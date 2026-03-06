@@ -11,7 +11,7 @@ npm install -g tuned-tensor-cli
 Or run from source:
 
 ```bash
-git clone <repo-url> && cd tuned-tensor-cli
+git clone https://github.com/tuned-tensor/tuned-tensor-cli.git && cd tuned-tensor-cli
 npm install
 npm run build
 npm link
@@ -90,14 +90,6 @@ tt datasets delete <id>              # delete a dataset
 tt models list                       # list fine-tuned models
 tt models get <id>                   # show model details
 tt models delete <id>                # delete a model
-```
-
-### API Keys
-
-```bash
-tt api-keys list                     # list API keys
-tt api-keys create --name "CI/CD"    # create a new key
-tt api-keys revoke <id>              # revoke a key
 ```
 
 ### Usage
