@@ -9,12 +9,14 @@ import { registerModelsCommands } from "./commands/models.js";
 import { registerUsageCommands } from "./commands/usage.js";
 import { ApiError } from "./client.js";
 
+declare const __TT_VERSION__: string;
+
 const program = new Command();
 
 program
   .name("tt")
   .description("Tuned Tensor CLI — fine-tune and evaluate LLMs")
-  .version("0.1.0")
+  .version(__TT_VERSION__)
   .option("-k, --api-key <key>", "API key (overrides stored key)")
   .option(
     "-u, --base-url <url>",

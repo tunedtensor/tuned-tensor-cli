@@ -1,52 +1,71 @@
-# tt — Tuned Tensor CLI
+# tt
 
-Command-line interface for [Tuned Tensor](https://www.tunedtensor.com), the end-to-end model behaviour shaping platform for instruction-tuning open-weight LLMs.
+`tt` is the command-line interface for [Tuned Tensor](https://www.tunedtensor.com), the platform for shaping model behavior and running instruction-tuning workflows for open-weight LLMs.
 
-## Install
+Use it to:
+
+- authenticate with your Tuned Tensor account
+- manage behavior specs
+- upload datasets
+- start and monitor runs
+- inspect fine-tuned models
+- check plan usage
+
+## Quick Start
+
+### 1. Install
 
 ```bash
 npm install -g @tuned-tensor/cli
 ```
 
-Or run from source:
+Verify the install:
 
 ```bash
-git clone https://github.com/tuned-tensor/tuned-tensor-cli.git && cd tuned-tensor-cli
+tt --version
+tt --help
+```
+
+To run from source instead:
+
+```bash
+git clone https://github.com/tuned-tensor/tuned-tensor-cli.git
+cd tuned-tensor-cli
 npm install
 npm run build
 npm link
 ```
 
-## Authentication
+### 2. Authenticate
 
-Generate an API key from the Tuned Tensor dashboard (**Settings → API Keys**), then:
+Create an API key in the Tuned Tensor dashboard at `Settings -> API Keys`, then log in:
 
 ```bash
 tt auth login
 # paste your tt_... key when prompted
 ```
 
-Alternatively, set the `TUNED_TENSOR_API_KEY` environment variable or pass `--api-key` on every call.
+Useful auth commands:
 
 ```bash
-tt auth status   # check current auth
-tt auth logout   # remove stored credentials
+tt auth status
+tt auth logout
 ```
 
-## Commands
+You can also authenticate with:
 
-### Behavior Specs
+- `TUNED_TENSOR_API_KEY`
+- `--api-key` on any command
+
+### 3. Create a behavior spec
+
+You can create a spec from a JSON file:
 
 ```bash
-tt specs list                        # list all specs
-tt specs get <id>                    # show spec details + examples
-tt specs create -f spec.json         # create from JSON file
-tt specs create --name "My Spec"     # create with flags
-tt specs update <id> -f updates.json # update from JSON file
-tt specs delete <id>                 # delete a spec
+tt specs create --file spec.json
 ```
 
-Spec JSON format:
+Example `spec.json`:
 
 ```json
 {
@@ -55,76 +74,184 @@ Spec JSON format:
   "system_prompt": "You are a helpful customer support agent.",
   "guidelines": ["Be concise", "Use a friendly tone"],
   "examples": [
-    { "input": "How do I reset my password?", "output": "Go to Settings → Security → Reset Password." }
+    {
+      "input": "How do I reset my password?",
+      "output": "Go to Settings -> Security -> Reset Password."
+    }
   ],
   "constraints": ["Never share internal URLs"],
   "base_model": "meta-llama/Llama-3.2-3B-Instruct"
 }
 ```
 
-### Runs
+Or create a minimal spec inline:
 
 ```bash
-tt runs list                         # list all runs
-tt runs list --spec <spec-id>        # list runs for a spec
-tt runs get <id>                     # show run details + eval results
-tt runs start <spec-id>              # start a new run
-tt runs start <spec-id> --epochs 5 --lr 0.0001
-tt runs cancel <id>                  # cancel a running run
-tt runs watch <id>                   # poll until run completes
+tt specs create --name "Customer Support Bot" --model "meta-llama/Llama-3.2-3B-Instruct"
 ```
 
-### Datasets
+### 4. Optionally upload a dataset
+
+Upload a JSONL dataset file:
 
 ```bash
-tt datasets list                     # list datasets
-tt datasets get <id>                 # show dataset details
-tt datasets upload data.jsonl        # upload a JSONL file
-tt datasets upload data.jsonl --name "Training Set v2"
-tt datasets delete <id>              # delete a dataset
+tt datasets upload data.jsonl --name "Support Training Set"
 ```
 
-### Models
+Example JSONL row:
+
+```json
+{"input":"How do I reset my password?","output":"Go to Settings -> Security -> Reset Password."}
+```
+
+### 5. Start and watch a run
 
 ```bash
-tt models list                       # list fine-tuned models
-tt models get <id>                   # show model details
-tt models delete <id>                # delete a model
+tt runs start <spec-id>
+tt runs watch <run-id>
 ```
 
-### Usage
+With custom hyperparameters:
 
 ```bash
-tt usage                             # show usage summary & tier info
+tt runs start <spec-id> --epochs 5 --lr 0.0001 --batch-size 8
 ```
+
+Tip: use `tt specs list`, `tt datasets list`, `tt runs list`, or `tt models list` to find IDs for later commands.
+
+## Common Workflows
+
+### Inspect your account state
+
+```bash
+tt auth status
+tt usage
+```
+
+### Browse specs and runs
+
+```bash
+tt specs list
+tt specs get <spec-id>
+tt runs list --spec <spec-id>
+tt runs get <run-id>
+```
+
+### Work with datasets
+
+```bash
+tt datasets list
+tt datasets get <dataset-id>
+tt datasets upload data.jsonl --description "Updated support examples"
+```
+
+### Inspect models
+
+```bash
+tt models list
+tt models get <model-id>
+```
+
+## Command Reference
+
+### `auth`
+
+| Command | Description |
+| --- | --- |
+| `tt auth login` | Store an API key locally |
+| `tt auth status` | Show current auth status and base URL |
+| `tt auth logout` | Remove stored credentials |
+
+### `specs`
+
+| Command | Description |
+| --- | --- |
+| `tt specs list` | List behavior specs |
+| `tt specs get <id>` | Show spec details and examples |
+| `tt specs create --file spec.json` | Create a spec from JSON |
+| `tt specs create --name "My Spec"` | Create a minimal spec |
+| `tt specs update <id> --file updates.json` | Update a spec from JSON |
+| `tt specs delete <id>` | Delete a spec |
+
+### `runs`
+
+| Command | Description |
+| --- | --- |
+| `tt runs list` | List runs |
+| `tt runs list --spec <spec-id>` | List runs for one spec |
+| `tt runs get <id>` | Show run details and eval results |
+| `tt runs start <spec-id>` | Start a run |
+| `tt runs start <spec-id> --epochs 5 --lr 0.0001` | Start with custom hyperparameters |
+| `tt runs watch <id>` | Poll until a run reaches a terminal state |
+| `tt runs cancel <id>` | Cancel a running run |
+
+### `datasets`
+
+| Command | Description |
+| --- | --- |
+| `tt datasets list` | List datasets |
+| `tt datasets get <id>` | Show dataset details |
+| `tt datasets upload data.jsonl` | Upload a JSONL dataset |
+| `tt datasets upload data.jsonl --name "Training Set v2"` | Upload with a custom name |
+| `tt datasets delete <id>` | Delete a dataset |
+
+### `models`
+
+| Command | Description |
+| --- | --- |
+| `tt models list` | List fine-tuned models |
+| `tt models get <id>` | Show model details |
+| `tt models delete <id>` | Delete a model |
+
+### `usage`
+
+| Command | Description |
+| --- | --- |
+| `tt usage` | Show usage summary and available tiers |
 
 ## Global Options
 
 | Flag | Description |
-|------|-------------|
-| `-k, --api-key <key>` | Override stored API key |
-| `-u, --base-url <url>` | Override API base URL |
+| --- | --- |
+| `-k, --api-key <key>` | Override the stored API key |
+| `-u, --base-url <url>` | Override the API base URL |
 | `--json` | Output raw JSON instead of formatted tables |
 | `--no-color` | Disable ANSI colors |
-| `-V, --version` | Show version |
+| `-V, --version` | Show the CLI version |
 | `-h, --help` | Show help |
+
+Use `--json` when you want to script against the CLI:
+
+```bash
+tt specs list --json
+tt runs get <run-id> --json
+```
+
+For command-specific help:
+
+```bash
+tt specs --help
+tt runs start --help
+```
 
 ## Configuration
 
-Credentials are stored in `~/.config/tuned-tensor/config.json` (respects `XDG_CONFIG_HOME`).
+Stored credentials live at `~/.config/tuned-tensor/config.json` and respect `XDG_CONFIG_HOME`.
 
 API key resolution order:
-1. `--api-key` flag
-2. `TUNED_TENSOR_API_KEY` environment variable
+
+1. `--api-key`
+2. `TUNED_TENSOR_API_KEY`
 3. Stored config file
 
 ## Development
 
 ```bash
-npm install         # install dependencies
-npm run build       # build with tsup
-npm run dev         # watch mode
-npm run typecheck   # type-check without emitting
+npm install
+npm run build
+npm run dev
+npm run typecheck
+npm test
 ```
 
 ## License
