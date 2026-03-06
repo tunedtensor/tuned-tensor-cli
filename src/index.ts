@@ -5,7 +5,7 @@ import { registerSpecsCommands } from "./commands/specs.js";
 import { registerRunsCommands } from "./commands/runs.js";
 import { registerDatasetsCommands } from "./commands/datasets.js";
 import { registerModelsCommands } from "./commands/models.js";
-import { registerApiKeysCommands } from "./commands/api-keys.js";
+
 import { registerUsageCommands } from "./commands/usage.js";
 import { ApiError } from "./client.js";
 
@@ -35,7 +35,7 @@ registerSpecsCommands(program);
 registerRunsCommands(program);
 registerDatasetsCommands(program);
 registerModelsCommands(program);
-registerApiKeysCommands(program);
+
 registerUsageCommands(program);
 
 program.parseAsync().catch((err) => {

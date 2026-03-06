@@ -7,6 +7,7 @@ import {
   clearConfig,
   getApiKey,
   getBaseUrl,
+  DEFAULT_BASE_URL,
 } from "../config.js";
 import {
   printSuccess,
@@ -16,6 +17,7 @@ import {
   isJsonMode,
   printJson,
 } from "../output.js";
+import chalk from "chalk";
 
 export function registerAuthCommands(parent: Command) {
   const auth = parent.command("auth").description("Manage authentication");
@@ -28,6 +30,14 @@ export function registerAuthCommands(parent: Command) {
       let apiKey = key;
 
       if (!apiKey) {
+        const settingsUrl = `${DEFAULT_BASE_URL}/dashboard/settings`;
+        console.log();
+        console.log(
+          `  To get your API key, go to ${chalk.bold("Settings → API Keys")} in the Tuned Tensor dashboard:`,
+        );
+        console.log(`  ${chalk.cyan.underline(settingsUrl)}`);
+        console.log();
+
         const rl = createInterface({ input: stdin, output: stdout });
         apiKey = await rl.question("Enter your API key (tt_...): ");
         rl.close();
