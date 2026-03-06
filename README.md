@@ -5,7 +5,7 @@ Command-line interface for [Tuned Tensor](https://www.tunedtensor.com), the end-
 ## Install
 
 ```bash
-npm install -g tuned-tensor-cli
+npm install -g @tuned-tensor/cli
 ```
 
 Or run from source:
