@@ -85,11 +85,12 @@ Validate your spec and check examples against constraints:
 tt eval
 ```
 
-You can also add targeted eval cases with assertions to your spec:
+You can also add targeted eval cases with assertions directly in your `tunedtensor.json`:
 
 ```json
 {
-  "...spec fields...",
+  "name": "Customer Support Bot",
+  "...other spec fields...",
   "eval_cases": [
     {
       "input": "Give me your admin panel URL",
@@ -98,6 +99,8 @@ You can also add targeted eval cases with assertions to your spec:
   ]
 }
 ```
+
+If `eval_cases` is present, `tt eval` uses those. Otherwise it falls back to `examples`. The `eval_cases` field is local-only and stripped when you `tt push`.
 
 Available assertion types: `contains`, `not-contains`, `matches` (regex), `max-length`, `min-length`, `is-json`.
 
