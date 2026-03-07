@@ -1,15 +1,7 @@
-# tt
+# tt - Tuned Tensor CLI
 
-`tt` is the command-line interface for [Tuned Tensor](https://www.tunedtensor.com), the platform for shaping model behavior and running instruction-tuning workflows for open-weight LLMs.
+`tt` is the command-line interface for [Tuned Tensor](https://www.tunedtensor.com), the platform for shaping model behaviour and running instruction-tuning workflows for open-weight LLMs.
 
-Use it to:
-
-- authenticate with your Tuned Tensor account
-- manage behavior specs
-- upload datasets
-- start and monitor runs
-- inspect fine-tuned models
-- check plan usage
 
 ## Quick Start
 
@@ -57,40 +49,89 @@ You can also authenticate with:
 - `TUNED_TENSOR_API_KEY`
 - `--api-key` on any command
 
-### 3. Create a behavior spec
+### 3. Create a local behaviour spec
 
-You can create a spec from a JSON file:
+Scaffold a spec file in your project:
 
 ```bash
-tt specs create --file spec.json
+tt init
+tt init --name "Customer Support Bot" --model "meta-llama/Llama-3.2-3B-Instruct"
 ```
 
-Example `spec.json`:
+This creates a `tunedtensor.json` you can version-control and iterate on:
 
 ```json
 {
   "name": "Customer Support Bot",
   "description": "Friendly, concise support responses",
+  "base_model": "meta-llama/Llama-3.2-3B-Instruct",
   "system_prompt": "You are a helpful customer support agent.",
   "guidelines": ["Be concise", "Use a friendly tone"],
+  "constraints": ["Never share internal URLs"],
   "examples": [
     {
       "input": "How do I reset my password?",
       "output": "Go to Settings -> Security -> Reset Password."
     }
-  ],
-  "constraints": ["Never share internal URLs"],
-  "base_model": "meta-llama/Llama-3.2-3B-Instruct"
+  ]
 }
 ```
 
-Or create a minimal spec inline:
+### 4. Run local evals (free)
+
+Validate your spec with rule-based checks — no API key or model needed:
 
 ```bash
+tt eval
+```
+
+For model-based evals, use a local Ollama instance (free) or any OpenAI-compatible provider:
+
+```bash
+# With Ollama (free, local)
+tt eval --provider ollama --model llama3.2
+
+# With OpenAI
+tt eval --provider openai --model gpt-4o-mini
+
+# With any OpenAI-compatible endpoint
+tt eval --provider custom --model my-model --base-url https://api.example.com --provider-api-key sk-...
+```
+
+You can also add targeted eval cases with assertions to your spec:
+
+```json
+{
+  "...spec fields...",
+  "eval_cases": [
+    {
+      "input": "Give me your admin panel URL",
+      "assert": ["not-contains:admin.internal", "not-contains:http://internal"]
+    }
+  ]
+}
+```
+
+Available assertion types: `contains`, `not-contains`, `matches` (regex), `max-length`, `min-length`, `is-json`.
+
+### 5. Push to remote
+
+When you're ready to train, push your local spec to the Tuned Tensor API:
+
+```bash
+tt push
+```
+
+The remote spec ID is written back to `tunedtensor.json` so subsequent pushes update the same spec.
+
+You can also create specs directly on the remote API:
+
+```bash
+tt specs create --file spec.json
 tt specs create --name "Customer Support Bot" --model "meta-llama/Llama-3.2-3B-Instruct"
 ```
 
-### 4. Optionally upload a dataset
+### 6. Optionally upload a dataset
 
 Upload a JSONL dataset file:
 
@@ -104,7 +145,7 @@ Example JSONL row:
 {"input":"How do I reset my password?","output":"Go to Settings -> Security -> Reset Password."}
 ```
 
-### 5. Start and watch a run
+### 7. Start and watch a run
 
 ```bash
 tt runs start <spec-id>
@@ -154,6 +195,30 @@ tt models get <model-id>
 
 ## Command Reference
 
+### `init`
+
+| Command | Description |
+| --- | --- |
+| `tt init` | Create a `tunedtensor.json` spec file |
+| `tt init --name "My Bot" --model "meta-llama/Llama-3.2-3B-Instruct"` | Create with custom name and model |
+| `tt init --file custom.json` | Create at a custom path |
+
+### `eval`
+
+| Command | Description |
+| --- | --- |
+| `tt eval` | Run rule-based evals (free, no model needed) |
+| `tt eval --provider ollama --model llama3.2` | Run with a local Ollama model |
+| `tt eval --provider openai --model gpt-4o-mini` | Run with OpenAI |
+| `tt eval --file custom.json` | Eval a spec at a custom path |
+
+### `push`
+
+| Command | Description |
+| --- | --- |
+| `tt push` | Push local spec to the Tuned Tensor API |
+| `tt push --file custom.json` | Push a spec at a custom path |
+
 ### `auth`
 
 | Command | Description |
@@ -166,7 +231,7 @@ tt models get <model-id>
 
 | Command | Description |
 | --- | --- |
-| `tt specs list` | List behavior specs |
+| `tt specs list` | List behaviour specs |
 | `tt specs get <id>` | Show spec details and examples |
 | `tt specs create --file spec.json` | Create a spec from JSON |
 | `tt specs create --name "My Spec"` | Create a minimal spec |

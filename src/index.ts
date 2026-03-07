@@ -7,6 +7,9 @@ import { registerDatasetsCommands } from "./commands/datasets.js";
 import { registerModelsCommands } from "./commands/models.js";
 
 import { registerUsageCommands } from "./commands/usage.js";
+import { registerInitCommand } from "./commands/init.js";
+import { registerEvalCommand } from "./commands/eval.js";
+import { registerPushCommand } from "./commands/push.js";
 import { ApiError } from "./client.js";
 
 declare const __TT_VERSION__: string;
@@ -39,6 +42,9 @@ registerDatasetsCommands(program);
 registerModelsCommands(program);
 
 registerUsageCommands(program);
+registerInitCommand(program);
+registerEvalCommand(program);
+registerPushCommand(program);
 
 program.parseAsync().catch((err) => {
   if (err instanceof ApiError) {
