@@ -77,26 +77,30 @@ This creates a `tunedtensor.json` you can version-control and iterate on:
 }
 ```
 
-### 4. Run local evals (free)
+### 4. Validate your spec (free)
 
-Validate your spec with rule-based checks — no API key or model needed:
+Check that your spec is well-formed before running evals:
 
 ```bash
-tt eval
+tt check
 ```
 
-For model-based evals, use a local Ollama instance (free) or any OpenAI-compatible provider:
+### 5. Evaluate model performance
+
+Measure how well a model follows your behaviour spec. Use a local Ollama instance (free) or any OpenAI-compatible provider:
 
 ```bash
-# With Ollama (free, local)
+# Eval base model with Ollama (free, local)
 tt eval --provider ollama --model llama3.2
 
-# With OpenAI
+# Eval with OpenAI
 tt eval --provider openai --model gpt-4o-mini
 
-# With any OpenAI-compatible endpoint
+# Eval with any OpenAI-compatible endpoint
 tt eval --provider custom --model my-model --base-url https://api.example.com --provider-api-key sk-...
 ```
+
+Run evals before and after fine-tuning to measure improvement.
 
 You can also add targeted eval cases with assertions to your spec:
 
@@ -114,7 +118,7 @@ You can also add targeted eval cases with assertions to your spec:
 
 Available assertion types: `contains`, `not-contains`, `matches` (regex), `max-length`, `min-length`, `is-json`.
 
-### 5. Push to remote
+### 6. Push to remote
 
 When you're ready to train, push your local spec to the Tuned Tensor API:
 
@@ -131,7 +135,7 @@ tt specs create --file spec.json
 tt specs create --name "Customer Support Bot" --model "meta-llama/Llama-3.2-3B-Instruct"
 ```
 
-### 6. Optionally upload a dataset
+### 7. Optionally upload a dataset
 
 Upload a JSONL dataset file:
 
@@ -145,7 +149,7 @@ Example JSONL row:
 {"input":"How do I reset my password?","output":"Go to Settings -> Security -> Reset Password."}
 ```
 
-### 7. Start and watch a run
+### 8. Start and watch a run
 
 ```bash
 tt runs start <spec-id>
@@ -203,14 +207,21 @@ tt models get <model-id>
 | `tt init --name "My Bot" --model "meta-llama/Llama-3.2-3B-Instruct"` | Create with custom name and model |
 | `tt init --file custom.json` | Create at a custom path |
 
+### `check`
+
+| Command | Description |
+| --- | --- |
+| `tt check` | Validate a spec (free, no model needed) |
+| `tt check --file custom.json` | Validate a spec at a custom path |
+
 ### `eval`
 
 | Command | Description |
 | --- | --- |
-| `tt eval` | Run rule-based evals (free, no model needed) |
-| `tt eval --provider ollama --model llama3.2` | Run with a local Ollama model |
-| `tt eval --provider openai --model gpt-4o-mini` | Run with OpenAI |
-| `tt eval --file custom.json` | Eval a spec at a custom path |
+| `tt eval --provider ollama --model llama3.2` | Evaluate model performance with Ollama |
+| `tt eval --provider openai --model gpt-4o-mini` | Evaluate with OpenAI |
+| `tt eval --provider custom --model my-model --base-url <url>` | Evaluate with a custom endpoint |
+| `tt eval --file custom.json --provider ollama` | Evaluate a spec at a custom path |
 
 ### `push`
 

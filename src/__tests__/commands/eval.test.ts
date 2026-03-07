@@ -38,21 +38,21 @@ const mockSummary: EvalSummary = {
     {
       input: "Hi",
       expected: "Hello!",
-      actual: null,
+      actual: "Hello there!",
       passed: true,
-      score: null,
-      reasoning: "All checks passed",
-      latency_ms: null,
+      score: 0.9,
+      reasoning: "Good response",
+      latency_ms: 150,
       assertions: [],
     },
     {
       input: "Secret?",
       expected: "No secrets here",
-      actual: null,
+      actual: "Here are the secrets",
       passed: false,
-      score: null,
+      score: 0.3,
       reasoning: "Constraint violation",
-      latency_ms: null,
+      latency_ms: 120,
       assertions: [
         { assertion: "constraint: Never mention secrets", passed: false, message: "Contains secrets" },
       ],
@@ -79,7 +79,11 @@ function buildProgram() {
 beforeEach(() => {
   setJsonMode(false);
   vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
   vi.mocked(runner.runEvals).mockResolvedValue(mockSummary);
+  vi.mocked(providers.checkProviderAvailability).mockResolvedValue({
+    available: true,
+  });
 
   const spec = {
     name: "Test",
@@ -97,24 +101,16 @@ afterEach(() => {
 });
 
 describe("eval command", () => {
-  it("runs rule-based evals without provider", async () => {
+  it("requires --provider flag", async () => {
     const program = buildProgram();
-    await program.parseAsync([
-      "node", "tt", "eval", "--file", "test-eval-spec.json",
-    ]);
-
-    expect(runner.runEvals).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Test" }),
-      null,
-      expect.any(Function),
-    );
+    await expect(
+      program.parseAsync([
+        "node", "tt", "eval", "--file", "test-eval-spec.json",
+      ]),
+    ).rejects.toThrow();
   });
 
-  it("checks provider availability before running", async () => {
-    vi.mocked(providers.checkProviderAvailability).mockResolvedValue({
-      available: true,
-    });
-
+  it("checks provider availability and runs evals", async () => {
     const program = buildProgram();
     await program.parseAsync([
       "node", "tt", "eval",
@@ -125,7 +121,7 @@ describe("eval command", () => {
 
     expect(providers.checkProviderAvailability).toHaveBeenCalled();
     expect(runner.runEvals).toHaveBeenCalledWith(
-      expect.anything(),
+      expect.objectContaining({ name: "Test" }),
       expect.objectContaining({ provider: "ollama", model: "llama3.2" }),
       expect.any(Function),
     );
@@ -136,10 +132,27 @@ describe("eval command", () => {
     const spy = vi.spyOn(console, "log");
     const program = buildProgram();
     await program.parseAsync([
-      "node", "tt", "eval", "--file", "test-eval-spec.json",
+      "node", "tt", "eval",
+      "--file", "test-eval-spec.json",
+      "--provider", "ollama",
     ]);
 
     const output = spy.mock.calls[0][0];
     expect(JSON.parse(output)).toHaveProperty("total");
+  });
+
+  it("infers default model for provider", async () => {
+    const program = buildProgram();
+    await program.parseAsync([
+      "node", "tt", "eval",
+      "--file", "test-eval-spec.json",
+      "--provider", "ollama",
+    ]);
+
+    expect(runner.runEvals).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ provider: "ollama", model: "llama3.2" }),
+      expect.any(Function),
+    );
   });
 });

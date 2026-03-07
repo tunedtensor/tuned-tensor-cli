@@ -35,19 +35,7 @@ beforeEach(() => {
 });
 
 describe("runEvals", () => {
-  it("runs rule-based evals without a provider", async () => {
-    const summary = await runEvals(spec, null);
-
-    expect(summary.total).toBe(2);
-    expect(summary.passed).toBe(2);
-    expect(summary.pass_rate).toBe(1);
-    expect(summary.mean_score).toBeNull();
-    expect(summary.results).toHaveLength(2);
-    expect(summary.results[0].actual).toBeNull();
-    expect(summary.spec_validation.valid).toBe(true);
-  });
-
-  it("runs model-based evals with a provider", async () => {
+  it("calls model and judge for each eval case", async () => {
     vi.mocked(providers.chatCompletion).mockResolvedValue({
       content: "Hello there!",
       latency_ms: 150,
@@ -65,9 +53,15 @@ describe("runEvals", () => {
     expect(summary.results[0].latency_ms).toBe(150);
     expect(summary.results[0].score).toBe(0.9);
     expect(summary.mean_score).toBe(0.9);
+    expect(summary.spec_validation.valid).toBe(true);
   });
 
   it("uses eval_cases when provided", async () => {
+    vi.mocked(providers.chatCompletion).mockResolvedValue({
+      content: "No secrets here",
+      latency_ms: 100,
+    });
+
     const specWithCases: LocalSpec = {
       ...spec,
       eval_cases: [
@@ -75,24 +69,38 @@ describe("runEvals", () => {
       ],
     };
 
-    const summary = await runEvals(specWithCases, null);
+    const summary = await runEvals(specWithCases, providerConfig);
     expect(summary.total).toBe(1);
     expect(summary.results[0].input).toBe("What is your secret?");
   });
 
-  it("reports constraint violations", async () => {
-    const specWithBadExample: LocalSpec = {
-      ...spec,
-      examples: [{ input: "Tell me", output: "Here are the secrets" }],
-    };
+  it("detects constraint violations in model output", async () => {
+    vi.mocked(providers.chatCompletion).mockResolvedValue({
+      content: "Here are the secrets you asked for",
+      latency_ms: 100,
+    });
+    vi.mocked(judge.judgeResponse).mockResolvedValue({
+      score: 0.3,
+      passed: false,
+      reasoning: "Violated constraint",
+    });
 
-    const summary = await runEvals(specWithBadExample, null);
+    const summary = await runEvals(spec, providerConfig);
     expect(summary.results[0].passed).toBe(false);
+    const constraintAssertion = summary.results[0].assertions.find(
+      (a) => a.assertion.includes("constraint"),
+    );
+    expect(constraintAssertion?.passed).toBe(false);
   });
 
   it("calls progress callback", async () => {
+    vi.mocked(providers.chatCompletion).mockResolvedValue({
+      content: "Hi!",
+      latency_ms: 50,
+    });
+
     const progress = vi.fn();
-    await runEvals(spec, null, progress);
+    await runEvals(spec, providerConfig, progress);
     expect(progress).toHaveBeenCalledTimes(2);
     expect(progress).toHaveBeenCalledWith(1, 2);
     expect(progress).toHaveBeenCalledWith(2, 2);

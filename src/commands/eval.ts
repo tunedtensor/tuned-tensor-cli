@@ -5,7 +5,6 @@ import {
   printTable,
   printJson,
   isJsonMode,
-  printSuccess,
   printError,
   printWarning,
   truncate,
@@ -18,50 +17,46 @@ import type { ProviderConfig, EvalSummary, ValidationCheck } from "../eval/types
 export function registerEvalCommand(parent: Command) {
   parent
     .command("eval")
-    .description("Run local evals against a behaviour spec")
-    .option("-f, --file <path>", "Spec file path", DEFAULT_SPEC_FILE)
-    .option(
+    .description("Evaluate a model's performance against a behaviour spec")
+    .requiredOption(
       "-p, --provider <provider>",
       "Model provider: ollama, openai, or custom",
     )
-    .option("-m, --model <model>", "Model name for eval")
+    .option("-m, --model <model>", "Model name to evaluate")
+    .option("-f, --file <path>", "Spec file path", DEFAULT_SPEC_FILE)
     .option("--base-url <url>", "Custom provider base URL")
     .option("--provider-api-key <key>", "Custom provider API key")
     .action(async (cmdOpts) => {
       const spec = loadSpec(cmdOpts.file);
 
-      let provider: ProviderConfig | null = null;
-      if (cmdOpts.provider) {
-        provider = {
-          provider: cmdOpts.provider as ProviderConfig["provider"],
-          model: cmdOpts.model || inferDefaultModel(cmdOpts.provider),
-          baseUrl: cmdOpts.baseUrl,
-          apiKey: cmdOpts.providerApiKey,
-        };
+      const provider: ProviderConfig = {
+        provider: cmdOpts.provider as ProviderConfig["provider"],
+        model: cmdOpts.model || inferDefaultModel(cmdOpts.provider),
+        baseUrl: cmdOpts.baseUrl,
+        apiKey: cmdOpts.providerApiKey,
+      };
 
-        const spinner = ora(`Checking ${provider.provider} availability...`).start();
-        const check = await checkProviderAvailability(provider);
-        if (!check.available) {
-          spinner.fail(check.error);
-          process.exit(1);
-        }
-        spinner.succeed(`${provider.provider} ready (${provider.model})`);
+      const spinner = ora(`Checking ${provider.provider} availability...`).start();
+      const check = await checkProviderAvailability(provider);
+      if (!check.available) {
+        spinner.fail(check.error);
+        process.exit(1);
       }
+      spinner.succeed(`${provider.provider} ready (${provider.model})`);
 
-      const mode = provider ? "model + rules" : "rules only (no model)";
       if (!isJsonMode()) {
         console.log(
-          chalk.dim(`\nSpec: ${cmdOpts.file}  |  Mode: ${mode}\n`),
+          chalk.dim(`\nSpec: ${cmdOpts.file}  |  Model: ${provider.model}\n`),
         );
       }
 
-      const spinner = ora("Running evals...").start();
+      const evalSpinner = ora("Running evals...").start();
 
       const summary = await runEvals(spec, provider, (done, total) => {
-        spinner.text = `Running evals... ${done}/${total}`;
+        evalSpinner.text = `Running evals... ${done}/${total}`;
       });
 
-      spinner.stop();
+      evalSpinner.stop();
 
       if (isJsonMode()) return printJson(summary);
 
@@ -101,16 +96,14 @@ function printResults(summary: EvalSummary) {
 
   console.log(chalk.bold(`Eval Results (${summary.total}):`));
 
-  const hasModel = summary.results.some((r) => r.actual !== null);
-
   printTable(
-    ["#", "Passed", "Score", "Input", ...(hasModel ? ["Latency"] : [])],
+    ["#", "Passed", "Score", "Input", "Latency"],
     summary.results.map((r, i) => [
       String(i + 1),
       r.passed ? chalk.green("✓") : chalk.red("✗"),
       r.score != null ? r.score.toFixed(2) : "—",
       truncate(r.input, 45),
-      ...(hasModel ? [r.latency_ms != null ? `${r.latency_ms}ms` : "—"] : []),
+      r.latency_ms != null ? `${r.latency_ms}ms` : "—",
     ]),
   );
 

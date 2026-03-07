@@ -21,7 +21,7 @@ function buildEvalCases(spec: LocalSpec): EvalCase[] {
 
 export async function runEvals(
   spec: LocalSpec,
-  provider: ProviderConfig | null,
+  provider: ProviderConfig,
   onProgress?: (completed: number, total: number) => void,
 ): Promise<EvalSummary> {
   const specValidation = validateSpec(spec);
@@ -50,27 +50,8 @@ export async function runEvals(
 async function runSingleEval(
   spec: LocalSpec,
   evalCase: EvalCase,
-  provider: ProviderConfig | null,
+  provider: ProviderConfig,
 ): Promise<EvalResult> {
-  const assertions = [
-    ...runAssertions(evalCase.expected ?? "", evalCase.assert ?? []),
-    ...checkConstraints(evalCase.expected ?? "", spec.constraints),
-  ];
-
-  if (!provider) {
-    const allPassed = assertions.every((a) => a.passed);
-    return {
-      input: evalCase.input,
-      expected: evalCase.expected ?? null,
-      actual: null,
-      passed: allPassed,
-      score: null,
-      reasoning: allPassed ? "All rule-based checks passed" : "Rule-based check(s) failed",
-      latency_ms: null,
-      assertions,
-    };
-  }
-
   try {
     const response = await chatCompletion(
       [
@@ -80,7 +61,7 @@ async function runSingleEval(
       provider,
     );
 
-    const modelAssertions = [
+    const assertions = [
       ...runAssertions(response.content, evalCase.assert ?? []),
       ...checkConstraints(response.content, spec.constraints),
     ];
@@ -98,7 +79,7 @@ async function runSingleEval(
       });
     }
 
-    const rulesPassed = modelAssertions.every((a) => a.passed);
+    const rulesPassed = assertions.every((a) => a.passed);
     const judgePassed = judgeResult ? judgeResult.passed : true;
 
     return {
@@ -109,7 +90,7 @@ async function runSingleEval(
       score: judgeResult?.score ?? (rulesPassed ? 1.0 : 0.0),
       reasoning: judgeResult?.reasoning ?? (rulesPassed ? "All checks passed" : "Rule check(s) failed"),
       latency_ms: response.latency_ms,
-      assertions: modelAssertions,
+      assertions,
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

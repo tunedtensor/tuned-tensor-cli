@@ -10,6 +10,7 @@ import { registerUsageCommands } from "./commands/usage.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerEvalCommand } from "./commands/eval.js";
 import { registerPushCommand } from "./commands/push.js";
+import { registerCheckCommand } from "./commands/check.js";
 import { ApiError } from "./client.js";
 
 declare const __TT_VERSION__: string;
@@ -45,6 +46,7 @@ registerUsageCommands(program);
 registerInitCommand(program);
 registerEvalCommand(program);
 registerPushCommand(program);
+registerCheckCommand(program);
 
 program.parseAsync().catch((err) => {
   if (err instanceof ApiError) {
