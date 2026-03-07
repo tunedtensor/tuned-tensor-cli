@@ -16,6 +16,7 @@ const SCAFFOLD: LocalSpec = {
   examples: [
     { input: "Hello", output: "Hi! How can I help you today?" },
   ],
+  eval_cases: [],
 };
 
 export function registerInitCommand(parent: Command) {
