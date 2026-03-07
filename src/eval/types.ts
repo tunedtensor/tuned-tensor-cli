@@ -30,11 +30,7 @@ export interface AssertionResult {
 export interface EvalResult {
   input: string;
   expected: string | null;
-  actual: string | null;
   passed: boolean;
-  score: number | null;
-  reasoning: string | null;
-  latency_ms: number | null;
   assertions: AssertionResult[];
 }
 
@@ -42,7 +38,6 @@ export interface EvalSummary {
   total: number;
   passed: number;
   failed: number;
-  mean_score: number | null;
   pass_rate: number;
   results: EvalResult[];
   spec_validation: ValidationResult;
@@ -57,11 +52,4 @@ export interface ValidationCheck {
   name: string;
   passed: boolean;
   message?: string;
-}
-
-export interface ProviderConfig {
-  provider: "ollama" | "openai" | "custom";
-  model: string;
-  baseUrl?: string;
-  apiKey?: string;
 }

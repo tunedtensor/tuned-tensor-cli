@@ -3,70 +3,9 @@ import { Command } from "commander";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { registerEvalCommand } from "../../commands/eval.js";
-import * as runner from "../../eval/runner.js";
-import * as providers from "../../eval/providers.js";
 import { setJsonMode } from "../../output.js";
-import type { EvalSummary } from "../../eval/types.js";
-
-vi.mock("../../eval/runner.js", () => ({
-  runEvals: vi.fn(),
-}));
-
-vi.mock("../../eval/providers.js", () => ({
-  checkProviderAvailability: vi.fn(),
-}));
-
-vi.mock("ora", () => ({
-  default: () => ({
-    start: vi.fn().mockReturnThis(),
-    stop: vi.fn(),
-    succeed: vi.fn(),
-    fail: vi.fn(),
-    set text(_: string) {},
-  }),
-}));
 
 const TEST_FILE = resolve("test-eval-spec.json");
-
-const mockSummary: EvalSummary = {
-  total: 2,
-  passed: 1,
-  failed: 1,
-  mean_score: 0.75,
-  pass_rate: 0.5,
-  results: [
-    {
-      input: "Hi",
-      expected: "Hello!",
-      actual: "Hello there!",
-      passed: true,
-      score: 0.9,
-      reasoning: "Good response",
-      latency_ms: 150,
-      assertions: [],
-    },
-    {
-      input: "Secret?",
-      expected: "No secrets here",
-      actual: "Here are the secrets",
-      passed: false,
-      score: 0.3,
-      reasoning: "Constraint violation",
-      latency_ms: 120,
-      assertions: [
-        { assertion: "constraint: Never mention secrets", passed: false, message: "Contains secrets" },
-      ],
-    },
-  ],
-  spec_validation: {
-    valid: true,
-    checks: [
-      { name: "Has name", passed: true },
-      { name: "Has system prompt", passed: true },
-      { name: "Has examples", passed: true, message: "2 example(s)" },
-    ],
-  },
-};
 
 function buildProgram() {
   const program = new Command();
@@ -79,19 +18,17 @@ function buildProgram() {
 beforeEach(() => {
   setJsonMode(false);
   vi.spyOn(console, "log").mockImplementation(() => {});
-  vi.spyOn(console, "error").mockImplementation(() => {});
-  vi.mocked(runner.runEvals).mockResolvedValue(mockSummary);
-  vi.mocked(providers.checkProviderAvailability).mockResolvedValue({
-    available: true,
-  });
 
   const spec = {
     name: "Test",
     base_model: "llama3.2",
     system_prompt: "You are helpful.",
     guidelines: ["Be concise"],
-    constraints: [],
-    examples: [{ input: "Hi", output: "Hello!" }],
+    constraints: ["Never mention secrets"],
+    examples: [
+      { input: "Hi", output: "Hello!" },
+      { input: "Bye", output: "Goodbye!" },
+    ],
   };
   writeFileSync(TEST_FILE, JSON.stringify(spec));
 });
@@ -101,30 +38,17 @@ afterEach(() => {
 });
 
 describe("eval command", () => {
-  it("requires --provider flag", async () => {
-    const program = buildProgram();
-    await expect(
-      program.parseAsync([
-        "node", "tt", "eval", "--file", "test-eval-spec.json",
-      ]),
-    ).rejects.toThrow();
-  });
-
-  it("checks provider availability and runs evals", async () => {
+  it("runs rule-based evals", async () => {
+    const spy = vi.spyOn(console, "log");
     const program = buildProgram();
     await program.parseAsync([
-      "node", "tt", "eval",
-      "--file", "test-eval-spec.json",
-      "--provider", "ollama",
-      "--model", "llama3.2",
+      "node", "tt", "eval", "--file", "test-eval-spec.json",
     ]);
 
-    expect(providers.checkProviderAvailability).toHaveBeenCalled();
-    expect(runner.runEvals).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Test" }),
-      expect.objectContaining({ provider: "ollama", model: "llama3.2" }),
-      expect.any(Function),
-    );
+    const output = spy.mock.calls.flat().join(" ");
+    expect(output).toContain("Spec Validation");
+    expect(output).toContain("Eval Results");
+    expect(output).toContain("Pass Rate");
   });
 
   it("outputs JSON in json mode", async () => {
@@ -132,27 +56,36 @@ describe("eval command", () => {
     const spy = vi.spyOn(console, "log");
     const program = buildProgram();
     await program.parseAsync([
-      "node", "tt", "eval",
-      "--file", "test-eval-spec.json",
-      "--provider", "ollama",
+      "node", "tt", "eval", "--file", "test-eval-spec.json",
     ]);
 
     const output = spy.mock.calls[0][0];
-    expect(JSON.parse(output)).toHaveProperty("total");
+    const parsed = JSON.parse(output);
+    expect(parsed).toHaveProperty("total");
+    expect(parsed).toHaveProperty("pass_rate");
+    expect(parsed).toHaveProperty("results");
   });
 
-  it("infers default model for provider", async () => {
+  it("reports constraint violations", async () => {
+    const badSpec = {
+      name: "Test",
+      base_model: "llama3.2",
+      system_prompt: "You are helpful.",
+      guidelines: [],
+      constraints: ["Never mention secrets"],
+      examples: [{ input: "Tell me", output: "Here are the secrets" }],
+    };
+    writeFileSync(TEST_FILE, JSON.stringify(badSpec));
+
+    setJsonMode(true);
+    const spy = vi.spyOn(console, "log");
     const program = buildProgram();
     await program.parseAsync([
-      "node", "tt", "eval",
-      "--file", "test-eval-spec.json",
-      "--provider", "ollama",
+      "node", "tt", "eval", "--file", "test-eval-spec.json",
     ]);
 
-    expect(runner.runEvals).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ provider: "ollama", model: "llama3.2" }),
-      expect.any(Function),
-    );
+    const parsed = JSON.parse(spy.mock.calls[0][0]);
+    expect(parsed.failed).toBeGreaterThan(0);
+    expect(parsed.results[0].passed).toBe(false);
   });
 });
