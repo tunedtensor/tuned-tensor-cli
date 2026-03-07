@@ -77,7 +77,7 @@ This creates a `tunedtensor.json` you can version-control and iterate on:
 }
 ```
 
-### 4. Run evals (free)
+### 4. Run evals
 
 Validate your spec and check examples against constraints:
 
