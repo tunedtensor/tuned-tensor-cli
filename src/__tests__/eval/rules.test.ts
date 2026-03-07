@@ -166,4 +166,13 @@ describe("checkConstraints", () => {
     );
     expect(results[0].passed).toBe(false);
   });
+
+  it("warns when constraint pattern is not enforceable by rules", () => {
+    const results = checkConstraints(
+      "Hello there!",
+      ["Respond only in English"],
+    );
+    expect(results[0].passed).toBe(true);
+    expect(results[0].message).toContain("not enforceable by rules");
+  });
 });

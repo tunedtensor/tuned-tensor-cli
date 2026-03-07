@@ -101,7 +101,10 @@ function evaluateConstraint(
     return { passed: true };
   }
 
-  return { passed: true };
+  return {
+    passed: true,
+    message: `Constraint not enforceable by rules: "${constraint}" (will be checked by LLM judge if a provider is configured)`,
+  };
 }
 
 export function runAssertions(

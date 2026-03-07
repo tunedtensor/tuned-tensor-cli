@@ -121,7 +121,7 @@ async function runSingleEval(
       score: 0,
       reasoning: `Model call failed: ${msg}`,
       latency_ms: null,
-      assertions,
+      assertions: [],
     };
   }
 }

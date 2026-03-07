@@ -106,5 +106,6 @@ describe("runEvals", () => {
     const summary = await runEvals(spec, providerConfig);
     expect(summary.results[0].passed).toBe(false);
     expect(summary.results[0].reasoning).toContain("Connection refused");
+    expect(summary.results[0].assertions).toHaveLength(0);
   });
 });
