@@ -33,11 +33,11 @@ interface BehaviorSpec {
 export function registerSpecsCommands(parent: Command) {
   const specs = parent
     .command("specs")
-    .description("Manage behavior specs");
+    .description("Manage behaviour specs");
 
   specs
     .command("list")
-    .description("List behavior specs")
+    .description("List behaviour specs")
     .option("-p, --page <n>", "Page number", "1")
     .option("--per-page <n>", "Results per page", "20")
     .action(async (cmdOpts) => {
@@ -103,7 +103,7 @@ export function registerSpecsCommands(parent: Command) {
 
   specs
     .command("create")
-    .description("Create a behavior spec")
+    .description("Create a behaviour spec")
     .option("-f, --file <path>", "JSON file with spec definition")
     .option("-n, --name <name>", "Spec name")
     .option("--model <model>", "Base model ID")
@@ -129,7 +129,7 @@ export function registerSpecsCommands(parent: Command) {
 
   specs
     .command("update")
-    .description("Update a behavior spec")
+    .description("Update a behaviour spec")
     .argument("<id>", "Spec ID")
     .option("-f, --file <path>", "JSON file with fields to update")
     .option("-n, --name <name>", "New name")
@@ -158,7 +158,7 @@ export function registerSpecsCommands(parent: Command) {
 
   specs
     .command("delete")
-    .description("Delete a behavior spec")
+    .description("Delete a behaviour spec")
     .argument("<id>", "Spec ID")
     .action(async (id: string) => {
       const opts = parent.opts() as ClientOpts;
