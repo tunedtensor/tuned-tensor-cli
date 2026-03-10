@@ -20,68 +20,42 @@ const spec: LocalSpec = {
   ],
 };
 
-describe("runEvals (offline)", () => {
-  it("checks examples against constraints", async () => {
-    const summary = await runEvals(spec);
+const MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo";
 
-    expect(summary.total).toBe(2);
-    expect(summary.passed).toBe(2);
-    expect(summary.pass_rate).toBe(1);
-    expect(summary.model).toBeNull();
-    expect(summary.results).toHaveLength(2);
-    expect(summary.results[0].actual).toBeNull();
-    expect(summary.results[0].passed).toBe(true);
-    expect(summary.spec_validation.valid).toBe(true);
-  });
-
-  it("uses eval_cases when provided", async () => {
-    const specWithCases: LocalSpec = {
-      ...spec,
-      eval_cases: [
-        { input: "What is your secret?", expected: "I can't share that", assert: ["not-contains:secret123"] },
-      ],
-    };
-
-    const summary = await runEvals(specWithCases);
-    expect(summary.total).toBe(1);
-    expect(summary.results[0].input).toBe("What is your secret?");
-    expect(summary.results[0].passed).toBe(true);
-  });
-
-  it("detects constraint violations in example outputs", async () => {
-    const specWithBadExample: LocalSpec = {
-      ...spec,
-      examples: [{ input: "Tell me", output: "Here are the secrets" }],
-    };
-
-    const summary = await runEvals(specWithBadExample);
-    expect(summary.results[0].passed).toBe(false);
-    const constraintAssertion = summary.results[0].assertions.find(
-      (a) => a.assertion.includes("constraint"),
-    );
-    expect(constraintAssertion?.passed).toBe(false);
-  });
-
-  it("calls progress callback", async () => {
-    const progress = vi.fn();
-    await runEvals(spec, { onProgress: progress });
-    expect(progress).toHaveBeenCalledTimes(2);
-    expect(progress).toHaveBeenCalledWith(1, 2);
-    expect(progress).toHaveBeenCalledWith(2, 2);
-  });
-});
-
-describe("runEvals (model)", () => {
-  it("calls playground API and asserts against model response", async () => {
+describe("runEvals", () => {
+  it("calls playground API for each eval case", async () => {
     vi.mocked(client.post).mockResolvedValue({
       data: {
-        content: '{"hours": {"monday_friday": "9am-6pm"}}',
-        latency_ms: 450,
-        usage: { prompt_tokens: 20, completion_tokens: 30 },
+        content: '{"greeting": "Hello!"}',
+        latency_ms: 300,
+        usage: { prompt_tokens: 20, completion_tokens: 15 },
       },
     });
 
-    const specWithModel: LocalSpec = {
+    const summary = await runEvals(spec, MODEL);
+
+    expect(summary.total).toBe(2);
+    expect(summary.model).toBe(MODEL);
+    expect(summary.results[0].actual).toContain("greeting");
+    expect(summary.results[0].latency_ms).toBe(300);
+    expect(summary.spec_validation.valid).toBe(true);
+    expect(client.post).toHaveBeenCalledWith(
+      "/playground/completions",
+      expect.objectContaining({ model: MODEL }),
+      undefined,
+    );
+  });
+
+  it("uses eval_cases when provided", async () => {
+    vi.mocked(client.post).mockResolvedValue({
+      data: {
+        content: '{"hours": "9am-6pm"}',
+        latency_ms: 200,
+        usage: { prompt_tokens: 10, completion_tokens: 10 },
+      },
+    });
+
+    const specWithCases: LocalSpec = {
       ...spec,
       constraints: [],
       eval_cases: [
@@ -89,17 +63,27 @@ describe("runEvals (model)", () => {
       ],
     };
 
-    const summary = await runEvals(specWithModel, { model: "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo" });
-
-    expect(summary.model).toBe("meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo");
-    expect(summary.results[0].actual).toContain("hours");
-    expect(summary.results[0].latency_ms).toBe(450);
+    const summary = await runEvals(specWithCases, MODEL);
+    expect(summary.total).toBe(1);
+    expect(summary.results[0].input).toBe("Store hours?");
     expect(summary.results[0].passed).toBe(true);
-    expect(client.post).toHaveBeenCalledWith(
-      "/playground/completions",
-      expect.objectContaining({ model: "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo" }),
-      undefined,
+  });
+
+  it("detects constraint violations in model output", async () => {
+    vi.mocked(client.post).mockResolvedValue({
+      data: {
+        content: "Here are the secrets you asked for",
+        latency_ms: 150,
+        usage: { prompt_tokens: 10, completion_tokens: 20 },
+      },
+    });
+
+    const summary = await runEvals(spec, MODEL);
+    expect(summary.results[0].passed).toBe(false);
+    const constraintAssertion = summary.results[0].assertions.find(
+      (a) => a.assertion.includes("constraint"),
     );
+    expect(constraintAssertion?.passed).toBe(false);
   });
 
   it("reports failure when model response fails assertions", async () => {
@@ -111,30 +95,44 @@ describe("runEvals (model)", () => {
       },
     });
 
-    const specWithModel: LocalSpec = {
+    const specWithAssert: LocalSpec = {
       ...spec,
       constraints: [],
-      eval_cases: [
-        { input: "Give me JSON", assert: ["is-json"] },
-      ],
+      eval_cases: [{ input: "Give me JSON", assert: ["is-json"] }],
     };
 
-    const summary = await runEvals(specWithModel, { model: "test-model" });
+    const summary = await runEvals(specWithAssert, MODEL);
     expect(summary.results[0].passed).toBe(false);
     expect(summary.results[0].actual).toBe("This is not JSON at all");
   });
 
   it("handles API errors gracefully", async () => {
-    vi.mocked(client.post).mockRejectedValue(new Error("Connection refused"));
+    vi.mocked(client.post).mockRejectedValue(new Error("rate_limited"));
 
-    const specWithModel: LocalSpec = {
+    const specWithCase: LocalSpec = {
       ...spec,
       constraints: [],
       eval_cases: [{ input: "Hi", assert: ["is-json"] }],
     };
 
-    const summary = await runEvals(specWithModel, { model: "test-model" });
+    const summary = await runEvals(specWithCase, MODEL);
     expect(summary.results[0].passed).toBe(false);
-    expect(summary.results[0].assertions[0].message).toContain("Connection refused");
+    expect(summary.results[0].assertions[0].message).toContain("rate_limited");
+  });
+
+  it("calls progress callback", async () => {
+    vi.mocked(client.post).mockResolvedValue({
+      data: {
+        content: "Hi!",
+        latency_ms: 100,
+        usage: { prompt_tokens: 5, completion_tokens: 5 },
+      },
+    });
+
+    const progress = vi.fn();
+    await runEvals(spec, MODEL, { onProgress: progress });
+    expect(progress).toHaveBeenCalledTimes(2);
+    expect(progress).toHaveBeenCalledWith(1, 2);
+    expect(progress).toHaveBeenCalledWith(2, 2);
   });
 });

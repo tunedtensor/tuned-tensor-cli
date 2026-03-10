@@ -79,13 +79,7 @@ This creates a `tunedtensor.json` you can version-control and iterate on:
 
 ### 4. Run evals
 
-Validate your spec offline (checks expected outputs against assertions):
-
-```bash
-tt eval
-```
-
-Or evaluate a real model's performance via the Tuned Tensor Playground API:
+Evaluate a model's performance against your spec via the Tuned Tensor Playground API:
 
 ```bash
 # Eval a base model
@@ -95,7 +89,7 @@ tt eval --model meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
 tt eval --model user/Llama-3.2-3B-Instruct-ft-abc123
 ```
 
-When `--model` is provided, each eval case is sent to the model and assertions run against the model's actual response. This lets you measure performance before and after fine-tuning.
+Each eval case is sent to the model and rule-based assertions run against the model's actual response. Run evals before and after fine-tuning to measure improvement.
 
 You can also add targeted eval cases with assertions directly in your `tunedtensor.json`:
 
@@ -209,9 +203,8 @@ tt models get <model-id>
 
 | Command | Description |
 | --- | --- |
-| `tt eval` | Run offline evals (checks expected outputs) |
-| `tt eval --model <model-id>` | Evaluate a model's real responses via Tuned Tensor API |
-| `tt eval --file custom.json` | Eval a spec at a custom path |
+| `tt eval --model <model-id>` | Evaluate a model via Tuned Tensor API |
+| `tt eval --model <model-id> --file custom.json` | Eval with a spec at a custom path |
 
 ### `push`
 

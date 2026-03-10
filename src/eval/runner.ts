@@ -21,8 +21,8 @@ function buildEvalCases(spec: LocalSpec): EvalCase[] {
 
 export async function runEvals(
   spec: LocalSpec,
+  model: string,
   opts?: {
-    model?: string;
     clientOpts?: ClientOpts;
     onProgress?: (completed: number, total: number) => void;
   },
@@ -30,12 +30,9 @@ export async function runEvals(
   const specValidation = validateSpec(spec);
   const cases = buildEvalCases(spec);
   const results: EvalResult[] = [];
-  const model = opts?.model ?? null;
 
   for (const [i, evalCase] of cases.entries()) {
-    const result = model
-      ? await runModelEval(spec, evalCase, model, opts?.clientOpts)
-      : runOfflineEval(spec, evalCase);
+    const result = await runSingleEval(spec, evalCase, model, opts?.clientOpts);
     results.push(result);
     opts?.onProgress?.(i + 1, cases.length);
   }
@@ -51,27 +48,7 @@ export async function runEvals(
   };
 }
 
-function runOfflineEval(
-  spec: LocalSpec,
-  evalCase: EvalCase,
-): EvalResult {
-  const text = evalCase.expected ?? "";
-  const assertions = [
-    ...runAssertions(text, evalCase.assert ?? []),
-    ...checkConstraints(text, spec.constraints),
-  ];
-
-  return {
-    input: evalCase.input,
-    expected: evalCase.expected ?? null,
-    actual: null,
-    passed: assertions.every((a) => a.passed),
-    latency_ms: null,
-    assertions,
-  };
-}
-
-async function runModelEval(
+async function runSingleEval(
   spec: LocalSpec,
   evalCase: EvalCase,
   model: string,

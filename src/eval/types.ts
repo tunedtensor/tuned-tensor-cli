@@ -41,7 +41,7 @@ export interface EvalSummary {
   passed: number;
   failed: number;
   pass_rate: number;
-  model: string | null;
+  model: string;
   results: EvalResult[];
   spec_validation: ValidationResult;
 }

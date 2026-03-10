@@ -15,8 +15,6 @@ vi.mock("ora", () => ({
   default: () => ({
     start: vi.fn().mockReturnThis(),
     stop: vi.fn(),
-    succeed: vi.fn(),
-    fail: vi.fn(),
     set text(_: string) {},
   }),
 }));
@@ -28,18 +26,14 @@ const mockSummary: EvalSummary = {
   passed: 2,
   failed: 0,
   pass_rate: 1,
-  model: null,
+  model: "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
   results: [
-    { input: "Hi", expected: "Hello!", actual: null, passed: true, latency_ms: null, assertions: [] },
-    { input: "Bye", expected: "Goodbye!", actual: null, passed: true, latency_ms: null, assertions: [] },
+    { input: "Hi", expected: "Hello!", actual: "Hello there!", passed: true, latency_ms: 300, assertions: [] },
+    { input: "Bye", expected: "Goodbye!", actual: "See you!", passed: true, latency_ms: 250, assertions: [] },
   ],
   spec_validation: {
     valid: true,
-    checks: [
-      { name: "Has name", passed: true },
-      { name: "Has system prompt", passed: true },
-      { name: "Has examples", passed: true, message: "2 example(s)" },
-    ],
+    checks: [{ name: "Has name", passed: true }],
   },
 };
 
@@ -57,17 +51,17 @@ function buildProgram() {
 beforeEach(() => {
   setJsonMode(false);
   vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
   vi.mocked(runner.runEvals).mockResolvedValue(mockSummary);
 
-  const spec = {
+  writeFileSync(TEST_FILE, JSON.stringify({
     name: "Test",
     base_model: "llama3.2",
     system_prompt: "You are helpful.",
-    guidelines: ["Be concise"],
+    guidelines: [],
     constraints: [],
     examples: [{ input: "Hi", output: "Hello!" }],
-  };
-  writeFileSync(TEST_FILE, JSON.stringify(spec));
+  }));
 });
 
 afterEach(() => {
@@ -75,19 +69,14 @@ afterEach(() => {
 });
 
 describe("eval command", () => {
-  it("runs offline evals without --model", async () => {
+  it("requires --model flag", async () => {
     const program = buildProgram();
-    await program.parseAsync([
-      "node", "tt", "eval", "--file", "test-eval-spec.json",
-    ]);
-
-    expect(runner.runEvals).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Test" }),
-      expect.objectContaining({ model: undefined }),
-    );
+    await expect(
+      program.parseAsync(["node", "tt", "eval", "--file", "test-eval-spec.json"]),
+    ).rejects.toThrow();
   });
 
-  it("passes model to runner when --model is provided", async () => {
+  it("calls runEvals with model and spec", async () => {
     const program = buildProgram();
     await program.parseAsync([
       "node", "tt", "eval",
@@ -96,8 +85,9 @@ describe("eval command", () => {
     ]);
 
     expect(runner.runEvals).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ model: "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo" }),
+      expect.objectContaining({ name: "Test" }),
+      "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+      expect.objectContaining({ clientOpts: expect.anything() }),
     );
   });
 
@@ -106,12 +96,13 @@ describe("eval command", () => {
     const spy = vi.spyOn(console, "log");
     const program = buildProgram();
     await program.parseAsync([
-      "node", "tt", "eval", "--file", "test-eval-spec.json",
+      "node", "tt", "eval",
+      "--file", "test-eval-spec.json",
+      "--model", "test-model",
     ]);
 
-    const output = spy.mock.calls[0][0];
-    const parsed = JSON.parse(output);
+    const parsed = JSON.parse(spy.mock.calls[0][0]);
     expect(parsed).toHaveProperty("total");
-    expect(parsed).toHaveProperty("pass_rate");
+    expect(parsed).toHaveProperty("model", "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo");
   });
 });

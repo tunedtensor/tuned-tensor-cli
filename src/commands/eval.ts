@@ -16,32 +16,25 @@ import type { EvalSummary, ValidationCheck } from "../eval/types.js";
 export function registerEvalCommand(parent: Command) {
   parent
     .command("eval")
-    .description("Evaluate a behaviour spec against rule-based assertions, optionally calling a model")
+    .description("Evaluate a model against a behaviour spec using rule-based assertions")
+    .requiredOption("-m, --model <model>", "Model ID to evaluate (base or fine-tuned)")
     .option("-f, --file <path>", "Spec file path", DEFAULT_SPEC_FILE)
-    .option("-m, --model <model>", "Model ID to evaluate (uses Tuned Tensor Playground API)")
     .action(async (cmdOpts) => {
       const spec = loadSpec(cmdOpts.file);
-      const clientOpts = cmdOpts.model ? parent.opts() as ClientOpts : undefined;
+      const clientOpts = parent.opts() as ClientOpts;
 
-      const mode = cmdOpts.model ? `model: ${cmdOpts.model}` : "offline (spec only)";
       if (!isJsonMode()) {
-        console.log(chalk.dim(`\nSpec: ${cmdOpts.file}  |  Mode: ${mode}\n`));
+        console.log(chalk.dim(`\nSpec: ${cmdOpts.file}  |  Model: ${cmdOpts.model}\n`));
       }
 
-      let spinner: ReturnType<typeof ora> | null = null;
-      if (cmdOpts.model) {
-        spinner = ora("Running evals...").start();
-      }
+      const spinner = ora("Running evals...").start();
 
-      const summary = await runEvals(spec, {
-        model: cmdOpts.model,
+      const summary = await runEvals(spec, cmdOpts.model, {
         clientOpts,
-        onProgress: spinner
-          ? (done, total) => { spinner!.text = `Running evals... ${done}/${total}`; }
-          : undefined,
+        onProgress: (done, total) => { spinner.text = `Running evals... ${done}/${total}`; },
       });
 
-      spinner?.stop();
+      spinner.stop();
 
       if (isJsonMode()) return printJson(summary);
 
@@ -70,15 +63,13 @@ function printResults(summary: EvalSummary) {
 
   console.log(chalk.bold(`Eval Results (${summary.total}):`));
 
-  const hasModel = summary.model !== null;
-
   printTable(
-    ["#", "Passed", "Input", ...(hasModel ? ["Latency"] : [])],
+    ["#", "Passed", "Input", "Latency"],
     summary.results.map((r, i) => [
       String(i + 1),
       r.passed ? chalk.green("✓") : chalk.red("✗"),
-      truncate(r.input, hasModel ? 40 : 55),
-      ...(hasModel ? [r.latency_ms != null ? `${r.latency_ms}ms` : "—"] : []),
+      truncate(r.input, 40),
+      r.latency_ms != null ? `${r.latency_ms}ms` : "—",
     ]),
   );
 
@@ -100,7 +91,7 @@ function printResults(summary: EvalSummary) {
     console.log(chalk.dim(`\nFailed eval details:`));
     for (const r of failedResults) {
       console.log(chalk.dim(`  • "${truncate(r.input, 50)}":`));
-      if (hasModel && r.actual) {
+      if (r.actual) {
         console.log(chalk.dim(`    Response: ${truncate(r.actual, 80)}`));
       }
       for (const a of r.assertions.filter((a) => !a.passed)) {
