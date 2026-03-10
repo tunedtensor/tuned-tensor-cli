@@ -30,7 +30,9 @@ export interface AssertionResult {
 export interface EvalResult {
   input: string;
   expected: string | null;
+  actual: string | null;
   passed: boolean;
+  latency_ms: number | null;
   assertions: AssertionResult[];
 }
 
@@ -39,6 +41,7 @@ export interface EvalSummary {
   passed: number;
   failed: number;
   pass_rate: number;
+  model: string | null;
   results: EvalResult[];
   spec_validation: ValidationResult;
 }
@@ -52,4 +55,13 @@ export interface ValidationCheck {
   name: string;
   passed: boolean;
   message?: string;
+}
+
+export interface PlaygroundResponse {
+  content: string;
+  latency_ms: number;
+  usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+  };
 }
