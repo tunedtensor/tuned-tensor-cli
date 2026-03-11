@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+### Changed
+
+- Simplified and shortened `README.md` for faster onboarding and easier scanning.
+- Added a concrete `eval_cases` example to show assertion-based eval patterns.
+
 ## 0.2.0
 
 ### Added

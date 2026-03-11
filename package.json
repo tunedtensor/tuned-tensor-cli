@@ -1,6 +1,6 @@
 {
   "name": "@tuned-tensor/cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "CLI for Tuned Tensor — fine-tune and evaluate LLMs from the command line",
   "type": "module",
   "bin": {
