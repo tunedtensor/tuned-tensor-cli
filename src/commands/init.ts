@@ -42,7 +42,7 @@ export function registerInitCommand(parent: Command) {
       printSuccess(`Created ${cmdOpts.file}`);
       console.log("\nNext steps:");
       console.log("  1. Edit the spec: system_prompt, guidelines, examples");
-      console.log("  2. Run local evals:  tt eval");
+      console.log("  2. Run evals:        tt eval --model <model-id>");
       console.log("  3. Push to remote:   tt push");
     });
 }
