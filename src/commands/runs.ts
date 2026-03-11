@@ -134,8 +134,8 @@ export function registerRunsCommands(parent: Command) {
 
   runs
     .command("start")
-    .description("Start a new run for a behavior spec")
-    .argument("<spec-id>", "Behavior spec ID")
+    .description("Start a new run for a behaviour spec")
+    .argument("<spec-id>", "Behaviour spec ID")
     .option("--no-augment", "Disable data augmentation")
     .option("--epochs <n>", "Number of training epochs")
     .option("--lr <rate>", "Learning rate")
