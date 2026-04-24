@@ -62,7 +62,8 @@ Tip: use `tt specs list`, `tt datasets list`, `tt runs list`, and `tt models lis
 ```bash
 # Account
 tt auth status
-tt usage
+tt balance
+tt topup --amount 25
 
 # Specs
 tt specs list
@@ -85,6 +86,18 @@ tt datasets get <dataset-id>
 tt models list
 tt models get <model-id>
 ```
+
+## Billing & Credits
+
+Tuned Tensor uses prepaid credits — every new account gets $5 in free credits, and you only pay for successful fine-tuning runs.
+
+```bash
+tt balance                 # show balance + recent transactions
+tt topup --amount 25       # opens Stripe Checkout in your browser
+tt topup --amount 25 --no-open  # print the URL instead
+```
+
+If a run is rejected with `402 insufficient_credits`, top up and re-try.
 
 ## Evals and Assertions
 

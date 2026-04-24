@@ -6,7 +6,8 @@ import { registerRunsCommands } from "./commands/runs.js";
 import { registerDatasetsCommands } from "./commands/datasets.js";
 import { registerModelsCommands } from "./commands/models.js";
 
-import { registerUsageCommands } from "./commands/usage.js";
+import { registerBalanceCommands } from "./commands/balance.js";
+import { registerTopupCommands } from "./commands/topup.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerEvalCommand } from "./commands/eval.js";
 import { registerPushCommand } from "./commands/push.js";
@@ -41,7 +42,8 @@ registerRunsCommands(program);
 registerDatasetsCommands(program);
 registerModelsCommands(program);
 
-registerUsageCommands(program);
+registerBalanceCommands(program);
+registerTopupCommands(program);
 registerInitCommand(program);
 registerEvalCommand(program);
 registerPushCommand(program);

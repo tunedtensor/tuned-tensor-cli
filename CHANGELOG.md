@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+
+- **`tt balance`** — Show current credit balance, signup bonus status, and recent transactions. Supports `--limit <n>` and `--json`.
+- **`tt topup`** — Add prepaid credits via Stripe Checkout. Use `--amount <usd>` for a specific amount (presets: $10, $25, $50, $100; min $5, max $10,000). Opens the checkout URL in your browser by default; use `--no-open` to just print it.
+
+### Removed
+
+- **`tt usage`** — Replaced by `tt balance`. The platform now uses prepaid credits instead of monthly run quotas.
+
+### Changed
+
+- New users automatically receive $5 in free credits on signup. Fine-tuning runs are charged based on `epochs × training_tokens × model_rate`. Inference, evals, and dataset operations remain free.
+
 ## 0.3.0
 
 ### Changed
