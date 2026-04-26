@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+### Fixed
+
+- **`tt balance`** — Show available credits and credits on hold from the reservation-aware billing API. Low-balance warnings now use spendable `available_cents` instead of total `balance_cents`.
+
 ## 0.4.0
 
 ### Added
