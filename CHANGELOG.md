@@ -6,6 +6,10 @@
 
 - **`tt balance`** — Show available credits and credits on hold from the reservation-aware billing API. Low-balance warnings now use spendable `available_cents` instead of total `balance_cents`.
 
+### Docs
+
+- Explain that active runs can reserve credits, so a positive total balance may still produce `402 insufficient_credits` when available credits are too low.
+
 ## 0.4.0
 
 ### Added

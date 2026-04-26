@@ -61,7 +61,7 @@ function formatSigned(cents: number): string {
 export function registerBalanceCommands(parent: Command) {
   parent
     .command("balance")
-    .description("Show credit balance and recent transactions")
+    .description("Show available credits, held credits, and recent transactions")
     .option("-n, --limit <n>", "Number of transactions to show (default 10)", "10")
     .action(async (options) => {
       const opts = parent.opts() as ClientOpts;
