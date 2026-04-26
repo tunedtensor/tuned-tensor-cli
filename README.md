@@ -92,12 +92,16 @@ tt models get <model-id>
 Tuned Tensor uses prepaid credits — every new account gets $5 in free credits, and you only pay for successful fine-tuning runs.
 
 ```bash
-tt balance                 # show balance + recent transactions
+tt balance                 # show available credits, holds, and recent transactions
 tt topup --amount 25       # opens Stripe Checkout in your browser
 tt topup --amount 25 --no-open  # print the URL instead
 ```
 
-If a run is rejected with `402 insufficient_credits`, top up and re-try.
+`tt balance` separates **Available** credits from **Total balance**. Starting a
+run or auto-tune session places an estimate on hold, so you can have a positive
+total balance while `Available` is too low to start another run. If a run is
+rejected with `402 insufficient_credits`, top up or wait for active holds to
+settle/release, then retry.
 
 ## Evals and Assertions
 

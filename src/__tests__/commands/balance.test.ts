@@ -27,6 +27,8 @@ function buildProgram() {
 
 const mockBalance = {
   balance_cents: 480,
+  reserved_cents: 300,
+  available_cents: 180,
   lifetime_topup_cents: 2500,
   signup_bonus_cents: 500,
   signup_bonus_granted: true,
@@ -83,6 +85,11 @@ describe("balance command", () => {
     );
     const out = spy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(out).toContain("$4.80");
+    expect(out).toContain("$3.00");
+    expect(out).toContain("$1.80");
+    expect(out).toContain("Available");
+    expect(out).toContain("On hold");
+    expect(out).toContain("Total balance");
     expect(out).toContain("Top-up");
     expect(out).toContain("Run");
   });
@@ -96,14 +103,21 @@ describe("balance command", () => {
     expect(parsed).toHaveProperty("balance");
     expect(parsed).toHaveProperty("transactions");
     expect(parsed.balance.balance_cents).toBe(480);
+    expect(parsed.balance.reserved_cents).toBe(300);
+    expect(parsed.balance.available_cents).toBe(180);
     expect(parsed.transactions).toHaveLength(2);
   });
 
-  it("warns on low balance", async () => {
+  it("warns on low available balance", async () => {
     vi.mocked(client.get).mockImplementation(((path: string) => {
       if (path === "/billing/balance") {
         return Promise.resolve({
-          data: { ...mockBalance, balance_cents: 50 },
+          data: {
+            ...mockBalance,
+            balance_cents: 480,
+            reserved_cents: 450,
+            available_cents: 30,
+          },
         });
       }
       return Promise.resolve({ data: [] });
