@@ -13,6 +13,8 @@ import {
 
 interface BalanceResponse {
   balance_cents: number;
+  reserved_cents: number;
+  available_cents: number;
   lifetime_topup_cents: number;
   signup_bonus_cents: number;
   signup_bonus_granted: boolean;
@@ -74,13 +76,15 @@ export function registerBalanceCommands(parent: Command) {
         return printJson({ balance, transactions });
       }
 
-      const lowBalance = balance.balance_cents < 100;
-      const balanceLine = lowBalance
-        ? chalk.red(formatCents(balance.balance_cents)) + chalk.dim(" (low)")
-        : chalk.bold.green(formatCents(balance.balance_cents));
+      const lowBalance = balance.available_cents < 100;
+      const availableLine = lowBalance
+        ? chalk.red(formatCents(balance.available_cents)) + chalk.dim(" (low)")
+        : chalk.bold.green(formatCents(balance.available_cents));
 
       printDetail([
-        ["Balance", balanceLine],
+        ["Available", availableLine],
+        ["Total balance", formatCents(balance.balance_cents)],
+        ["On hold", formatCents(balance.reserved_cents)],
         [
           "Signup bonus",
           balance.signup_bonus_granted
@@ -111,7 +115,7 @@ export function registerBalanceCommands(parent: Command) {
       if (lowBalance) {
         console.log(
           `\n${formatStatus("preparing")} ${chalk.yellow(
-            "Run `tt topup` to add more credits before starting a run."
+            "Run `tt topup` to add more available credits before starting a run."
           )}`
         );
       }
