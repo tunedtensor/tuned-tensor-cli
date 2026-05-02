@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2
+
+### Changed
+
+- **`tt runs get`** — Show the current run stage, progress percentage, and latest status message returned by the Tuned Tensor API.
+- **`tt runs watch`** — Poll and display long-running run progress so users can follow AWS runner stage transitions from the terminal.
+
 ## 0.4.1
 
 ### Fixed
