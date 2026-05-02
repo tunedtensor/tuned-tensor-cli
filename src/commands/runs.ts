@@ -18,6 +18,10 @@ interface Run {
   behavior_spec_id: string;
   run_number: number;
   status: string;
+  current_stage?: string | null;
+  stage_label?: string | null;
+  progress_pct?: number | null;
+  status_message?: string | null;
   hyperparameters: Record<string, unknown> | null;
   eval_summary: { mean_score?: number; pass_rate?: number } | null;
   error: string | null;
@@ -27,6 +31,7 @@ interface Run {
   updated_at: string;
   _spec_name?: string;
   _evals?: RunEval[];
+  _events?: RunEvent[];
 }
 
 interface RunEval {
@@ -38,6 +43,21 @@ interface RunEval {
   score: number | null;
   reasoning: string | null;
   latency_ms: number | null;
+}
+
+interface RunEvent {
+  id: string;
+  stage: string;
+  label: string;
+  status: string;
+  message: string | null;
+  occurred_at: string;
+}
+
+function formatProgress(run: Run): string | undefined {
+  if (run.progress_pct == null && !run.stage_label) return undefined;
+  const label = run.stage_label ?? run.current_stage ?? "Progress";
+  return run.progress_pct == null ? label : `${label} (${run.progress_pct}%)`;
 }
 
 export function registerRunsCommands(parent: Command) {
@@ -98,6 +118,8 @@ export function registerRunsCommands(parent: Command) {
         ["Spec", data._spec_name ?? shortId(data.behavior_spec_id)],
         ["Run #", String(data.run_number)],
         ["Status", formatStatus(data.status)],
+        ["Stage", formatProgress(data)],
+        ["Message", data.status_message ?? undefined],
         ["Score", data.eval_summary?.mean_score != null
           ? (data.eval_summary.mean_score * 100).toFixed(1) + "%"
           : undefined],
@@ -114,6 +136,16 @@ export function registerRunsCommands(parent: Command) {
         console.log("\nHyperparameters:");
         for (const [k, v] of Object.entries(data.hyperparameters)) {
           console.log(`  ${k}: ${v}`);
+        }
+      }
+
+      if (data._events?.length) {
+        console.log("\nLatest Updates:");
+        for (const event of data._events.slice(-5)) {
+          const time = formatDate(event.occurred_at);
+          console.log(
+            `  ${time}  ${formatStatus(event.status)} ${event.label}${event.message ? ` — ${event.message}` : ""}`,
+          );
         }
       }
 
@@ -164,7 +196,7 @@ export function registerRunsCommands(parent: Command) {
 
       if (isJsonMode()) return printJson(data);
       printSuccess(
-        `Run #${data.run_number} started (${shortId(data.id)}). Status: ${formatStatus(data.status)}`,
+        `Run #${data.run_number} started (${shortId(data.id)}). ${formatProgress(data) ?? `Status: ${formatStatus(data.status)}`}`,
       );
     });
 
@@ -200,7 +232,7 @@ export function registerRunsCommands(parent: Command) {
       while (true) {
         const { data } = await get<Run>(`/runs/${id}`, undefined, opts);
         run = data;
-        spinner.text = `Run ${shortId(id)} — ${formatStatus(run.status)}`;
+        spinner.text = `Run ${shortId(id)} — ${formatProgress(run) ?? formatStatus(run.status)}`;
 
         if (terminalStates.has(run.status)) break;
         await new Promise((r) => setTimeout(r, interval));
@@ -213,6 +245,8 @@ export function registerRunsCommands(parent: Command) {
       printDetail([
         ["Run", shortId(run.id)],
         ["Status", formatStatus(run.status)],
+        ["Stage", formatProgress(run)],
+        ["Message", run.status_message ?? undefined],
         ["Score", run.eval_summary?.mean_score != null
           ? (run.eval_summary.mean_score * 100).toFixed(1) + "%"
           : undefined],
