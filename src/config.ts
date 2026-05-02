@@ -46,7 +46,7 @@ export function clearConfig(): void {
   if (existsSync(path)) writeFileSync(path, "{}\n");
 }
 
-export const DEFAULT_BASE_URL = "https://www.tunedtensor.com";
+export const DEFAULT_BASE_URL = "https://tunedtensor.com";
 
 export function getBaseUrl(opts?: { baseUrl?: string }): string {
   return opts?.baseUrl || process.env.TUNED_TENSOR_URL || readConfig().base_url || DEFAULT_BASE_URL;
