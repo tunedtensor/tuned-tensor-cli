@@ -24,7 +24,7 @@ program
   .option("-k, --api-key <key>", "API key (overrides stored key)")
   .option(
     "-u, --base-url <url>",
-    "API base URL (default: https://www.tunedtensor.com)",
+    "API base URL (default: https://tunedtensor.com)",
   )
   .option("--json", "Output raw JSON")
   .option("--no-color", "Disable colors")

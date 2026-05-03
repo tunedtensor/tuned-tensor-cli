@@ -80,7 +80,7 @@ describe("config", () => {
 
   describe("getBaseUrl", () => {
     it("returns default URL when nothing is set", () => {
-      expect(configModule.getBaseUrl()).toBe("https://www.tunedtensor.com");
+      expect(configModule.getBaseUrl()).toBe("https://tunedtensor.com");
     });
 
     it("uses opts.baseUrl first", () => {
