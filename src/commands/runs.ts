@@ -172,6 +172,7 @@ export function registerRunsCommands(parent: Command) {
     .description("Start a new run for a behaviour spec")
     .argument("<spec-id>", "Behaviour spec ID (full UUID or 8+ char prefix)")
     .option("--no-augment", "Disable data augmentation")
+    .option("--no-llm-judge", "Disable Bedrock LLM judging")
     .option("--epochs <n>", "Number of training epochs")
     .option("--lr <rate>", "Learning rate")
     .option("--batch-size <n>", "Batch size")
@@ -189,6 +190,7 @@ export function registerRunsCommands(parent: Command) {
       if (cmdOpts.batchSize) hp.batch_size = Number(cmdOpts.batchSize);
       if (cmdOpts.loraRank) hp.lora_rank = Number(cmdOpts.loraRank);
       if (cmdOpts.loraAlpha) hp.lora_alpha = Number(cmdOpts.loraAlpha);
+      if (cmdOpts.llmJudge === false) hp.use_llm_judge = false;
       if (Object.keys(hp).length) body.hyperparameters = hp;
 
       const fullSpecId = await resolveSpecId(specId, opts);

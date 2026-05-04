@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`tt runs start --no-llm-judge`** — Add an explicit CLI opt-out for Bedrock LLM judging by sending `hyperparameters.use_llm_judge = false` when starting a run.
+
 ## 0.4.4
 
 ### Fixed
