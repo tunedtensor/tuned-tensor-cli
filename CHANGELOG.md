@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3
+
+### Fixed
+
+- **`tt specs create --file`** — Validate the file body before sending. Detects run-input payloads (with `spec_snapshot` and friends), missing `name`, and warns on unknown top-level keys. Common cause of opaque `[500] An unexpected error occurred` from the API on `tt specs create`.
+- **`--json`** — Errors now respect `--json` and emit `{"error":{"status","code","message"}}` on stdout instead of a colored text message on stderr, so failures can be parsed by tooling.
+
 ## 0.4.2
 
 ### Changed

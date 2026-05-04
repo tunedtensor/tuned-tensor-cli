@@ -5,6 +5,7 @@ import {
   printTable,
   printDetail,
   printSuccess,
+  printWarning,
   printJson,
   isJsonMode,
   formatDate,
@@ -12,6 +13,64 @@ import {
   truncate,
   shortId,
 } from "../output.js";
+
+const SPEC_BODY_KEYS = new Set([
+  "name",
+  "description",
+  "base_model",
+  "system_prompt",
+  "guidelines",
+  "constraints",
+  "examples",
+]);
+
+const RUN_INPUT_KEYS = ["run_id", "behavior_spec_id", "spec_snapshot", "run_number"];
+
+class SpecBodyError extends Error {}
+
+function loadSpecBody(filePath: string, mode: "create" | "update"): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(filePath, "utf-8"));
+  } catch (e) {
+    throw new SpecBodyError(
+      `Could not parse ${filePath}: ${(e as Error).message}`,
+    );
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new SpecBodyError(
+      `${filePath} must contain a JSON object at the top level.`,
+    );
+  }
+
+  const body = parsed as Record<string, unknown>;
+
+  const runInputHits = RUN_INPUT_KEYS.filter((k) => k in body);
+  if (runInputHits.length >= 2 || "spec_snapshot" in body) {
+    const hint = "spec_snapshot" in body
+      ? `This file looks like a run-input payload (top-level keys: ${runInputHits.join(", ")}). The actual spec is nested under "spec_snapshot". Try:\n  jq '.spec_snapshot' ${filePath} > spec.json\n  tt specs ${mode === "create" ? "create" : "update <id>"} --file spec.json`
+      : `This file looks like a run-input payload (top-level keys: ${runInputHits.join(", ")}), not a behaviour spec. To start a run on an existing spec, use: tt runs start <spec-id>`;
+    throw new SpecBodyError(hint);
+  }
+
+  if (mode === "create" && typeof body.name !== "string") {
+    throw new SpecBodyError(
+      `${filePath} is missing required field "name" (string).`,
+    );
+  }
+
+  const unknown = Object.keys(body).filter(
+    (k) => !SPEC_BODY_KEYS.has(k) && k !== "id" && k !== "eval_cases",
+  );
+  if (unknown.length && !isJsonMode()) {
+    printWarning(
+      `Unknown spec field(s) in ${filePath}: ${unknown.join(", ")}. They will be sent but may be rejected by the API.`,
+    );
+  }
+
+  return body;
+}
 
 interface BehaviorSpec {
   id: string;
@@ -112,13 +171,12 @@ export function registerSpecsCommands(parent: Command) {
       let body: Record<string, unknown>;
 
       if (cmdOpts.file) {
-        body = JSON.parse(readFileSync(cmdOpts.file, "utf-8"));
+        body = loadSpecBody(cmdOpts.file, "create");
       } else if (cmdOpts.name) {
         body = { name: cmdOpts.name };
         if (cmdOpts.model) body.base_model = cmdOpts.model;
       } else {
-        console.error("Provide --file or --name");
-        process.exit(1);
+        throw new SpecBodyError("Provide --file or --name");
       }
 
       const { data } = await post<BehaviorSpec>("/behavior-specs", body, opts);
@@ -139,7 +197,7 @@ export function registerSpecsCommands(parent: Command) {
       let body: Record<string, unknown>;
 
       if (cmdOpts.file) {
-        body = JSON.parse(readFileSync(cmdOpts.file, "utf-8"));
+        body = loadSpecBody(cmdOpts.file, "update");
       } else {
         body = {};
         if (cmdOpts.name) body.name = cmdOpts.name;

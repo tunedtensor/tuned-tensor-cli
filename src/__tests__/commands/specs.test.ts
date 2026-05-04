@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Command } from "commander";
+import { writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { registerSpecsCommands } from "../../commands/specs.js";
 import * as client from "../../client.js";
 import { setJsonMode } from "../../output.js";
@@ -46,6 +49,10 @@ const mockSpec = {
 beforeEach(() => {
   setJsonMode(false);
   process.env.TUNED_TENSOR_API_KEY = FAKE_KEY;
+  vi.mocked(client.get).mockReset();
+  vi.mocked(client.post).mockReset();
+  vi.mocked(client.put).mockReset();
+  vi.mocked(client.del).mockReset();
 });
 
 describe("specs commands", () => {
@@ -122,6 +129,94 @@ describe("specs commands", () => {
         { name: "My Spec", base_model: "meta-llama/Llama-3.2-3B-Instruct" },
         expect.anything(),
       );
+    });
+
+    describe("--file validation", () => {
+      const fixtureDir = join(tmpdir(), `tt-test-specs-${process.pid}`);
+      const writeFixture = (name: string, body: unknown) => {
+        const path = join(fixtureDir, name);
+        writeFileSync(path, JSON.stringify(body));
+        return path;
+      };
+
+      beforeEach(() => {
+        rmSync(fixtureDir, { recursive: true, force: true });
+        mkdirSync(fixtureDir, { recursive: true });
+      });
+
+      it("posts the file body when valid", async () => {
+        const path = writeFixture("spec.json", {
+          name: "From File",
+          base_model: "x/y",
+          examples: [],
+        });
+        vi.mocked(client.post).mockResolvedValue({ data: mockSpec });
+        vi.spyOn(console, "log").mockImplementation(() => {});
+
+        const program = buildProgram();
+        await program.parseAsync([
+          "node", "tt", "specs", "create", "--file", path,
+        ]);
+
+        expect(client.post).toHaveBeenCalledWith(
+          "/behavior-specs",
+          { name: "From File", base_model: "x/y", examples: [] },
+          expect.anything(),
+        );
+      });
+
+      it("rejects a run-input shape with a helpful hint", async () => {
+        const path = writeFixture("run-input.json", {
+          run_id: "r1",
+          behavior_spec_id: "s1",
+          run_number: 1,
+          spec_snapshot: { name: "Nested Spec" },
+          hyperparameters: {},
+        });
+
+        const program = buildProgram();
+        await expect(
+          program.parseAsync(["node", "tt", "specs", "create", "--file", path]),
+        ).rejects.toThrow(/run-input payload.*spec_snapshot/s);
+
+        expect(client.post).not.toHaveBeenCalled();
+      });
+
+      it("rejects when name is missing on create", async () => {
+        const path = writeFixture("nameless.json", { description: "hi" });
+
+        const program = buildProgram();
+        await expect(
+          program.parseAsync(["node", "tt", "specs", "create", "--file", path]),
+        ).rejects.toThrow(/missing required field "name"/);
+
+        expect(client.post).not.toHaveBeenCalled();
+      });
+
+      it("warns on unknown top-level keys but still posts", async () => {
+        const path = writeFixture("extra.json", {
+          name: "Has Extras",
+          base_model: "x/y",
+          totally_unknown_field: 42,
+        });
+        vi.mocked(client.post).mockResolvedValue({ data: mockSpec });
+        const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+        const program = buildProgram();
+        await program.parseAsync([
+          "node", "tt", "specs", "create", "--file", path,
+        ]);
+
+        const warnedAt = logSpy.mock.calls.findIndex((c) =>
+          String(c[0]).includes("totally_unknown_field"),
+        );
+        expect(warnedAt).toBeGreaterThanOrEqual(0);
+        expect(client.post).toHaveBeenCalledWith(
+          "/behavior-specs",
+          expect.objectContaining({ totally_unknown_field: 42 }),
+          expect.anything(),
+        );
+      });
     });
   });
 

@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import Table from "cli-table3";
+import { ApiError } from "./client.js";
 
 let jsonMode = false;
 
@@ -57,6 +58,25 @@ export function printWarning(message: string) {
 
 export function printError(message: string) {
   console.error(chalk.red("✗") + " " + message);
+}
+
+export function reportError(err: unknown): void {
+  const isApi = err instanceof ApiError;
+  const message = (err as Error)?.message || String(err);
+
+  if (jsonMode) {
+    printJson({
+      error: {
+        status: isApi ? err.status : null,
+        code: isApi ? err.code : "CLI_ERROR",
+        message,
+      },
+    });
+  } else if (isApi) {
+    printError(`[${err.status}] ${message}`);
+  } else {
+    printError(message);
+  }
 }
 
 export function formatDate(iso?: string | null): string {

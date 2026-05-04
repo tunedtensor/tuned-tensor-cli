@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { setJsonMode, printError } from "./output.js";
+import { setJsonMode, reportError } from "./output.js";
 import { registerAuthCommands } from "./commands/auth.js";
 import { registerSpecsCommands } from "./commands/specs.js";
 import { registerRunsCommands } from "./commands/runs.js";
@@ -11,7 +11,6 @@ import { registerTopupCommands } from "./commands/topup.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerEvalCommand } from "./commands/eval.js";
 import { registerPushCommand } from "./commands/push.js";
-import { ApiError } from "./client.js";
 
 declare const __TT_VERSION__: string;
 
@@ -48,11 +47,11 @@ registerInitCommand(program);
 registerEvalCommand(program);
 registerPushCommand(program);
 
+// Honor --json even when parsing fails before the preAction hook runs
+// (e.g. on unknown commands). Cheap argv sniff is fine here.
+if (process.argv.includes("--json")) setJsonMode(true);
+
 program.parseAsync().catch((err) => {
-  if (err instanceof ApiError) {
-    printError(`[${err.status}] ${err.message}`);
-    process.exit(1);
-  }
-  printError(err.message || String(err));
+  reportError(err);
   process.exit(1);
 });
