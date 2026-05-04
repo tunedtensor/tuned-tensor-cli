@@ -52,6 +52,7 @@ tt push
 
 ```bash
 tt runs start <spec-id>
+tt runs start <spec-id> --no-llm-judge
 tt runs watch <run-id>
 ```
 
@@ -75,6 +76,7 @@ tt specs update <spec-id> --file updates.json
 tt runs list --spec <spec-id>
 tt runs get <run-id>
 tt runs start <spec-id> --epochs 5 --lr 0.0001 --batch-size 8
+tt runs start <spec-id> --no-llm-judge
 tt runs cancel <run-id>
 
 # Datasets
@@ -86,6 +88,8 @@ tt datasets get <dataset-id>
 tt models list
 tt models get <model-id>
 ```
+
+Use `--no-llm-judge` with `tt runs start` to opt out of Bedrock LLM judging for a new run.
 
 ## Billing & Credits
 

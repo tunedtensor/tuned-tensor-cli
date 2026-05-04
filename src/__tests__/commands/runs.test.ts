@@ -132,6 +132,20 @@ describe("runs commands", () => {
       );
     });
 
+    it("passes use_llm_judge false when --no-llm-judge is provided", async () => {
+      vi.mocked(client.post).mockResolvedValue({ data: mockRun });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "runs", "start", SPEC_UUID, "--no-llm-judge",
+      ]);
+      expect(client.post).toHaveBeenCalledWith(
+        `/behavior-specs/${SPEC_UUID}/runs`,
+        { hyperparameters: { use_llm_judge: false } },
+        expect.anything(),
+      );
+    });
+
     it("passes hyperparameters when provided", async () => {
       vi.mocked(client.post).mockResolvedValue({ data: mockRun });
       vi.spyOn(console, "log").mockImplementation(() => {});
