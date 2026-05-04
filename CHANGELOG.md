@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.4
+
+### Fixed
+
+- **Spec & run ID prefixes** — `tt specs get/update/delete`, `tt runs start`, `tt runs list --spec`, `tt runs get/cancel/watch` now resolve 8+ char ID prefixes client-side via the list endpoint. Previously the truncated IDs shown in `tt specs list` and `tt runs list` produced opaque `[404] Behaviour spec not found` because the API only accepts full UUIDs.
+- Help text for ID arguments now correctly says "(full UUID or 8+ char prefix)" instead of just "(full or prefix)".
+- Ambiguous prefixes now error with the matching IDs and names so you can disambiguate. Prefixes shorter than 4 chars are rejected up front.
+
 ## 0.4.3
 
 ### Fixed

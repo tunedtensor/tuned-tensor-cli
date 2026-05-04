@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { get, post, put, del, type ClientOpts } from "../client.js";
+import { resolveSpecId } from "../resolve.js";
 import {
   printTable,
   printDetail,
@@ -127,10 +128,11 @@ export function registerSpecsCommands(parent: Command) {
   specs
     .command("get")
     .description("Show spec details")
-    .argument("<id>", "Spec ID (full or prefix)")
+    .argument("<id>", "Spec ID (full UUID or 8+ char prefix)")
     .action(async (id: string) => {
       const opts = parent.opts() as ClientOpts;
-      const { data } = await get<BehaviorSpec>(`/behavior-specs/${id}`, undefined, opts);
+      const fullId = await resolveSpecId(id, opts);
+      const { data } = await get<BehaviorSpec>(`/behavior-specs/${fullId}`, undefined, opts);
 
       if (isJsonMode()) return printJson(data);
 
@@ -188,7 +190,7 @@ export function registerSpecsCommands(parent: Command) {
   specs
     .command("update")
     .description("Update a behaviour spec")
-    .argument("<id>", "Spec ID")
+    .argument("<id>", "Spec ID (full UUID or 8+ char prefix)")
     .option("-f, --file <path>", "JSON file with fields to update")
     .option("-n, --name <name>", "New name")
     .option("--model <model>", "New base model ID")
@@ -204,8 +206,9 @@ export function registerSpecsCommands(parent: Command) {
         if (cmdOpts.model) body.base_model = cmdOpts.model;
       }
 
+      const fullId = await resolveSpecId(id, opts);
       const { data } = await put<BehaviorSpec>(
-        `/behavior-specs/${id}`,
+        `/behavior-specs/${fullId}`,
         body,
         opts,
       );
@@ -217,12 +220,13 @@ export function registerSpecsCommands(parent: Command) {
   specs
     .command("delete")
     .description("Delete a behaviour spec")
-    .argument("<id>", "Spec ID")
+    .argument("<id>", "Spec ID (full UUID or 8+ char prefix)")
     .action(async (id: string) => {
       const opts = parent.opts() as ClientOpts;
-      await del(`/behavior-specs/${id}`, opts);
+      const fullId = await resolveSpecId(id, opts);
+      await del(`/behavior-specs/${fullId}`, opts);
 
-      if (isJsonMode()) return printJson({ id, deleted: true });
-      printSuccess(`Spec deleted: ${shortId(id)}`);
+      if (isJsonMode()) return printJson({ id: fullId, deleted: true });
+      printSuccess(`Spec deleted: ${shortId(fullId)}`);
     });
 }

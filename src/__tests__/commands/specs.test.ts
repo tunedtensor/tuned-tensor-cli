@@ -31,8 +31,11 @@ function buildProgram() {
   return program;
 }
 
+const SPEC_UUID = "11111111-1111-4111-8111-111111111111";
+const SPEC_UUID_2 = "22222222-2222-4222-8222-222222222222";
+
 const mockSpec = {
-  id: "spec-12345678-abcd",
+  id: SPEC_UUID,
   name: "Test Spec",
   description: "A test spec",
   system_prompt: "You are helpful.",
@@ -91,9 +94,9 @@ describe("specs commands", () => {
       vi.mocked(client.get).mockResolvedValue({ data: mockSpec });
       const spy = vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
-      await program.parseAsync(["node", "tt", "specs", "get", "spec-1234"]);
+      await program.parseAsync(["node", "tt", "specs", "get", SPEC_UUID]);
       expect(client.get).toHaveBeenCalledWith(
-        "/behavior-specs/spec-1234",
+        `/behavior-specs/${SPEC_UUID}`,
         undefined,
         expect.anything(),
       );
@@ -226,10 +229,10 @@ describe("specs commands", () => {
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
       await program.parseAsync([
-        "node", "tt", "specs", "update", "spec-1234", "--name", "New Name",
+        "node", "tt", "specs", "update", SPEC_UUID, "--name", "New Name",
       ]);
       expect(client.put).toHaveBeenCalledWith(
-        "/behavior-specs/spec-1234",
+        `/behavior-specs/${SPEC_UUID}`,
         { name: "New Name" },
         expect.anything(),
       );
@@ -241,9 +244,34 @@ describe("specs commands", () => {
       vi.mocked(client.del).mockResolvedValue({ data: null as never });
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
-      await program.parseAsync(["node", "tt", "specs", "delete", "spec-1234"]);
+      await program.parseAsync(["node", "tt", "specs", "delete", SPEC_UUID]);
       expect(client.del).toHaveBeenCalledWith(
-        "/behavior-specs/spec-1234",
+        `/behavior-specs/${SPEC_UUID}`,
+        expect.anything(),
+      );
+    });
+
+    it("resolves an 8-char prefix via the list endpoint", async () => {
+      const otherSpec = { ...mockSpec, id: SPEC_UUID_2, name: "Other" };
+      vi.mocked(client.get).mockResolvedValue({
+        data: [mockSpec, otherSpec],
+        meta: { page: 1, per_page: 100, total: 2 },
+      });
+      vi.mocked(client.del).mockResolvedValue({ data: null as never });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "specs", "delete", SPEC_UUID.slice(0, 8),
+      ]);
+
+      expect(client.get).toHaveBeenCalledWith(
+        "/behavior-specs",
+        { page: 1, per_page: 100 },
+        expect.anything(),
+      );
+      expect(client.del).toHaveBeenCalledWith(
+        `/behavior-specs/${SPEC_UUID}`,
         expect.anything(),
       );
     });

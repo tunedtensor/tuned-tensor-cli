@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import ora from "ora";
 import { get, post, type ClientOpts } from "../client.js";
+import { resolveSpecId, resolveRunId } from "../resolve.js";
 import {
   printTable,
   printDetail,
@@ -66,7 +67,7 @@ export function registerRunsCommands(parent: Command) {
   runs
     .command("list")
     .description("List runs")
-    .option("-s, --spec <id>", "Filter by spec ID")
+    .option("-s, --spec <id>", "Filter by spec ID (full UUID or 8+ char prefix)")
     .option("-p, --page <n>", "Page number", "1")
     .option("--per-page <n>", "Results per page", "20")
     .action(async (cmdOpts) => {
@@ -79,7 +80,8 @@ export function registerRunsCommands(parent: Command) {
       };
 
       if (cmdOpts.spec) {
-        path = `/behavior-specs/${cmdOpts.spec}/runs`;
+        const fullSpecId = await resolveSpecId(cmdOpts.spec, opts);
+        path = `/behavior-specs/${fullSpecId}/runs`;
       }
 
       const { data, meta } = await get<Run[]>(path, query, opts);
@@ -106,10 +108,11 @@ export function registerRunsCommands(parent: Command) {
   runs
     .command("get")
     .description("Show run details and eval results")
-    .argument("<id>", "Run ID")
+    .argument("<id>", "Run ID (full UUID or 8+ char prefix)")
     .action(async (id: string) => {
       const opts = parent.opts() as ClientOpts;
-      const { data } = await get<Run>(`/runs/${id}`, undefined, opts);
+      const fullId = await resolveRunId(id, opts);
+      const { data } = await get<Run>(`/runs/${fullId}`, undefined, opts);
 
       if (isJsonMode()) return printJson(data);
 
@@ -167,7 +170,7 @@ export function registerRunsCommands(parent: Command) {
   runs
     .command("start")
     .description("Start a new run for a behaviour spec")
-    .argument("<spec-id>", "Behaviour spec ID")
+    .argument("<spec-id>", "Behaviour spec ID (full UUID or 8+ char prefix)")
     .option("--no-augment", "Disable data augmentation")
     .option("--epochs <n>", "Number of training epochs")
     .option("--lr <rate>", "Learning rate")
@@ -188,8 +191,9 @@ export function registerRunsCommands(parent: Command) {
       if (cmdOpts.loraAlpha) hp.lora_alpha = Number(cmdOpts.loraAlpha);
       if (Object.keys(hp).length) body.hyperparameters = hp;
 
+      const fullSpecId = await resolveSpecId(specId, opts);
       const { data } = await post<Run>(
-        `/behavior-specs/${specId}/runs`,
+        `/behavior-specs/${fullSpecId}/runs`,
         body,
         opts,
       );
@@ -203,24 +207,26 @@ export function registerRunsCommands(parent: Command) {
   runs
     .command("cancel")
     .description("Cancel a running run")
-    .argument("<id>", "Run ID")
+    .argument("<id>", "Run ID (full UUID or 8+ char prefix)")
     .action(async (id: string) => {
       const opts = parent.opts() as ClientOpts;
-      const { data } = await post<Run>(`/runs/${id}/cancel`, undefined, opts);
+      const fullId = await resolveRunId(id, opts);
+      const { data } = await post<Run>(`/runs/${fullId}/cancel`, undefined, opts);
 
       if (isJsonMode()) return printJson(data);
-      printSuccess(`Run ${shortId(id)} cancelled.`);
+      printSuccess(`Run ${shortId(fullId)} cancelled.`);
     });
 
   runs
     .command("watch")
     .description("Watch a run until it completes")
-    .argument("<id>", "Run ID")
+    .argument("<id>", "Run ID (full UUID or 8+ char prefix)")
     .option("--interval <ms>", "Poll interval in milliseconds", "5000")
     .action(async (id: string, cmdOpts) => {
       const opts = parent.opts() as ClientOpts;
       const interval = Number(cmdOpts.interval);
-      const spinner = ora(`Watching run ${shortId(id)}...`).start();
+      const fullId = await resolveRunId(id, opts);
+      const spinner = ora(`Watching run ${shortId(fullId)}...`).start();
 
       const terminalStates = new Set([
         "completed",
@@ -230,9 +236,9 @@ export function registerRunsCommands(parent: Command) {
 
       let run: Run;
       while (true) {
-        const { data } = await get<Run>(`/runs/${id}`, undefined, opts);
+        const { data } = await get<Run>(`/runs/${fullId}`, undefined, opts);
         run = data;
-        spinner.text = `Run ${shortId(id)} — ${formatProgress(run) ?? formatStatus(run.status)}`;
+        spinner.text = `Run ${shortId(fullId)} — ${formatProgress(run) ?? formatStatus(run.status)}`;
 
         if (terminalStates.has(run.status)) break;
         await new Promise((r) => setTimeout(r, interval));

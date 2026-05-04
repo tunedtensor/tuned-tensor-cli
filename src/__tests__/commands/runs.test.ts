@@ -34,9 +34,12 @@ function buildProgram() {
   return program;
 }
 
+const SPEC_UUID = "11111111-1111-4111-8111-111111111111";
+const RUN_UUID = "33333333-3333-4333-8333-333333333333";
+
 const mockRun = {
-  id: "run-12345678-abcd",
-  behavior_spec_id: "spec-12345678",
+  id: RUN_UUID,
+  behavior_spec_id: SPEC_UUID,
   run_number: 1,
   status: "completed",
   hyperparameters: { n_epochs: 3 },
@@ -53,6 +56,8 @@ const mockRun = {
 beforeEach(() => {
   setJsonMode(false);
   process.env.TUNED_TENSOR_API_KEY = FAKE_KEY;
+  vi.mocked(client.get).mockReset();
+  vi.mocked(client.post).mockReset();
 });
 
 describe("runs commands", () => {
@@ -80,10 +85,10 @@ describe("runs commands", () => {
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
       await program.parseAsync([
-        "node", "tt", "runs", "list", "--spec", "spec-123",
+        "node", "tt", "runs", "list", "--spec", SPEC_UUID,
       ]);
       expect(client.get).toHaveBeenCalledWith(
-        "/behavior-specs/spec-123/runs",
+        `/behavior-specs/${SPEC_UUID}/runs`,
         expect.anything(),
         expect.anything(),
       );
@@ -95,9 +100,9 @@ describe("runs commands", () => {
       vi.mocked(client.get).mockResolvedValue({ data: mockRun });
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
-      await program.parseAsync(["node", "tt", "runs", "get", "run-1234"]);
+      await program.parseAsync(["node", "tt", "runs", "get", RUN_UUID]);
       expect(client.get).toHaveBeenCalledWith(
-        "/runs/run-1234",
+        `/runs/${RUN_UUID}`,
         undefined,
         expect.anything(),
       );
@@ -108,7 +113,7 @@ describe("runs commands", () => {
       vi.mocked(client.get).mockResolvedValue({ data: mockRun });
       const spy = vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
-      await program.parseAsync(["node", "tt", "runs", "get", "run-1234"]);
+      await program.parseAsync(["node", "tt", "runs", "get", RUN_UUID]);
       const output = JSON.parse(spy.mock.calls[0][0]);
       expect(output.id).toBe(mockRun.id);
     });
@@ -119,9 +124,9 @@ describe("runs commands", () => {
       vi.mocked(client.post).mockResolvedValue({ data: mockRun });
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
-      await program.parseAsync(["node", "tt", "runs", "start", "spec-123"]);
+      await program.parseAsync(["node", "tt", "runs", "start", SPEC_UUID]);
       expect(client.post).toHaveBeenCalledWith(
-        "/behavior-specs/spec-123/runs",
+        `/behavior-specs/${SPEC_UUID}/runs`,
         {},
         expect.anything(),
       );
@@ -132,12 +137,37 @@ describe("runs commands", () => {
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
       await program.parseAsync([
-        "node", "tt", "runs", "start", "spec-123",
+        "node", "tt", "runs", "start", SPEC_UUID,
         "--epochs", "5", "--lr", "0.0001",
       ]);
       expect(client.post).toHaveBeenCalledWith(
-        "/behavior-specs/spec-123/runs",
+        `/behavior-specs/${SPEC_UUID}/runs`,
         { hyperparameters: { n_epochs: 5, learning_rate: 0.0001 } },
+        expect.anything(),
+      );
+    });
+
+    it("resolves a spec ID prefix before posting", async () => {
+      vi.mocked(client.get).mockResolvedValue({
+        data: [{ id: SPEC_UUID, name: "Match" }],
+        meta: { page: 1, per_page: 100, total: 1 },
+      });
+      vi.mocked(client.post).mockResolvedValue({ data: mockRun });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "runs", "start", SPEC_UUID.slice(0, 8),
+      ]);
+
+      expect(client.get).toHaveBeenCalledWith(
+        "/behavior-specs",
+        { page: 1, per_page: 100 },
+        expect.anything(),
+      );
+      expect(client.post).toHaveBeenCalledWith(
+        `/behavior-specs/${SPEC_UUID}/runs`,
+        {},
         expect.anything(),
       );
     });
@@ -148,9 +178,9 @@ describe("runs commands", () => {
       vi.mocked(client.post).mockResolvedValue({ data: { ...mockRun, status: "cancelled" } });
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
-      await program.parseAsync(["node", "tt", "runs", "cancel", "run-1234"]);
+      await program.parseAsync(["node", "tt", "runs", "cancel", RUN_UUID]);
       expect(client.post).toHaveBeenCalledWith(
-        "/runs/run-1234/cancel",
+        `/runs/${RUN_UUID}/cancel`,
         undefined,
         expect.anything(),
       );
@@ -165,10 +195,10 @@ describe("runs commands", () => {
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
       await program.parseAsync([
-        "node", "tt", "runs", "watch", "run-1234", "--interval", "10",
+        "node", "tt", "runs", "watch", RUN_UUID, "--interval", "10",
       ]);
       expect(client.get).toHaveBeenCalledWith(
-        "/runs/run-1234",
+        `/runs/${RUN_UUID}`,
         undefined,
         expect.anything(),
       );
