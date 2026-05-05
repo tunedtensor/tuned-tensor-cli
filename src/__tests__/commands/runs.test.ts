@@ -132,7 +132,7 @@ describe("runs commands", () => {
       );
     });
 
-    it("passes use_llm_judge false when --no-llm-judge is provided", async () => {
+    it("passes use_llm_judge false at the top level when --no-llm-judge is provided", async () => {
       vi.mocked(client.post).mockResolvedValue({ data: mockRun });
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
@@ -141,7 +141,7 @@ describe("runs commands", () => {
       ]);
       expect(client.post).toHaveBeenCalledWith(
         `/behavior-specs/${SPEC_UUID}/runs`,
-        { hyperparameters: { use_llm_judge: false } },
+        { use_llm_judge: false },
         expect.anything(),
       );
     });
