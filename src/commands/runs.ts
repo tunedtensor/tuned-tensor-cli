@@ -190,7 +190,7 @@ export function registerRunsCommands(parent: Command) {
       if (cmdOpts.batchSize) hp.batch_size = Number(cmdOpts.batchSize);
       if (cmdOpts.loraRank) hp.lora_rank = Number(cmdOpts.loraRank);
       if (cmdOpts.loraAlpha) hp.lora_alpha = Number(cmdOpts.loraAlpha);
-      if (cmdOpts.llmJudge === false) hp.use_llm_judge = false;
+      if (cmdOpts.llmJudge === false) body.use_llm_judge = false;
       if (Object.keys(hp).length) body.hyperparameters = hp;
 
       const fullSpecId = await resolveSpecId(specId, opts);
