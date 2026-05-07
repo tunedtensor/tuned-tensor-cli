@@ -108,6 +108,30 @@ describe("balance command", () => {
     expect(parsed.transactions).toHaveLength(2);
   });
 
+  it("displays balances returned by the zero-bonus API schema", async () => {
+    vi.mocked(client.get).mockImplementation(((path: string) => {
+      if (path === "/billing/balance") {
+        return Promise.resolve({
+          data: {
+            balance_cents: 0,
+            reserved_cents: 0,
+            available_cents: 0,
+            lifetime_topup_cents: 0,
+          },
+        });
+      }
+      return Promise.resolve({ data: [] });
+    }) as typeof client.get);
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const program = buildProgram();
+    await program.parseAsync(["node", "tt", "balance"]);
+    const out = spy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(out).toContain("Available");
+    expect(out).toContain("$0.00");
+    expect(out).not.toContain("Signup bonus");
+    expect(out).not.toContain("not yet granted");
+  });
+
   it("warns on low available balance", async () => {
     vi.mocked(client.get).mockImplementation(((path: string) => {
       if (path === "/billing/balance") {
