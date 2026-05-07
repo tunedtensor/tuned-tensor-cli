@@ -16,8 +16,6 @@ interface BalanceResponse {
   reserved_cents: number;
   available_cents: number;
   lifetime_topup_cents: number;
-  signup_bonus_cents: number;
-  signup_bonus_granted: boolean;
 }
 
 type CreditKind =
@@ -85,12 +83,6 @@ export function registerBalanceCommands(parent: Command) {
         ["Available", availableLine],
         ["Total balance", formatCents(balance.balance_cents)],
         ["On hold", formatCents(balance.reserved_cents)],
-        [
-          "Signup bonus",
-          balance.signup_bonus_granted
-            ? chalk.green("granted") + ` (${formatCents(balance.signup_bonus_cents)})`
-            : chalk.dim("not yet granted"),
-        ],
         ["Lifetime top-ups", formatCents(balance.lifetime_topup_cents)],
       ]);
 
