@@ -2,9 +2,15 @@
 
 ## Unreleased
 
+## 0.4.5
+
 ### Added
 
-- **`tt runs start --no-llm-judge`** — Add an explicit CLI opt-out for Bedrock LLM judging by sending `hyperparameters.use_llm_judge = false` when starting a run.
+- **`tt runs start --no-llm-judge`** — Start a run without Bedrock LLM judging. The CLI now sends `use_llm_judge = false` in the request body so the API honors the opt-out.
+
+### Fixed
+
+- **`tt balance`** — Handle the current zero-bonus billing API response by no longer expecting signup-bonus fields. Zero-balance accounts now display cleanly without stale bonus messaging.
 
 ## 0.4.4
 
