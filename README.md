@@ -93,7 +93,7 @@ Use `--no-llm-judge` with `tt runs start` to opt out of Bedrock LLM judging for 
 
 ## Billing & Credits
 
-Tuned Tensor uses prepaid credits — every new account gets $5 in free credits, and you only pay for successful fine-tuning runs.
+Tuned Tensor uses prepaid credits. New accounts start at a zero balance, so top up before starting your first fine-tuning run; you only pay for successful runs.
 
 ```bash
 tt balance                 # show available credits, holds, and recent transactions
