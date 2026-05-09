@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import ora from "ora";
 import { get, post, type ClientOpts } from "../client.js";
-import { resolveSpecId, resolveRunId } from "../resolve.js";
+import { resolveSpecId, resolveRunId, resolveDatasetId } from "../resolve.js";
 import {
   printTable,
   printDetail,
@@ -176,7 +176,7 @@ export function registerRunsCommands(parent: Command) {
     .option("--epochs <n>", "Number of training epochs")
     .option("--lr <rate>", "Learning rate")
     .option("--batch-size <n>", "Batch size")
-    .option("--dataset <id>", "Dataset ID to use instead of inline spec examples")
+    .option("--dataset <id>", "Dataset ID to use instead of inline spec examples (full UUID or 4+ char prefix)")
     .option("--train-ratio <ratio>", "Dataset training split ratio (default: 0.8 when any split ratio is set)")
     .option("--validation-ratio <ratio>", "Dataset validation split ratio (default: 0.1 when any split ratio is set)")
     .option("--test-ratio <ratio>", "Dataset test split ratio (default: 0.1 when any split ratio is set)")
@@ -187,7 +187,7 @@ export function registerRunsCommands(parent: Command) {
       const body: Record<string, unknown> = {};
 
       if (cmdOpts.augment === false) body.augment = false;
-      if (cmdOpts.dataset) body.dataset_id = cmdOpts.dataset;
+      if (cmdOpts.dataset) body.dataset_id = await resolveDatasetId(cmdOpts.dataset, opts);
 
       const splitRatioOptions = [
         cmdOpts.trainRatio,

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Dataset ID prefixes** — `tt runs start --dataset`, `tt datasets get`, and `tt datasets delete` now resolve unambiguous dataset ID prefixes before calling the API. This matches the shortened IDs shown by `tt datasets list` while still sending the full UUID required by the API.
+
 ## 0.4.6
 
 ### Added

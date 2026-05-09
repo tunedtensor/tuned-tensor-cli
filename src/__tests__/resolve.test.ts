@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { resolveSpecId, resolveRunId, isFullUuid, ResolveError } from "../resolve.js";
+import {
+  resolveSpecId,
+  resolveRunId,
+  resolveDatasetId,
+  isFullUuid,
+  ResolveError,
+} from "../resolve.js";
 import * as client from "../client.js";
 
 vi.mock("../client.js", async (importOriginal) => {
@@ -10,6 +16,7 @@ vi.mock("../client.js", async (importOriginal) => {
 const SPEC_A = "11111111-1111-4111-8111-111111111111";
 const SPEC_B = "1111aaaa-1111-4111-8111-111111111111";
 const RUN_A = "33333333-3333-4333-8333-333333333333";
+const DATASET_A = "44444444-4444-4444-8444-444444444444";
 
 beforeEach(() => {
   vi.mocked(client.get).mockReset();
@@ -133,5 +140,41 @@ describe("resolveRunId", () => {
 
     await expect(resolveRunId("33333333")).rejects.toThrow(/run #1/);
     await expect(resolveRunId("33333333")).rejects.toThrow(/run #2/);
+  });
+});
+
+describe("resolveDatasetId", () => {
+  it("returns full UUIDs unchanged without an API call", async () => {
+    const result = await resolveDatasetId(DATASET_A);
+    expect(result).toBe(DATASET_A);
+    expect(client.get).not.toHaveBeenCalled();
+  });
+
+  it("resolves a unique prefix from /datasets", async () => {
+    vi.mocked(client.get).mockResolvedValue({
+      data: [{ id: DATASET_A, name: "Training data" }],
+      meta: { page: 1, per_page: 100, total: 1 },
+    });
+
+    const result = await resolveDatasetId(DATASET_A.slice(0, 8));
+    expect(result).toBe(DATASET_A);
+    expect(client.get).toHaveBeenCalledWith(
+      "/datasets",
+      { page: 1, per_page: 100 },
+      undefined,
+    );
+  });
+
+  it("includes dataset names in ambiguity hints", async () => {
+    vi.mocked(client.get).mockResolvedValue({
+      data: [
+        { id: "44444444-4444-4444-8444-aaaaaaaaaaaa", name: "Alpha" },
+        { id: "44444444-4444-4444-8444-bbbbbbbbbbbb", name: "Beta" },
+      ],
+      meta: { page: 1, per_page: 100, total: 2 },
+    });
+
+    await expect(resolveDatasetId("44444444")).rejects.toThrow(/Alpha/);
+    await expect(resolveDatasetId("44444444")).rejects.toThrow(/Beta/);
   });
 });

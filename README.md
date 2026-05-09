@@ -54,12 +54,12 @@ tt push
 
 ```bash
 tt runs start <spec-id>
-tt runs start <spec-id> --dataset <dataset-id> --train-ratio 0.8 --validation-ratio 0.1 --test-ratio 0.1
+tt runs start <spec-id> --dataset <dataset-id-or-prefix> --train-ratio 0.8 --validation-ratio 0.1 --test-ratio 0.1
 tt runs start <spec-id> --no-llm-judge
 tt runs watch <run-id>
 ```
 
-Tip: use `tt specs list`, `tt datasets list`, `tt runs list`, and `tt models list` to find IDs.
+Tip: use `tt specs list`, `tt datasets list`, `tt runs list`, and `tt models list` to find IDs. Spec, run, and dataset commands accept full UUIDs or unambiguous ID prefixes.
 
 ## Typical Workflows
 
@@ -79,7 +79,7 @@ tt specs update <spec-id> --file updates.json
 tt runs list --spec <spec-id>
 tt runs get <run-id>
 tt runs start <spec-id> --epochs 5 --lr 0.0001 --batch-size 8
-tt runs start <spec-id> --dataset <dataset-id> --train-ratio 0.8 --validation-ratio 0.1 --test-ratio 0.1
+tt runs start <spec-id> --dataset <dataset-id-or-prefix> --train-ratio 0.8 --validation-ratio 0.1 --test-ratio 0.1
 tt runs start <spec-id> --no-llm-judge
 tt runs cancel <run-id>
 
@@ -93,7 +93,7 @@ tt models list
 tt models get <model-id>
 ```
 
-Use `--dataset <dataset-id>` with `tt runs start` to train from an uploaded dataset instead of inline spec examples. Add `--train-ratio`, `--validation-ratio`, and `--test-ratio` to override the default 80/10/10 split.
+Use `--dataset <dataset-id-or-prefix>` with `tt runs start` to train from an uploaded dataset instead of inline spec examples. Add `--train-ratio`, `--validation-ratio`, and `--test-ratio` to override the default 80/10/10 split.
 
 Use `--no-llm-judge` with `tt runs start` to opt out of Bedrock LLM judging for a new run.
 

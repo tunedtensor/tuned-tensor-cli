@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { existsSync, readFileSync } from "node:fs";
 import { get, del, upload, type ClientOpts } from "../client.js";
+import { resolveDatasetId } from "../resolve.js";
 import {
   printTable,
   printDetail,
@@ -125,10 +126,11 @@ export function registerDatasetsCommands(parent: Command) {
   datasets
     .command("get")
     .description("Show dataset details")
-    .argument("<id>", "Dataset ID")
+    .argument("<id>", "Dataset ID (full UUID or 4+ char prefix)")
     .action(async (id: string) => {
       const opts = parent.opts() as ClientOpts;
-      const { data } = await get<Dataset>(`/datasets/${id}`, undefined, opts);
+      const fullId = await resolveDatasetId(id, opts);
+      const { data } = await get<Dataset>(`/datasets/${fullId}`, undefined, opts);
 
       if (isJsonMode()) return printJson(data);
 
@@ -189,12 +191,13 @@ export function registerDatasetsCommands(parent: Command) {
   datasets
     .command("delete")
     .description("Delete a dataset")
-    .argument("<id>", "Dataset ID")
+    .argument("<id>", "Dataset ID (full UUID or 4+ char prefix)")
     .action(async (id: string) => {
       const opts = parent.opts() as ClientOpts;
-      await del(`/datasets/${id}`, opts);
+      const fullId = await resolveDatasetId(id, opts);
+      await del(`/datasets/${fullId}`, opts);
 
-      if (isJsonMode()) return printJson({ id, deleted: true });
-      printSuccess(`Dataset deleted: ${shortId(id)}`);
+      if (isJsonMode()) return printJson({ id: fullId, deleted: true });
+      printSuccess(`Dataset deleted: ${shortId(fullId)}`);
     });
 }
