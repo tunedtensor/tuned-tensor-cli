@@ -18,6 +18,7 @@ vi.mock("../../client.js", async (importOriginal) => {
 });
 
 const FAKE_KEY = "tt_" + "a".repeat(48);
+const DATASET_UUID = "44444444-4444-4444-8444-444444444444";
 
 function buildProgram() {
   const program = new Command();
@@ -31,7 +32,7 @@ function buildProgram() {
 }
 
 const mockDataset = {
-  id: "ds-12345678-abcd",
+  id: DATASET_UUID,
   name: "training-data",
   description: null,
   storage_path: "/uploads/training-data.jsonl",
@@ -85,9 +86,35 @@ describe("datasets commands", () => {
       vi.mocked(client.get).mockResolvedValue({ data: mockDataset });
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
-      await program.parseAsync(["node", "tt", "datasets", "get", "ds-1234"]);
+      await program.parseAsync(["node", "tt", "datasets", "get", DATASET_UUID]);
       expect(client.get).toHaveBeenCalledWith(
-        "/datasets/ds-1234",
+        `/datasets/${DATASET_UUID}`,
+        undefined,
+        expect.anything(),
+      );
+    });
+
+    it("resolves a dataset ID prefix before fetching details", async () => {
+      vi.mocked(client.get)
+        .mockResolvedValueOnce({
+          data: [mockDataset],
+          meta: { page: 1, per_page: 100, total: 1 },
+        })
+        .mockResolvedValueOnce({ data: mockDataset });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "datasets", "get", DATASET_UUID.slice(0, 8),
+      ]);
+      expect(client.get).toHaveBeenNthCalledWith(
+        1,
+        "/datasets",
+        { page: 1, per_page: 100 },
+        expect.anything(),
+      );
+      expect(client.get).toHaveBeenNthCalledWith(
+        2,
+        `/datasets/${DATASET_UUID}`,
         undefined,
         expect.anything(),
       );
@@ -102,7 +129,7 @@ describe("datasets commands", () => {
       vi.mocked(client.get).mockResolvedValue({ data: dsWithErrors });
       const spy = vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
-      await program.parseAsync(["node", "tt", "datasets", "get", "ds-1234"]);
+      await program.parseAsync(["node", "tt", "datasets", "get", DATASET_UUID]);
       const allOutput = spy.mock.calls.map((c) => String(c[0])).join("\n");
       expect(allOutput).toContain("Row 3 missing");
     });
@@ -196,9 +223,9 @@ describe("datasets commands", () => {
       vi.mocked(client.del).mockResolvedValue({ data: null as never });
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
-      await program.parseAsync(["node", "tt", "datasets", "delete", "ds-1234"]);
+      await program.parseAsync(["node", "tt", "datasets", "delete", DATASET_UUID]);
       expect(client.del).toHaveBeenCalledWith(
-        "/datasets/ds-1234",
+        `/datasets/${DATASET_UUID}`,
         expect.anything(),
       );
     });

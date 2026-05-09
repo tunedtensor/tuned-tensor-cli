@@ -36,6 +36,7 @@ function buildProgram() {
 
 const SPEC_UUID = "11111111-1111-4111-8111-111111111111";
 const RUN_UUID = "33333333-3333-4333-8333-333333333333";
+const DATASET_UUID = "00000000-0000-4000-8000-000000000123";
 
 const mockRun = {
   id: RUN_UUID,
@@ -169,7 +170,7 @@ describe("runs commands", () => {
       const program = buildProgram();
       await program.parseAsync([
         "node", "tt", "runs", "start", SPEC_UUID,
-        "--dataset", "00000000-0000-0000-0000-000000000123",
+        "--dataset", DATASET_UUID,
         "--train-ratio", "0.7",
         "--validation-ratio", "0.2",
         "--test-ratio", "0.1",
@@ -177,9 +178,35 @@ describe("runs commands", () => {
       expect(client.post).toHaveBeenCalledWith(
         `/behavior-specs/${SPEC_UUID}/runs`,
         {
-          dataset_id: "00000000-0000-0000-0000-000000000123",
+          dataset_id: DATASET_UUID,
           split_ratios: { train: 0.7, validation: 0.2, test: 0.1 },
         },
+        expect.anything(),
+      );
+    });
+
+    it("resolves a dataset ID prefix before posting", async () => {
+      vi.mocked(client.get).mockResolvedValueOnce({
+        data: [{ id: DATASET_UUID, name: "Training data" }],
+        meta: { page: 1, per_page: 100, total: 1 },
+      });
+      vi.mocked(client.post).mockResolvedValue({ data: mockRun });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "runs", "start", SPEC_UUID,
+        "--dataset", DATASET_UUID.slice(0, 8),
+      ]);
+
+      expect(client.get).toHaveBeenCalledWith(
+        "/datasets",
+        { page: 1, per_page: 100 },
+        expect.anything(),
+      );
+      expect(client.post).toHaveBeenCalledWith(
+        `/behavior-specs/${SPEC_UUID}/runs`,
+        { dataset_id: DATASET_UUID },
         expect.anything(),
       );
     });

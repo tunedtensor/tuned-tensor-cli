@@ -29,15 +29,15 @@ export function isFullUuid(value: string): boolean {
 
 async function resolvePrefix<T extends Identifiable>(
   prefix: string,
-  kind: "spec" | "run",
+  kind: "spec" | "run" | "dataset",
   listPath: string,
   describe: (item: T) => string,
   opts?: ClientOpts,
 ): Promise<string> {
   if (isFullUuid(prefix)) return prefix;
 
-  const noun = kind === "spec" ? "spec" : "run";
-  const listCmd = kind === "spec" ? "tt specs list --json" : "tt runs list --json";
+  const noun = kind;
+  const listCmd = `tt ${kind}s list --json`;
 
   if (prefix.length < MIN_PREFIX_LEN) {
     throw new ResolveError(
@@ -91,6 +91,16 @@ export function resolveRunId(prefix: string, opts?: ClientOpts): Promise<string>
     "run",
     "/runs",
     (r) => `${r.id}${r.run_number != null ? `  (run #${r.run_number})` : ""}`,
+    opts,
+  );
+}
+
+export function resolveDatasetId(prefix: string, opts?: ClientOpts): Promise<string> {
+  return resolvePrefix<Identifiable>(
+    prefix,
+    "dataset",
+    "/datasets",
+    (d) => `${d.id}${d.name ? `  (${d.name})` : ""}`,
     opts,
   );
 }
