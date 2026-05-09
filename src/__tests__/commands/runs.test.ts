@@ -161,6 +161,29 @@ describe("runs commands", () => {
       );
     });
 
+
+
+    it("passes dataset and split ratios when provided", async () => {
+      vi.mocked(client.post).mockResolvedValue({ data: mockRun });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "runs", "start", SPEC_UUID,
+        "--dataset", "00000000-0000-0000-0000-000000000123",
+        "--train-ratio", "0.7",
+        "--validation-ratio", "0.2",
+        "--test-ratio", "0.1",
+      ]);
+      expect(client.post).toHaveBeenCalledWith(
+        `/behavior-specs/${SPEC_UUID}/runs`,
+        {
+          dataset_id: "00000000-0000-0000-0000-000000000123",
+          split_ratios: { train: 0.7, validation: 0.2, test: 0.1 },
+        },
+        expect.anything(),
+      );
+    });
+
     it("resolves a spec ID prefix before posting", async () => {
       vi.mocked(client.get).mockResolvedValue({
         data: [{ id: SPEC_UUID, name: "Match" }],

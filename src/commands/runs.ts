@@ -176,6 +176,10 @@ export function registerRunsCommands(parent: Command) {
     .option("--epochs <n>", "Number of training epochs")
     .option("--lr <rate>", "Learning rate")
     .option("--batch-size <n>", "Batch size")
+    .option("--dataset <id>", "Dataset ID to use instead of inline spec examples")
+    .option("--train-ratio <ratio>", "Dataset training split ratio (default: 0.8 when any split ratio is set)")
+    .option("--validation-ratio <ratio>", "Dataset validation split ratio (default: 0.1 when any split ratio is set)")
+    .option("--test-ratio <ratio>", "Dataset test split ratio (default: 0.1 when any split ratio is set)")
     .option("--lora-rank <n>", "LoRA rank")
     .option("--lora-alpha <n>", "LoRA alpha")
     .action(async (specId: string, cmdOpts) => {
@@ -183,6 +187,21 @@ export function registerRunsCommands(parent: Command) {
       const body: Record<string, unknown> = {};
 
       if (cmdOpts.augment === false) body.augment = false;
+      if (cmdOpts.dataset) body.dataset_id = cmdOpts.dataset;
+
+      const splitRatioOptions = [
+        cmdOpts.trainRatio,
+        cmdOpts.validationRatio,
+        cmdOpts.testRatio,
+      ];
+      if (splitRatioOptions.some((value) => value != null)) {
+        body.split_ratios = {
+          train: cmdOpts.trainRatio != null ? Number(cmdOpts.trainRatio) : 0.8,
+          validation:
+            cmdOpts.validationRatio != null ? Number(cmdOpts.validationRatio) : 0.1,
+          test: cmdOpts.testRatio != null ? Number(cmdOpts.testRatio) : 0.1,
+        };
+      }
 
       const hp: Record<string, unknown> = {};
       if (cmdOpts.epochs) hp.n_epochs = Number(cmdOpts.epochs);
