@@ -33,8 +33,10 @@ tt auth status
 ```bash
 tt init
 # or:
-tt init --name "Customer Support Bot" --model "meta-llama/Llama-3.2-3B-Instruct"
+tt init --name "Customer Support Bot" --model "Qwen/Qwen3.5-2B"
 ```
+
+Supported spec base models are `Qwen/Qwen3.5-2B`, `google/gemma-4-E2B-it`, and `google/gemma-4-26B-A4B-it`.
 
 3) **Run evals**
 
@@ -178,7 +180,7 @@ npm test
 
 ## Troubleshooting
 
-`tt specs create --name "..." --model "..."` (without `--file`) may return a `500` from the API. Use `--file spec.json` when possible.
+If the API rejects a spec with a generic server error, check that `base_model` is one of the supported spec base models listed above.
 
 ## License
 

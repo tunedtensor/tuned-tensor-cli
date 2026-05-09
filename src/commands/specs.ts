@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { get, post, put, del, type ClientOpts } from "../client.js";
 import { resolveSpecId } from "../resolve.js";
+import { canonicalizeBaseModel, canonicalizeSpecBaseModel } from "../base-models.js";
 import {
   printTable,
   printDetail,
@@ -70,7 +71,7 @@ function loadSpecBody(filePath: string, mode: "create" | "update"): Record<strin
     );
   }
 
-  return body;
+  return canonicalizeSpecBaseModel(body);
 }
 
 interface BehaviorSpec {
@@ -176,7 +177,7 @@ export function registerSpecsCommands(parent: Command) {
         body = loadSpecBody(cmdOpts.file, "create");
       } else if (cmdOpts.name) {
         body = { name: cmdOpts.name };
-        if (cmdOpts.model) body.base_model = cmdOpts.model;
+        if (cmdOpts.model) body.base_model = canonicalizeBaseModel(cmdOpts.model);
       } else {
         throw new SpecBodyError("Provide --file or --name");
       }
@@ -203,7 +204,7 @@ export function registerSpecsCommands(parent: Command) {
       } else {
         body = {};
         if (cmdOpts.name) body.name = cmdOpts.name;
-        if (cmdOpts.model) body.base_model = cmdOpts.model;
+        if (cmdOpts.model) body.base_model = canonicalizeBaseModel(cmdOpts.model);
       }
 
       const fullId = await resolveSpecId(id, opts);

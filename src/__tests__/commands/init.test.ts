@@ -43,12 +43,25 @@ describe("init command", () => {
       "node", "tt", "init",
       "--file", "test-init-spec.json",
       "--name", "My Bot",
-      "--model", "gpt-4o",
+      "--model", "qwen/qwen3.5-2b-base",
     ]);
 
     const content = JSON.parse(readFileSync(TEST_FILE, "utf-8"));
     expect(content.name).toBe("My Bot");
-    expect(content.base_model).toBe("gpt-4o");
+    expect(content.base_model).toBe("Qwen/Qwen3.5-2B");
+  });
+
+  it("rejects unsupported models", async () => {
+    const program = buildProgram();
+    await expect(
+      program.parseAsync([
+        "node", "tt", "init",
+        "--file", "test-init-spec.json",
+        "--model", "Qwen/Qwen2.5-1.5B-Instruct",
+      ]),
+    ).rejects.toThrow(/Unsupported base_model/);
+
+    expect(existsSync(TEST_FILE)).toBe(false);
   });
 
   it("warns if file already exists", async () => {

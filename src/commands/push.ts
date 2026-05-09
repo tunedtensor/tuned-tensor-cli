@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { post, put, type ClientOpts } from "../client.js";
 import { printSuccess, printJson, isJsonMode, shortId } from "../output.js";
 import { loadSpec, DEFAULT_SPEC_FILE } from "./init.js";
+import { canonicalizeSpecBaseModel } from "../base-models.js";
 
 interface RemoteSpec {
   id: string;
@@ -21,7 +22,8 @@ export function registerPushCommand(parent: Command) {
       const filePath = resolve(cmdOpts.file);
       const spec = loadSpec(cmdOpts.file);
 
-      const { id, eval_cases, ...body } = spec as unknown as Record<string, unknown>;
+      const { id, eval_cases, ...rawBody } = spec as unknown as Record<string, unknown>;
+      const body = canonicalizeSpecBaseModel(rawBody);
 
       let data: RemoteSpec;
 
