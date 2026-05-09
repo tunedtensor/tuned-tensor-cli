@@ -42,7 +42,7 @@ const mockSpec = {
   guidelines: ["Be nice"],
   examples: [{ input: "hi", output: "hello" }],
   constraints: ["No bad words"],
-  base_model: "meta-llama/Llama-3.2-3B-Instruct",
+  base_model: "Qwen/Qwen3.5-2B",
   created_at: "2024-01-01T00:00:00Z",
   updated_at: "2024-01-01T00:00:00Z",
   _run_count: 2,
@@ -125,13 +125,42 @@ describe("specs commands", () => {
       await program.parseAsync([
         "node", "tt", "specs", "create",
         "--name", "My Spec",
-        "--model", "meta-llama/Llama-3.2-3B-Instruct",
+        "--model", "Qwen/Qwen3.5-2B",
       ]);
       expect(client.post).toHaveBeenCalledWith(
         "/behavior-specs",
-        { name: "My Spec", base_model: "meta-llama/Llama-3.2-3B-Instruct" },
+        { name: "My Spec", base_model: "Qwen/Qwen3.5-2B" },
         expect.anything(),
       );
+    });
+
+    it("canonicalizes supported model aliases before posting", async () => {
+      vi.mocked(client.post).mockResolvedValue({ data: mockSpec });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "specs", "create",
+        "--name", "My Spec",
+        "--model", "qwen/qwen3.5-2b-base",
+      ]);
+      expect(client.post).toHaveBeenCalledWith(
+        "/behavior-specs",
+        { name: "My Spec", base_model: "Qwen/Qwen3.5-2B" },
+        expect.anything(),
+      );
+    });
+
+    it("rejects unsupported inline model values before posting", async () => {
+      const program = buildProgram();
+      await expect(
+        program.parseAsync([
+          "node", "tt", "specs", "create",
+          "--name", "My Spec",
+          "--model", "Qwen/Qwen2.5-1.5B-Instruct",
+        ]),
+      ).rejects.toThrow(/Unsupported base_model.*Qwen\/Qwen3\.5-2B/);
+
+      expect(client.post).not.toHaveBeenCalled();
     });
 
     describe("--file validation", () => {
@@ -150,7 +179,7 @@ describe("specs commands", () => {
       it("posts the file body when valid", async () => {
         const path = writeFixture("spec.json", {
           name: "From File",
-          base_model: "x/y",
+          base_model: "google/gemma-4-e2b",
           examples: [],
         });
         vi.mocked(client.post).mockResolvedValue({ data: mockSpec });
@@ -163,7 +192,7 @@ describe("specs commands", () => {
 
         expect(client.post).toHaveBeenCalledWith(
           "/behavior-specs",
-          { name: "From File", base_model: "x/y", examples: [] },
+          { name: "From File", base_model: "google/gemma-4-E2B-it", examples: [] },
           expect.anything(),
         );
       });
@@ -199,7 +228,7 @@ describe("specs commands", () => {
       it("warns on unknown top-level keys but still posts", async () => {
         const path = writeFixture("extra.json", {
           name: "Has Extras",
-          base_model: "x/y",
+          base_model: "Qwen/Qwen3.5-2B",
           totally_unknown_field: 42,
         });
         vi.mocked(client.post).mockResolvedValue({ data: mockSpec });
@@ -219,6 +248,21 @@ describe("specs commands", () => {
           expect.objectContaining({ totally_unknown_field: 42 }),
           expect.anything(),
         );
+      });
+
+      it("rejects unsupported file model values before posting", async () => {
+        const path = writeFixture("bad-model.json", {
+          name: "Bad Model",
+          base_model: "Qwen/Qwen2.5-1.5B-Instruct",
+          examples: [],
+        });
+
+        const program = buildProgram();
+        await expect(
+          program.parseAsync(["node", "tt", "specs", "create", "--file", path]),
+        ).rejects.toThrow(/Unsupported base_model/);
+
+        expect(client.post).not.toHaveBeenCalled();
       });
     });
   });

@@ -34,6 +34,8 @@ function buildProgram() {
 beforeEach(() => {
   setJsonMode(false);
   process.env.TUNED_TENSOR_API_KEY = FAKE_KEY;
+  vi.mocked(client.post).mockReset();
+  vi.mocked(client.put).mockReset();
   vi.spyOn(console, "log").mockImplementation(() => {});
 });
 
@@ -45,7 +47,7 @@ describe("push command", () => {
   it("creates a new spec when no id is present", async () => {
     const spec = {
       name: "Test Bot",
-      base_model: "llama3.2",
+      base_model: "qwen/qwen3.5-2b-base",
       system_prompt: "You are helpful.",
       guidelines: [],
       constraints: [],
@@ -64,7 +66,7 @@ describe("push command", () => {
 
     expect(client.post).toHaveBeenCalledWith(
       "/behavior-specs",
-      expect.objectContaining({ name: "Test Bot" }),
+      expect.objectContaining({ name: "Test Bot", base_model: "Qwen/Qwen3.5-2B" }),
       expect.anything(),
     );
 
@@ -76,7 +78,7 @@ describe("push command", () => {
     const spec = {
       id: "spec-existing-id",
       name: "Test Bot",
-      base_model: "llama3.2",
+      base_model: "Qwen/Qwen3.5-2B",
       system_prompt: "Updated prompt",
       guidelines: [],
       constraints: [],
@@ -103,7 +105,7 @@ describe("push command", () => {
   it("strips eval_cases before pushing", async () => {
     const spec = {
       name: "Test Bot",
-      base_model: "llama3.2",
+      base_model: "Qwen/Qwen3.5-2B",
       system_prompt: "Helpful",
       guidelines: [],
       constraints: [],
@@ -123,5 +125,24 @@ describe("push command", () => {
 
     const body = vi.mocked(client.post).mock.calls[0][1] as Record<string, unknown>;
     expect(body.eval_cases).toBeUndefined();
+  });
+
+  it("rejects unsupported local spec model values before pushing", async () => {
+    const spec = {
+      name: "Test Bot",
+      base_model: "Qwen/Qwen2.5-1.5B-Instruct",
+      system_prompt: "Helpful",
+      guidelines: [],
+      constraints: [],
+      examples: [{ input: "Hi", output: "Hello!" }],
+    };
+    writeFileSync(TEST_FILE, JSON.stringify(spec));
+
+    const program = buildProgram();
+    await expect(
+      program.parseAsync(["node", "tt", "push", "--file", "test-push-spec.json"]),
+    ).rejects.toThrow(/Unsupported base_model/);
+
+    expect(client.post).not.toHaveBeenCalled();
   });
 });

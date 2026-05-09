@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.4.6
+
+### Added
+
+- **`tt runs start --dataset`** — Start a run from an uploaded dataset instead of inline spec examples. Optional `--train-ratio`, `--validation-ratio`, and `--test-ratio` flags send explicit dataset split ratios.
+
+### Fixed
+
+- **Spec base models** — Align CLI defaults and validation with the Tuned Tensor API enum: `Qwen/Qwen3.5-2B`, `google/gemma-4-E2B-it`, and `google/gemma-4-26B-A4B-it`. Unsupported models now fail locally instead of bubbling up as generic API errors.
+
+### Docs
+
+- **Billing guide** — Remove stale signup-bonus wording. The README now says new accounts start at a zero balance and should top up before starting fine-tuning runs.
+
 ## 0.4.5
 
 ### Added

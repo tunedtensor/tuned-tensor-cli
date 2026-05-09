@@ -3,13 +3,14 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { printSuccess, printError, printWarning } from "../output.js";
 import type { LocalSpec } from "../eval/types.js";
+import { canonicalizeBaseModel } from "../base-models.js";
 
 const DEFAULT_SPEC_FILE = "tunedtensor.json";
 
 const SCAFFOLD: LocalSpec = {
   name: "My Agent",
   description: "",
-  base_model: "meta-llama/Llama-3.2-3B-Instruct",
+  base_model: "Qwen/Qwen3.5-2B",
   system_prompt: "You are a helpful assistant.",
   guidelines: [],
   constraints: [],
@@ -36,7 +37,7 @@ export function registerInitCommand(parent: Command) {
 
       const spec: LocalSpec = { ...SCAFFOLD };
       if (cmdOpts.name) spec.name = cmdOpts.name;
-      if (cmdOpts.model) spec.base_model = cmdOpts.model;
+      if (cmdOpts.model) spec.base_model = canonicalizeBaseModel(cmdOpts.model);
 
       writeFileSync(filePath, JSON.stringify(spec, null, 2) + "\n");
       printSuccess(`Created ${cmdOpts.file}`);
