@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { get, del, upload, type ClientOpts } from "../client.js";
 import {
   printTable,
@@ -32,6 +32,60 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function validateDatasetFile(file: string): void {
+  const lines = readFileSync(file, "utf8").split(/\r?\n/);
+  const errors: string[] = [];
+  let rowCount = 0;
+
+  for (const [index, rawLine] of lines.entries()) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    rowCount += 1;
+    const rowNumber = index + 1;
+    let row: unknown;
+
+    try {
+      row = JSON.parse(line);
+    } catch {
+      errors.push(`Row ${rowNumber}: invalid JSON`);
+      continue;
+    }
+
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      errors.push(`Row ${rowNumber}: expected an object with "input" and "output" fields`);
+      continue;
+    }
+
+    const record = row as Record<string, unknown>;
+    if ("messages" in record && !("input" in record) && !("output" in record)) {
+      errors.push(
+        `Row ${rowNumber}: found OpenAI SFT-style "messages"; Tuned Tensor datasets require flat "input" and "output" strings`,
+      );
+      continue;
+    }
+
+    if (typeof record.input !== "string") {
+      errors.push(`Row ${rowNumber}: missing string "input" field`);
+    }
+    if (typeof record.output !== "string") {
+      errors.push(`Row ${rowNumber}: missing string "output" field`);
+    }
+  }
+
+  if (rowCount === 0) {
+    errors.push("File contains no JSONL rows");
+  }
+
+  if (errors.length > 0) {
+    const preview = errors.slice(0, 5).join("\n");
+    const suffix = errors.length > 5 ? `\n...and ${errors.length - 5} more error(s)` : "";
+    throw new Error(
+      `Invalid dataset format. Each JSONL row must be {"input": "...", "output": "..."}.\n${preview}${suffix}`,
+    );
+  }
 }
 
 export function registerDatasetsCommands(parent: Command) {
@@ -111,6 +165,8 @@ export function registerDatasetsCommands(parent: Command) {
         printError(`File not found: ${file}`);
         process.exit(1);
       }
+
+      validateDatasetFile(file);
 
       const fields: Record<string, string> = {
         name: cmdOpts.name || file.split("/").pop()!.replace(/\.jsonl?$/, ""),

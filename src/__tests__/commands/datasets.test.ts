@@ -45,6 +45,7 @@ const mockDataset = {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   setJsonMode(false);
   process.env.TUNED_TENSOR_API_KEY = FAKE_KEY;
 });
@@ -144,6 +145,49 @@ describe("datasets commands", () => {
           "node", "tt", "datasets", "upload", "/nonexistent/data.jsonl",
         ]),
       ).rejects.toThrow();
+    });
+
+    it("rejects OpenAI messages format before uploading", async () => {
+      writeFileSync(
+        tmpFile,
+        '{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"}]}\n',
+      );
+      const program = buildProgram();
+
+      await expect(
+        program.parseAsync(["node", "tt", "datasets", "upload", tmpFile]),
+      ).rejects.toThrow(/OpenAI SFT-style "messages".*flat "input" and "output"/s);
+      expect(client.upload).not.toHaveBeenCalled();
+    });
+
+    it("rejects rows missing input or output before uploading", async () => {
+      writeFileSync(tmpFile, '{"input":"hi"}\n{"output":"hello"}\n');
+      const program = buildProgram();
+
+      await expect(
+        program.parseAsync(["node", "tt", "datasets", "upload", tmpFile]),
+      ).rejects.toThrow(/missing string "output".*missing string "input"/s);
+      expect(client.upload).not.toHaveBeenCalled();
+    });
+
+    it("rejects invalid JSONL before uploading", async () => {
+      writeFileSync(tmpFile, '{"input":"hi","output":"hello"\n');
+      const program = buildProgram();
+
+      await expect(
+        program.parseAsync(["node", "tt", "datasets", "upload", tmpFile]),
+      ).rejects.toThrow(/invalid JSON/);
+      expect(client.upload).not.toHaveBeenCalled();
+    });
+
+    it("rejects empty files before uploading", async () => {
+      writeFileSync(tmpFile, "\n");
+      const program = buildProgram();
+
+      await expect(
+        program.parseAsync(["node", "tt", "datasets", "upload", tmpFile]),
+      ).rejects.toThrow(/no JSONL rows/);
+      expect(client.upload).not.toHaveBeenCalled();
     });
   });
 
