@@ -4,6 +4,7 @@
 
 ### Changed
 
+- `tt datasets upload` now uses the signed upload URL flow: request an upload URL, PUT the JSONL file directly to S3, then finalize the dataset with the API.
 - `tt eval` now validates the local `tunedtensor.json` only. It no longer requires `--model`, calls the Playground API, or runs response assertions.
 
 ## 0.4.7
