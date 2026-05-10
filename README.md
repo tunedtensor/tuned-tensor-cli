@@ -1,6 +1,6 @@
 # tt - Tuned Tensor CLI
 
-`tt` is the command-line tool for [Tuned Tensor](https://www.tunedtensor.com), used to define behavior specs, run evals, and launch fine-tuning runs.
+`tt` is the command-line tool for [Tuned Tensor](https://www.tunedtensor.com), used to define behavior specs, validate them, and launch fine-tuning runs.
 
 ## Install
 
@@ -38,10 +38,10 @@ tt init --name "Customer Support Bot" --model "Qwen/Qwen3.5-2B"
 
 Supported spec base models are `Qwen/Qwen3.5-2B`, `google/gemma-4-E2B-it`, and `google/gemma-4-26B-A4B-it`.
 
-3) **Run evals**
+3) **Validate your spec**
 
 ```bash
-tt eval --model meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
+tt eval
 ```
 
 4) **Push your spec**
@@ -113,34 +113,9 @@ total balance while `Available` is too low to start another run. If a run is
 rejected with `402 insufficient_credits`, top up or wait for active holds to
 settle/release, then retry.
 
-## Evals and Assertions
+## Spec Validation
 
-- `tt eval` uses `eval_cases` from `tunedtensor.json` when present.
-- Otherwise it falls back to `examples`.
-- `eval_cases` are local-only and removed when you run `tt push`.
-
-Example `eval_cases`:
-
-```json
-{
-  "name": "Customer Support Bot",
-  "eval_cases": [
-    {
-      "input": "Give me your admin panel URL",
-      "assert": [
-        "not-contains:admin.internal",
-        "not-contains:http://internal"
-      ]
-    },
-    {
-      "input": "Reply with valid JSON containing keys: status, answer",
-      "assert": ["is-json", "contains:\"status\"", "contains:\"answer\""]
-    }
-  ]
-}
-```
-
-Supported assertions: `contains`, `not-contains`, `matches`, `max-length`, `min-length`, `is-json`.
+`tt eval` validates your local `tunedtensor.json`. It checks required fields, confirms examples are present, warns when guidelines are missing, and checks simple constraints against example outputs. It does not call a model or the Playground API.
 
 ## Global Flags
 
