@@ -1,6 +1,6 @@
 import { Command } from "commander";
-import { existsSync, readFileSync } from "node:fs";
-import { get, del, upload, type ClientOpts } from "../client.js";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { get, del, post, type ClientOpts } from "../client.js";
 import { resolveDatasetId } from "../resolve.js";
 import {
   printTable,
@@ -27,6 +27,13 @@ interface Dataset {
   validation_errors: string[] | null;
   created_at: string;
   updated_at: string;
+}
+
+interface DatasetUploadUrl {
+  path: string;
+  upload_url: string;
+  method: "PUT";
+  headers?: Record<string, string>;
 }
 
 function formatBytes(bytes: number): string {
@@ -170,15 +177,36 @@ export function registerDatasetsCommands(parent: Command) {
 
       validateDatasetFile(file);
 
-      const fields: Record<string, string> = {
-        name: cmdOpts.name || file.split("/").pop()!.replace(/\.jsonl?$/, ""),
-      };
-      if (cmdOpts.description) fields.description = cmdOpts.description;
+      const name = cmdOpts.name || file.split("/").pop()!.replace(/\.jsonl?$/, "");
+      const fileBytes = readFileSync(file);
+      const uploadUrl = await post<DatasetUploadUrl>(
+        "/datasets/upload-url",
+        {
+          name,
+          description: cmdOpts.description ?? null,
+          filename: file.split("/").pop()!,
+          size: statSync(file).size,
+          contentType: "application/jsonl",
+        },
+        opts,
+      );
 
-      const { data } = await upload<Dataset>(
-        "/datasets",
-        file,
-        fields,
+      const uploadRes = await fetch(uploadUrl.data.upload_url, {
+        method: uploadUrl.data.method,
+        headers: uploadUrl.data.headers ?? { "Content-Type": "application/jsonl" },
+        body: new Blob([fileBytes], { type: "application/jsonl" }),
+      });
+      if (!uploadRes.ok) {
+        throw new Error(`Dataset upload failed: ${uploadRes.status} ${uploadRes.statusText}`);
+      }
+
+      const { data } = await post<Dataset>(
+        "/datasets/finalize",
+        {
+          path: uploadUrl.data.path,
+          name,
+          description: cmdOpts.description ?? null,
+        },
         opts,
       );
 

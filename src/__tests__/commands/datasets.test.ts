@@ -13,7 +13,7 @@ vi.mock("../../client.js", async (importOriginal) => {
     ...actual,
     get: vi.fn(),
     del: vi.fn(),
-    upload: vi.fn(),
+    post: vi.fn(),
   };
 });
 
@@ -47,6 +47,7 @@ const mockDataset = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
   setJsonMode(false);
   process.env.TUNED_TENSOR_API_KEY = FAKE_KEY;
 });
@@ -147,16 +148,45 @@ describe("datasets commands", () => {
     });
 
     it("uploads a file", async () => {
-      vi.mocked(client.upload).mockResolvedValue({ data: mockDataset });
+      vi.mocked(client.post)
+        .mockResolvedValueOnce({
+          data: {
+            path: "s3://tt-runs/users/user-1/datasets/upload.jsonl",
+            upload_url: "https://uploads.example.com/upload.jsonl",
+            method: "PUT",
+            headers: { "Content-Type": "application/jsonl" },
+          },
+        })
+        .mockResolvedValueOnce({ data: mockDataset });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({ ok: true }),
+      );
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
       await program.parseAsync([
         "node", "tt", "datasets", "upload", tmpFile,
       ]);
-      expect(client.upload).toHaveBeenCalledWith(
-        "/datasets",
-        tmpFile,
-        expect.objectContaining({ name: expect.stringContaining("tt-test-upload") }),
+      expect(client.post).toHaveBeenNthCalledWith(
+        1,
+        "/datasets/upload-url",
+        expect.objectContaining({
+          name: expect.stringContaining("tt-test-upload"),
+          filename: expect.stringContaining("tt-test-upload"),
+        }),
+        expect.anything(),
+      );
+      expect(fetch).toHaveBeenCalledWith(
+        "https://uploads.example.com/upload.jsonl",
+        expect.objectContaining({ method: "PUT" }),
+      );
+      expect(client.post).toHaveBeenNthCalledWith(
+        2,
+        "/datasets/finalize",
+        expect.objectContaining({
+          path: "s3://tt-runs/users/user-1/datasets/upload.jsonl",
+          name: expect.stringContaining("tt-test-upload"),
+        }),
         expect.anything(),
       );
     });
@@ -184,7 +214,7 @@ describe("datasets commands", () => {
       await expect(
         program.parseAsync(["node", "tt", "datasets", "upload", tmpFile]),
       ).rejects.toThrow(/OpenAI SFT-style "messages".*flat "input" and "output"/s);
-      expect(client.upload).not.toHaveBeenCalled();
+      expect(client.post).not.toHaveBeenCalled();
     });
 
     it("rejects rows missing input or output before uploading", async () => {
@@ -194,7 +224,7 @@ describe("datasets commands", () => {
       await expect(
         program.parseAsync(["node", "tt", "datasets", "upload", tmpFile]),
       ).rejects.toThrow(/missing string "output".*missing string "input"/s);
-      expect(client.upload).not.toHaveBeenCalled();
+      expect(client.post).not.toHaveBeenCalled();
     });
 
     it("rejects invalid JSONL before uploading", async () => {
@@ -204,7 +234,7 @@ describe("datasets commands", () => {
       await expect(
         program.parseAsync(["node", "tt", "datasets", "upload", tmpFile]),
       ).rejects.toThrow(/invalid JSON/);
-      expect(client.upload).not.toHaveBeenCalled();
+      expect(client.post).not.toHaveBeenCalled();
     });
 
     it("rejects empty files before uploading", async () => {
@@ -214,7 +244,7 @@ describe("datasets commands", () => {
       await expect(
         program.parseAsync(["node", "tt", "datasets", "upload", tmpFile]),
       ).rejects.toThrow(/no JSONL rows/);
-      expect(client.upload).not.toHaveBeenCalled();
+      expect(client.post).not.toHaveBeenCalled();
     });
   });
 
