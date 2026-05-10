@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- `tt eval` now validates the local `tunedtensor.json` only. It no longer requires `--model`, calls the Playground API, or runs response assertions.
+
 ## 0.4.7
 
 ### Fixed

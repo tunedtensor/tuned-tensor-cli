@@ -31,7 +31,7 @@ export function registerInitCommand(parent: Command) {
       const filePath = resolve(cmdOpts.file);
 
       if (existsSync(filePath)) {
-        printWarning(`${cmdOpts.file} already exists. Use tt eval to run evals or edit it directly.`);
+        printWarning(`${cmdOpts.file} already exists. Use tt eval to validate it or edit it directly.`);
         return;
       }
 
@@ -43,7 +43,7 @@ export function registerInitCommand(parent: Command) {
       printSuccess(`Created ${cmdOpts.file}`);
       console.log("\nNext steps:");
       console.log("  1. Edit the spec: system_prompt, guidelines, examples");
-      console.log("  2. Run evals:        tt eval --model <model-id>");
+      console.log("  2. Validate spec:    tt eval");
       console.log("  3. Push to remote:   tt push");
     });
 }
