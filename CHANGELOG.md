@@ -2,9 +2,17 @@
 
 ## Unreleased
 
+## 0.4.7
+
 ### Fixed
 
+- **Dataset format validation** — `tt datasets upload` validates JSONL locally before upload. Each line must be `{"input": "...", "output": "..."}` for the supervised format the API expects, with a short preview of the first bad row on failure.
+
 - **Dataset ID prefixes** — `tt runs start --dataset`, `tt datasets get`, and `tt datasets delete` now resolve unambiguous dataset ID prefixes before calling the API. This matches the shortened IDs shown by `tt datasets list` while still sending the full UUID required by the API.
+
+### Security
+
+- **Dependencies** — Updated `package-lock.json` to clear `npm audit` findings on transitive packages.
 
 ## 0.4.6
 
