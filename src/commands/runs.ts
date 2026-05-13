@@ -182,6 +182,8 @@ export function registerRunsCommands(parent: Command) {
     .option("--test-ratio <ratio>", "Dataset test split ratio (default: 0.1 when any split ratio is set)")
     .option("--lora-rank <n>", "LoRA rank")
     .option("--lora-alpha <n>", "LoRA alpha")
+    .option("--max-eval-examples <n>", "Max examples for the primary eval pass")
+    .option("--max-test-eval-examples <n>", "Max examples for the secondary test eval pass")
     .action(async (specId: string, cmdOpts) => {
       const opts = parent.opts() as ClientOpts;
       const body: Record<string, unknown> = {};
@@ -209,6 +211,8 @@ export function registerRunsCommands(parent: Command) {
       if (cmdOpts.batchSize) hp.batch_size = Number(cmdOpts.batchSize);
       if (cmdOpts.loraRank) hp.lora_rank = Number(cmdOpts.loraRank);
       if (cmdOpts.loraAlpha) hp.lora_alpha = Number(cmdOpts.loraAlpha);
+      if (cmdOpts.maxEvalExamples) hp.max_eval_examples = Number(cmdOpts.maxEvalExamples);
+      if (cmdOpts.maxTestEvalExamples) hp.max_test_eval_examples = Number(cmdOpts.maxTestEvalExamples);
       if (cmdOpts.llmJudge === false) body.use_llm_judge = false;
       if (Object.keys(hp).length) body.hyperparameters = hp;
 
