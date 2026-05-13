@@ -95,6 +95,8 @@ tt models get <model-id>
 
 Use `--dataset <dataset-id-or-prefix>` with `tt runs start` to train from an uploaded dataset instead of inline spec examples. Add `--train-ratio`, `--validation-ratio`, and `--test-ratio` to override the default 80/10/10 split.
 
+Use `--max-eval-examples <n>` and `--max-test-eval-examples <n>` with `tt runs start` to cap primary and secondary test evaluation passes for larger datasets; the runs backend still clamps values to its configured ceiling.
+
 Use `--no-llm-judge` with `tt runs start` to opt out of Bedrock LLM judging for a new run.
 
 ## Billing & Credits

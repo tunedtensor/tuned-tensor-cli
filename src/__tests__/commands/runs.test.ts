@@ -162,7 +162,21 @@ describe("runs commands", () => {
       );
     });
 
-
+    it("passes eval cap hyperparameters when provided", async () => {
+      vi.mocked(client.post).mockResolvedValue({ data: mockRun });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "runs", "start", SPEC_UUID,
+        "--max-eval-examples", "64",
+        "--max-test-eval-examples", "32",
+      ]);
+      expect(client.post).toHaveBeenCalledWith(
+        `/behavior-specs/${SPEC_UUID}/runs`,
+        { hyperparameters: { max_eval_examples: 64, max_test_eval_examples: 32 } },
+        expect.anything(),
+      );
+    });
 
     it("passes dataset and split ratios when provided", async () => {
       vi.mocked(client.post).mockResolvedValue({ data: mockRun });
