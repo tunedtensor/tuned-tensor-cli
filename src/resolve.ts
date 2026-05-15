@@ -29,7 +29,7 @@ export function isFullUuid(value: string): boolean {
 
 async function resolvePrefix<T extends Identifiable>(
   prefix: string,
-  kind: "spec" | "run" | "dataset",
+  kind: "spec" | "run" | "dataset" | "model",
   listPath: string,
   describe: (item: T) => string,
   opts?: ClientOpts,
@@ -101,6 +101,16 @@ export function resolveDatasetId(prefix: string, opts?: ClientOpts): Promise<str
     "dataset",
     "/datasets",
     (d) => `${d.id}${d.name ? `  (${d.name})` : ""}`,
+    opts,
+  );
+}
+
+export function resolveModelId(prefix: string, opts?: ClientOpts): Promise<string> {
+  return resolvePrefix<Identifiable>(
+    prefix,
+    "model",
+    "/models",
+    (m) => `${m.id}${m.name ? `  (${m.name})` : ""}`,
     opts,
   );
 }

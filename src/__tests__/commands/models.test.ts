@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Command } from "commander";
+import { existsSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { registerModelsCommands } from "../../commands/models.js";
 import * as client from "../../client.js";
 import { setJsonMode } from "../../output.js";
@@ -37,6 +40,7 @@ const mockModel = {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   setJsonMode(false);
   process.env.TUNED_TENSOR_API_KEY = FAKE_KEY;
 });
@@ -105,6 +109,95 @@ describe("models commands", () => {
         "/models/model-1234",
         expect.anything(),
       );
+    });
+  });
+
+  describe("models download", () => {
+    it("downloads a model artifact to the requested path", async () => {
+      const outputPath = join(tmpdir(), `tt-model-download-${process.pid}.tar.gz`);
+      if (existsSync(outputPath)) rmSync(outputPath);
+
+      vi.mocked(client.get)
+        .mockResolvedValueOnce({
+          data: [mockModel],
+          meta: { page: 1, per_page: 100, total: 1 },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            url: "https://signed.example/model.tar.gz",
+            filename: "model.tar.gz",
+            expires_at: "2026-01-01T00:10:00Z",
+          },
+        });
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response("artifact-bytes", {
+          status: 200,
+          headers: { "content-length": "14" },
+        }),
+      );
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      const program = buildProgram();
+      await program.parseAsync([
+        "node",
+        "tt",
+        "models",
+        "download",
+        "model-1234",
+        "--output",
+        outputPath,
+      ]);
+
+      expect(client.get).toHaveBeenNthCalledWith(
+        1,
+        "/models",
+        { page: 1, per_page: 100 },
+        expect.anything(),
+      );
+      expect(client.get).toHaveBeenNthCalledWith(
+        2,
+        "/models/model-12345678-abcd/download",
+        undefined,
+        expect.anything(),
+      );
+      expect(globalThis.fetch).toHaveBeenCalledWith("https://signed.example/model.tar.gz");
+      expect(readFileSync(outputPath, "utf8")).toBe("artifact-bytes");
+
+      rmSync(outputPath);
+    });
+
+    it("refuses to overwrite without --force", async () => {
+      const outputPath = join(tmpdir(), `tt-model-download-existing-${process.pid}.tar.gz`);
+      rmSync(outputPath, { force: true });
+      writeFileSync(outputPath, "existing");
+
+      vi.mocked(client.get)
+        .mockResolvedValueOnce({
+          data: [mockModel],
+          meta: { page: 1, per_page: 100, total: 1 },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            url: "https://signed.example/model.tar.gz",
+            filename: "model.tar.gz",
+            expires_at: "2026-01-01T00:10:00Z",
+          },
+        });
+
+      const program = buildProgram();
+      await expect(
+        program.parseAsync([
+          "node",
+          "tt",
+          "models",
+          "download",
+          "model-1234",
+          "--output",
+          outputPath,
+        ]),
+      ).rejects.toThrow("Output file already exists");
+
+      rmSync(outputPath, { force: true });
     });
   });
 });
