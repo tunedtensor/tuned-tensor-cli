@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.4.8
+
+### Added
+
+- **`tt models download`** — Download locally stored SageMaker model artifacts through the API when a model has a downloadable S3 artifact.
+- **Run eval caps** — `tt runs start` now accepts `--max-eval-examples` and `--max-test-eval-examples` for small smoke tests and cost-controlled runs.
+
 ### Changed
 
 - `tt datasets upload` now uses the signed upload URL flow: request an upload URL, PUT the JSONL file directly to S3, then finalize the dataset with the API.
