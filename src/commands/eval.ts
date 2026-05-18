@@ -37,7 +37,11 @@ export function registerEvalCommand(parent: Command) {
 function printValidation(checks: ValidationCheck[]) {
   console.log(chalk.bold("Spec Validation"));
   for (const check of checks) {
-    const icon = check.passed ? chalk.green("✓") : chalk.red("✗");
+    const icon = check.passed
+      ? chalk.green("✓")
+      : check.severity === "warning"
+        ? chalk.yellow("⚠")
+        : chalk.red("✗");
     const msg = check.message
       ? chalk.dim(` — ${check.message}`)
       : "";

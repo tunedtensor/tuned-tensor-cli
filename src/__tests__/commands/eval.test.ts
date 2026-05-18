@@ -86,6 +86,24 @@ describe("eval command", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("exits 0 for default init scaffold (empty guidelines are a warning only)", async () => {
+    writeFileSync(TEST_FILE, JSON.stringify({
+      name: "Workflow Test",
+      description: "",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "You are a helpful assistant.",
+      guidelines: [],
+      constraints: [],
+      examples: [{ input: "Hello", output: "Hi! How can I help you today?" }],
+      eval_cases: [],
+    }));
+
+    const program = buildProgram();
+    await program.parseAsync(["node", "tt", "eval", "--file", "test-eval-spec.json"]);
+
+    expect(process.exitCode).toBe(0);
+  });
+
   it("outputs validation JSON in json mode", async () => {
     setJsonMode(true);
     const spy = vi.spyOn(console, "log");

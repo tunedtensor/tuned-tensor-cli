@@ -54,6 +54,8 @@ export interface ValidationResult {
 export interface ValidationCheck {
   name: string;
   passed: boolean;
+  /** When set to "warning", a failed check does not make the spec invalid. */
+  severity?: "error" | "warning";
   message?: string;
 }
 

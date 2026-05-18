@@ -40,6 +40,7 @@ export function validateSpec(spec: LocalSpec): ValidationResult {
   checks.push({
     name: "Has guidelines",
     passed: (spec.guidelines?.length ?? 0) > 0,
+    severity: "warning",
     message:
       (spec.guidelines?.length ?? 0) > 0
         ? undefined
@@ -59,7 +60,7 @@ export function validateSpec(spec: LocalSpec): ValidationResult {
   }
 
   return {
-    valid: checks.every((c) => c.passed),
+    valid: checks.every((c) => c.passed || c.severity === "warning"),
     checks,
   };
 }

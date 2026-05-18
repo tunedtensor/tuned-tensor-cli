@@ -40,10 +40,12 @@ describe("validateSpec", () => {
     expect(result.valid).toBe(false);
   });
 
-  it("warns when guidelines are empty", () => {
+  it("warns when guidelines are empty without failing validation", () => {
     const result = validateSpec({ ...validSpec, guidelines: [] });
     const guideCheck = result.checks.find((c) => c.name === "Has guidelines");
     expect(guideCheck?.passed).toBe(false);
+    expect(guideCheck?.severity).toBe("warning");
+    expect(result.valid).toBe(true);
   });
 
   it("detects constraint violations in examples", () => {
