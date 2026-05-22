@@ -59,7 +59,7 @@ tt runs start <spec-id> --no-llm-judge
 tt runs watch <run-id>
 ```
 
-Tip: use `tt specs list`, `tt datasets list`, `tt runs list`, and `tt models list` to find IDs. Spec, run, and dataset commands accept full UUIDs or unambiguous ID prefixes.
+Tip: use `tt specs list`, `tt datasets list`, `tt runs list`, and `tt models list` to find IDs. Spec, run, dataset, and model commands accept full UUIDs or unambiguous ID prefixes.
 
 ## Typical Workflows
 

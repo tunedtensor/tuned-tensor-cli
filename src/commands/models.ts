@@ -101,10 +101,11 @@ export function registerModelsCommands(parent: Command) {
   models
     .command("get")
     .description("Show model details")
-    .argument("<id>", "Model ID")
+    .argument("<id>", "Model ID (full UUID or 4+ char prefix)")
     .action(async (id: string) => {
       const opts = parent.opts() as ClientOpts;
-      const { data } = await get<Model>(`/models/${id}`, undefined, opts);
+      const fullId = await resolveModelId(id, opts);
+      const { data } = await get<Model>(`/models/${fullId}`, undefined, opts);
 
       if (isJsonMode()) return printJson(data);
 
@@ -158,12 +159,13 @@ export function registerModelsCommands(parent: Command) {
   models
     .command("delete")
     .description("Delete a model")
-    .argument("<id>", "Model ID")
+    .argument("<id>", "Model ID (full UUID or 4+ char prefix)")
     .action(async (id: string) => {
       const opts = parent.opts() as ClientOpts;
-      await del(`/models/${id}`, opts);
+      const fullId = await resolveModelId(id, opts);
+      await del(`/models/${fullId}`, opts);
 
-      if (isJsonMode()) return printJson({ id, deleted: true });
-      printSuccess(`Model deleted: ${shortId(id)}`);
+      if (isJsonMode()) return printJson({ id: fullId, deleted: true });
+      printSuccess(`Model deleted: ${shortId(fullId)}`);
     });
 }
