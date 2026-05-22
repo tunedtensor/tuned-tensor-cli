@@ -1,7 +1,6 @@
 export const SUPPORTED_BASE_MODELS = [
   "google/gemma-4-E2B-it",
   "google/gemma-4-E4B-it",
-  "google/gemma-4-26B-A4B-it",
   "Qwen/Qwen3.5-2B",
   "Qwen/Qwen3.5-4B",
   "meta-llama/Llama-3.2-3B-Instruct",
@@ -25,9 +24,6 @@ for (const [alias, model] of [
   ["google/gemma-4-E4B", "google/gemma-4-E4B-it"],
   ["google/gemma-4-e4b", "google/gemma-4-E4B-it"],
   ["google/gemma-4-e4b-it", "google/gemma-4-E4B-it"],
-  ["google/gemma-4-26b-a4b-it", "google/gemma-4-26B-A4B-it"],
-  ["google/gemma-4-26B-A4B", "google/gemma-4-26B-A4B-it"],
-  ["google/gemma-4-26b-a4b", "google/gemma-4-26B-A4B-it"],
   ["qwen/qwen3.5-2b", "Qwen/Qwen3.5-2B"],
   ["Qwen/Qwen3.5-2B-Base", "Qwen/Qwen3.5-2B"],
   ["qwen/qwen3.5-2b-base", "Qwen/Qwen3.5-2B"],
