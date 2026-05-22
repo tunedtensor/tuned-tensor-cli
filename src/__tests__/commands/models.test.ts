@@ -32,8 +32,8 @@ function buildProgram() {
 const mockModel = {
   id: "model-12345678-abcd",
   name: "my-fine-tuned-model",
-  provider: "together",
-  provider_model_id: "ft:meta-llama/Llama-3.2-3B-Instruct:abc123",
+  provider: "sagemaker",
+  provider_model_id: "s3://bucket/models/model.tar.gz",
   base_model: "meta-llama/Llama-3.2-3B-Instruct",
   description: null,
   created_at: "2024-01-01T00:00:00Z",
@@ -112,7 +112,7 @@ describe("models commands", () => {
       await program.parseAsync(["node", "tt", "models", "get", "model-1234"]);
       const allOutput = spy.mock.calls.map((c) => String(c[0])).join("\n");
       expect(allOutput).toContain("my-fine-tuned-model");
-      expect(allOutput).toContain("together");
+      expect(allOutput).toContain("sagemaker");
     });
   });
 

@@ -36,7 +36,7 @@ tt init
 tt init --name "Customer Support Bot" --model "Qwen/Qwen3.5-2B"
 ```
 
-Supported spec base models are `Qwen/Qwen3.5-2B`, `google/gemma-4-E2B-it`, and `google/gemma-4-26B-A4B-it`.
+Supported spec base models are `Qwen/Qwen3.5-2B`, `Qwen/Qwen3.5-4B`, `google/gemma-4-E2B-it`, `google/gemma-4-E4B-it`, `google/gemma-4-26B-A4B-it`, `meta-llama/Llama-3.2-3B-Instruct`, `microsoft/Phi-4-mini-instruct`, `ibm-granite/granite-3.3-2b-instruct`, and `bigcode/starcoder2-3b`.
 
 3) **Validate your spec**
 
