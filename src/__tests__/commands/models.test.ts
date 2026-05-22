@@ -77,19 +77,36 @@ describe("models commands", () => {
 
   describe("models get", () => {
     it("fetches model details", async () => {
-      vi.mocked(client.get).mockResolvedValue({ data: mockModel });
+      vi.mocked(client.get)
+        .mockResolvedValueOnce({
+          data: [mockModel],
+          meta: { page: 1, per_page: 100, total: 1 },
+        })
+        .mockResolvedValueOnce({ data: mockModel });
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
       await program.parseAsync(["node", "tt", "models", "get", "model-1234"]);
-      expect(client.get).toHaveBeenCalledWith(
-        "/models/model-1234",
+      expect(client.get).toHaveBeenNthCalledWith(
+        1,
+        "/models",
+        { page: 1, per_page: 100 },
+        expect.anything(),
+      );
+      expect(client.get).toHaveBeenNthCalledWith(
+        2,
+        "/models/model-12345678-abcd",
         undefined,
         expect.anything(),
       );
     });
 
     it("displays all fields", async () => {
-      vi.mocked(client.get).mockResolvedValue({ data: mockModel });
+      vi.mocked(client.get)
+        .mockResolvedValueOnce({
+          data: [mockModel],
+          meta: { page: 1, per_page: 100, total: 1 },
+        })
+        .mockResolvedValueOnce({ data: mockModel });
       const spy = vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
       await program.parseAsync(["node", "tt", "models", "get", "model-1234"]);
@@ -101,12 +118,21 @@ describe("models commands", () => {
 
   describe("models delete", () => {
     it("deletes a model", async () => {
+      vi.mocked(client.get).mockResolvedValue({
+        data: [mockModel],
+        meta: { page: 1, per_page: 100, total: 1 },
+      });
       vi.mocked(client.del).mockResolvedValue({ data: null as never });
       vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
       await program.parseAsync(["node", "tt", "models", "delete", "model-1234"]);
+      expect(client.get).toHaveBeenCalledWith(
+        "/models",
+        { page: 1, per_page: 100 },
+        expect.anything(),
+      );
       expect(client.del).toHaveBeenCalledWith(
-        "/models/model-1234",
+        "/models/model-12345678-abcd",
         expect.anything(),
       );
     });
