@@ -109,6 +109,16 @@ describe("runs commands", () => {
       );
     });
 
+    it("displays API avg_score in run details", async () => {
+      vi.mocked(client.get).mockResolvedValue({
+        data: { ...mockRun, eval_summary: { avg_score: 0.85, pass_rate: 0.9 } },
+      });
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "runs", "get", RUN_UUID]);
+      expect(spy.mock.calls.flat().join("\n")).toContain("85.0%");
+    });
+
     it("outputs JSON when json mode is on", async () => {
       setJsonMode(true);
       vi.mocked(client.get).mockResolvedValue({ data: mockRun });

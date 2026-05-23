@@ -24,7 +24,7 @@ interface Run {
   progress_pct?: number | null;
   status_message?: string | null;
   hyperparameters: Record<string, unknown> | null;
-  eval_summary: { mean_score?: number; pass_rate?: number } | null;
+  eval_summary: { avg_score?: number; mean_score?: number; pass_rate?: number } | null;
   error: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -61,6 +61,15 @@ function formatProgress(run: Run): string | undefined {
   return run.progress_pct == null ? label : `${label} (${run.progress_pct}%)`;
 }
 
+function getEvalScore(run: Run): number | undefined {
+  return run.eval_summary?.avg_score ?? run.eval_summary?.mean_score;
+}
+
+function formatEvalScore(run: Run): string | undefined {
+  const score = getEvalScore(run);
+  return score == null ? undefined : (score * 100).toFixed(1) + "%";
+}
+
 export function registerRunsCommands(parent: Command) {
   const runs = parent.command("runs").description("Manage runs");
 
@@ -95,9 +104,7 @@ export function registerRunsCommands(parent: Command) {
           r._spec_name ? truncate(r._spec_name, 20) : shortId(r.behavior_spec_id),
           String(r.run_number),
           formatStatus(r.status),
-          r.eval_summary?.mean_score != null
-            ? (r.eval_summary.mean_score * 100).toFixed(1) + "%"
-            : "—",
+          formatEvalScore(r) ?? "—",
           formatDate(r.started_at),
           formatDate(r.completed_at),
         ]),
@@ -123,9 +130,7 @@ export function registerRunsCommands(parent: Command) {
         ["Status", formatStatus(data.status)],
         ["Stage", formatProgress(data)],
         ["Message", data.status_message ?? undefined],
-        ["Score", data.eval_summary?.mean_score != null
-          ? (data.eval_summary.mean_score * 100).toFixed(1) + "%"
-          : undefined],
+        ["Score", formatEvalScore(data)],
         ["Pass Rate", data.eval_summary?.pass_rate != null
           ? (data.eval_summary.pass_rate * 100).toFixed(1) + "%"
           : undefined],
@@ -278,9 +283,7 @@ export function registerRunsCommands(parent: Command) {
         ["Status", formatStatus(run.status)],
         ["Stage", formatProgress(run)],
         ["Message", run.status_message ?? undefined],
-        ["Score", run.eval_summary?.mean_score != null
-          ? (run.eval_summary.mean_score * 100).toFixed(1) + "%"
-          : undefined],
+        ["Score", formatEvalScore(run)],
         ["Error", run.error ?? undefined],
         ["Completed", formatDate(run.completed_at)],
       ]);
