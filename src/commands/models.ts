@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { get, del, type ClientOpts } from "../client.js";
 import { resolveModelId } from "../resolve.js";
+import { SUPPORTED_BASE_MODELS } from "../base-models.js";
 import {
   printTable,
   printDetail,
@@ -69,6 +70,24 @@ async function downloadUrlToFile(url: string, outputPath: string): Promise<numbe
 
 export function registerModelsCommands(parent: Command) {
   const models = parent.command("models").description("Manage fine-tuned models");
+
+  models
+    .command("base")
+    .description("List supported base models")
+    .action(async () => {
+      const data = SUPPORTED_BASE_MODELS.map((model) => ({
+        id: model,
+        name: model.split("/").pop() || model,
+        type: "base" as const,
+      }));
+
+      if (isJsonMode()) return printJson({ data });
+
+      printTable(
+        ["ID", "Name", "Type"],
+        data.map((m) => [m.id, m.name, m.type]),
+      );
+    });
 
   models
     .command("list")

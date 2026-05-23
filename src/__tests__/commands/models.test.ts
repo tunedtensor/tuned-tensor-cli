@@ -46,6 +46,34 @@ beforeEach(() => {
 });
 
 describe("models commands", () => {
+  describe("models base", () => {
+    it("lists supported base models without an API request", async () => {
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "models", "base"]);
+
+      const allOutput = spy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(allOutput).toContain("Qwen/Qwen3.5-2B");
+      expect(allOutput).toContain("google/gemma-4-E2B-it");
+      expect(client.get).not.toHaveBeenCalled();
+    });
+
+    it("outputs JSON when json mode is on", async () => {
+      setJsonMode(true);
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "models", "base"]);
+
+      const parsed = JSON.parse(spy.mock.calls[0][0]);
+      expect(parsed.data).toContainEqual({
+        id: "Qwen/Qwen3.5-2B",
+        name: "Qwen3.5-2B",
+        type: "base",
+      });
+      expect(client.get).not.toHaveBeenCalled();
+    });
+  });
+
   describe("models list", () => {
     it("fetches and displays models", async () => {
       vi.mocked(client.get).mockResolvedValue({
