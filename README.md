@@ -38,6 +38,13 @@ tt init --name "Customer Support Bot" --model "Qwen/Qwen3.5-2B"
 
 Supported spec base models are `Qwen/Qwen3.5-2B`, `Qwen/Qwen3.5-4B`, `google/gemma-4-E2B-it`, `google/gemma-4-E4B-it`, `meta-llama/Llama-3.2-3B-Instruct`, `microsoft/Phi-4-mini-instruct`, `ibm-granite/granite-3.3-2b-instruct`, and `bigcode/starcoder2-3b`.
 
+You can print the same list from the CLI:
+
+```bash
+tt models base
+tt models base --json
+```
+
 3) **Validate your spec**
 
 ```bash
@@ -89,6 +96,7 @@ tt datasets list
 tt datasets get <dataset-id>
 
 # Models
+tt models base
 tt models list
 tt models get <model-id>
 tt models download <model-id> --output model.tar.gz

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.4.9
+
+### Added
+
+- **`tt models base`** — List the supported base models accepted by local CLI spec validation, with `--json` support for scripts.
+
 ## 0.4.8
 
 ### Added
