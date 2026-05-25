@@ -246,6 +246,72 @@ describe("datasets commands", () => {
       ).rejects.toThrow(/no JSONL rows/);
       expect(client.post).not.toHaveBeenCalled();
     });
+
+    it("rejects rows containing invisible NEL (U+0085) before uploading", async () => {
+      // NEL inside the input string. JSON.parse accepts it, but Python
+      // splitlines() will split the JSONL row in half mid-string downstream.
+      const row = JSON.stringify({ input: "subjectbody", output: "ok" });
+      writeFileSync(tmpFile, `${row}\n`);
+      const program = buildProgram();
+
+      await expect(
+        program.parseAsync(["node", "tt", "datasets", "upload", tmpFile]),
+      ).rejects.toThrow(/U\+0085.*NEXT LINE/);
+      expect(client.post).not.toHaveBeenCalled();
+    });
+
+    it("rejects rows containing C0 control chars (BELL) before uploading", async () => {
+      const row = JSON.stringify({ input: "ab", output: "ok" });
+      writeFileSync(tmpFile, `${row}\n`);
+      const program = buildProgram();
+
+      await expect(
+        program.parseAsync(["node", "tt", "datasets", "upload", tmpFile]),
+      ).rejects.toThrow(/U\+0007.*BELL/);
+      expect(client.post).not.toHaveBeenCalled();
+    });
+
+    it("rejects rows containing C1 control chars (U+0092) before uploading", async () => {
+      const row = JSON.stringify({ input: "smartquote", output: "ok" });
+      writeFileSync(tmpFile, `${row}\n`);
+      const program = buildProgram();
+
+      await expect(
+        program.parseAsync(["node", "tt", "datasets", "upload", tmpFile]),
+      ).rejects.toThrow(/U\+0092.*C1 CONTROL CHARACTER/);
+      expect(client.post).not.toHaveBeenCalled();
+    });
+
+    it("rejects rows containing U+2028 LINE SEPARATOR before uploading", async () => {
+      const row = JSON.stringify({ input: "a b", output: "ok" });
+      writeFileSync(tmpFile, `${row}\n`);
+      const program = buildProgram();
+
+      await expect(
+        program.parseAsync(["node", "tt", "datasets", "upload", tmpFile]),
+      ).rejects.toThrow(/U\+2028.*LINE SEPARATOR/);
+      expect(client.post).not.toHaveBeenCalled();
+    });
+
+    it("accepts rows containing tab, newline, and carriage return inside strings", async () => {
+      const row = JSON.stringify({ input: "line1\nline2\twith tab\rcr", output: "ok" });
+      writeFileSync(tmpFile, `${row}\n`);
+      vi.mocked(client.post)
+        .mockResolvedValueOnce({
+          data: {
+            path: "s3://tt-runs/users/user-1/datasets/upload.jsonl",
+            upload_url: "https://uploads.example.com/upload.jsonl",
+            method: "PUT",
+            headers: { "Content-Type": "application/jsonl" },
+          },
+        })
+        .mockResolvedValueOnce({ data: mockDataset });
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "datasets", "upload", tmpFile]);
+      expect(client.post).toHaveBeenCalled();
+    });
   });
 
   describe("datasets delete", () => {

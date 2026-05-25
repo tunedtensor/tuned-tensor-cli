@@ -42,6 +42,66 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Invisible characters that JSON parsers accept but downstream JSONL consumers
+// often mishandle. Concretely: Python's str.splitlines() treats every char in
+// this set as a line break, so a row containing one of them gets cut in half
+// before json.loads sees it. We strip these at validate-time so the failure
+// mode is "row 1099 has U+0085 at offset 4078" (seconds, locally) instead of
+// "AlgorithmError: exit code 1" after a training launch (minutes, remote).
+const FORBIDDEN_CONTROL_CODEPOINTS: ReadonlyArray<{ code: number; name: string }> = [
+  // C0 control chars except whitespace we explicitly allow inside string values.
+  // U+0009 TAB, U+000A LF, U+000D CR are kept since they appear in normal text.
+  { code: 0x00, name: "NULL" },
+  { code: 0x01, name: "START OF HEADING" },
+  { code: 0x02, name: "START OF TEXT" },
+  { code: 0x03, name: "END OF TEXT" },
+  { code: 0x04, name: "END OF TRANSMISSION" },
+  { code: 0x05, name: "ENQUIRY" },
+  { code: 0x06, name: "ACKNOWLEDGE" },
+  { code: 0x07, name: "BELL" },
+  { code: 0x08, name: "BACKSPACE" },
+  { code: 0x0b, name: "VERTICAL TAB" },
+  { code: 0x0c, name: "FORM FEED" },
+  { code: 0x0e, name: "SHIFT OUT" },
+  { code: 0x0f, name: "SHIFT IN" },
+  // 0x10..0x1F all rejected; named lookup falls back to "CONTROL CHARACTER".
+  { code: 0x1c, name: "FILE SEPARATOR" },
+  { code: 0x1d, name: "GROUP SEPARATOR" },
+  { code: 0x1e, name: "RECORD SEPARATOR" },
+  // C1 control range U+0080..U+009F (all invisible, often mojibake from
+  // Windows-1252 smart quotes mis-tagged as Unicode codepoints).
+  { code: 0x0085, name: "NEXT LINE" },
+  // Unicode line/paragraph separators - cut lines too.
+  { code: 0x2028, name: "LINE SEPARATOR" },
+  { code: 0x2029, name: "PARAGRAPH SEPARATOR" },
+];
+
+function findControlChar(value: string): { codepoint: number; offset: number; name: string } | null {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    // Whitelist real whitespace; everything in C0 below 0x20 (besides tab/LF/CR) is hazardous.
+    if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) {
+      const named = FORBIDDEN_CONTROL_CODEPOINTS.find((entry) => entry.code === code);
+      return { codepoint: code, offset: i, name: named?.name ?? "CONTROL CHARACTER" };
+    }
+    // C1 control range - all hazardous (NEL, etc.); JSON parsers accept these
+    // but Python's splitlines() splits on several of them.
+    if (code >= 0x80 && code <= 0x9f) {
+      const named = FORBIDDEN_CONTROL_CODEPOINTS.find((entry) => entry.code === code);
+      return { codepoint: code, offset: i, name: named?.name ?? "C1 CONTROL CHARACTER" };
+    }
+    if (code === 0x2028 || code === 0x2029) {
+      const named = FORBIDDEN_CONTROL_CODEPOINTS.find((entry) => entry.code === code);
+      return { codepoint: code, offset: i, name: named?.name ?? "LINE BREAK" };
+    }
+  }
+  return null;
+}
+
+function formatCodepoint(code: number): string {
+  return `U+${code.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
 function validateDatasetFile(file: string): void {
   const lines = readFileSync(file, "utf8").split(/\r?\n/);
   const errors: string[] = [];
@@ -80,6 +140,17 @@ function validateDatasetFile(file: string): void {
     }
     if (typeof record.output !== "string") {
       errors.push(`Row ${rowNumber}: missing string "output" field`);
+    }
+
+    for (const field of ["input", "output"] as const) {
+      const value = record[field];
+      if (typeof value !== "string") continue;
+      const hit = findControlChar(value);
+      if (hit) {
+        errors.push(
+          `Row ${rowNumber}: field "${field}" contains invisible control character ${formatCodepoint(hit.codepoint)} (${hit.name}) at offset ${hit.offset} — strip or escape before uploading; some training paths split on it`,
+        );
+      }
     }
   }
 
