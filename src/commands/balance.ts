@@ -59,7 +59,7 @@ function formatSigned(cents: number): string {
 export function registerBalanceCommands(parent: Command) {
   parent
     .command("balance")
-    .description("Show available credits, held credits, and recent transactions")
+    .description("Show credit balance and recent transactions")
     .option("-n, --limit <n>", "Number of transactions to show (default 10)", "10")
     .action(async (options) => {
       const opts = parent.opts() as ClientOpts;
@@ -74,15 +74,13 @@ export function registerBalanceCommands(parent: Command) {
         return printJson({ balance, transactions });
       }
 
-      const lowBalance = balance.available_cents < 100;
-      const availableLine = lowBalance
-        ? chalk.red(formatCents(balance.available_cents)) + chalk.dim(" (low)")
-        : chalk.bold.green(formatCents(balance.available_cents));
+      const lowBalance = balance.balance_cents < 100;
+      const balanceLine = lowBalance
+        ? chalk.red(formatCents(balance.balance_cents)) + chalk.dim(" (low)")
+        : chalk.bold.green(formatCents(balance.balance_cents));
 
       printDetail([
-        ["Available", availableLine],
-        ["Total balance", formatCents(balance.balance_cents)],
-        ["On hold", formatCents(balance.reserved_cents)],
+        ["Credits", balanceLine],
         ["Lifetime top-ups", formatCents(balance.lifetime_topup_cents)],
       ]);
 
@@ -107,7 +105,7 @@ export function registerBalanceCommands(parent: Command) {
       if (lowBalance) {
         console.log(
           `\n${formatStatus("preparing")} ${chalk.yellow(
-            "Run `tt topup` to add more available credits before starting a run."
+            "Run `tt topup` to add more credits before starting a run."
           )}`
         );
       }

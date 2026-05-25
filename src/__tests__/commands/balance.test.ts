@@ -85,11 +85,12 @@ describe("balance command", () => {
     );
     const out = spy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(out).toContain("$4.80");
-    expect(out).toContain("$3.00");
-    expect(out).toContain("$1.80");
-    expect(out).toContain("Available");
-    expect(out).toContain("On hold");
-    expect(out).toContain("Total balance");
+    expect(out).toContain("Credits");
+    expect(out).not.toContain("$3.00");
+    expect(out).not.toContain("$1.80");
+    expect(out).not.toContain("Available");
+    expect(out).not.toContain("Reserved");
+    expect(out).not.toContain("Total balance");
     expect(out).toContain("Top-up");
     expect(out).toContain("Run");
   });
@@ -126,20 +127,20 @@ describe("balance command", () => {
     const program = buildProgram();
     await program.parseAsync(["node", "tt", "balance"]);
     const out = spy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(out).toContain("Available");
+    expect(out).toContain("Credits");
     expect(out).toContain("$0.00");
     expect(out).not.toContain("Signup bonus");
     expect(out).not.toContain("not yet granted");
   });
 
-  it("warns on low available balance", async () => {
+  it("warns on low credit balance", async () => {
     vi.mocked(client.get).mockImplementation(((path: string) => {
       if (path === "/billing/balance") {
         return Promise.resolve({
           data: {
             ...mockBalance,
-            balance_cents: 480,
-            reserved_cents: 450,
+            balance_cents: 30,
+            reserved_cents: 0,
             available_cents: 30,
           },
         });
