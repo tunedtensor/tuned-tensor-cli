@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.4.10
+
+### Added
+
+- **Dataset upload validation** — `tt datasets upload` now rejects invisible control characters before upload, with tests covering malformed JSONL rows that previously reached the API.
+
+### Fixed
+
+- **`tt balance`** — Show a single `Credits` value instead of exposing available, reserved, and total balance accounting. Low-balance warnings now use total `balance_cents`.
+
+### Docs
+
+- Simplify README billing copy to match the single credit-balance CLI output.
+
 ## 0.4.9
 
 ### Added
@@ -82,11 +96,11 @@
 
 ### Fixed
 
-- **`tt balance`** — Show a single credit balance from the reservation-aware billing API. Low-balance warnings now use total `balance_cents`.
+- **`tt balance`** — Show available credits and credits on hold from the reservation-aware billing API. Low-balance warnings now use spendable `available_cents` instead of total `balance_cents`.
 
 ### Docs
 
-- Explain the simplified credit balance shown by `tt balance`.
+- Explain that active runs can reserve credits, so a positive total balance may still produce `402 insufficient_credits` when available credits are too low.
 
 ## 0.4.0
 
