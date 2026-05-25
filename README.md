@@ -115,16 +115,13 @@ Use `--no-llm-judge` with `tt runs start` to opt out of Bedrock LLM judging for 
 Tuned Tensor uses prepaid credits. New accounts start at a zero balance, so top up before starting your first fine-tuning run; you only pay for successful runs.
 
 ```bash
-tt balance                 # show available credits, holds, and recent transactions
+tt balance                 # show credit balance and recent transactions
 tt topup --amount 25       # opens Stripe Checkout in your browser
 tt topup --amount 25 --no-open  # print the URL instead
 ```
 
-`tt balance` separates **Available** credits from **Total balance**. Starting a
-run or auto-tune session places an estimate on hold, so you can have a positive
-total balance while `Available` is too low to start another run. If a run is
-rejected with `402 insufficient_credits`, top up or wait for active holds to
-settle/release, then retry.
+`tt balance` shows your current credit balance. If a run is rejected with
+`402 insufficient_credits`, top up and retry.
 
 ## Spec Validation
 
