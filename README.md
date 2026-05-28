@@ -108,7 +108,7 @@ Use `--max-eval-examples <n>` and `--max-test-eval-examples <n>` with `tt runs s
 
 Use `--no-llm-judge` with `tt runs start` to opt out of LLM judging for a new run.
 
-`tt models download` downloads models that have a Tuned Tensor-hosted artifact. Hosted models can still be used for inference through their model ID, but may not expose downloadable weights.
+`tt models download` downloads models that have a Tuned Tensor-hosted artifact. In interactive terminals it shows download progress, transfer rate, and ETA; `--json` output remains machine-readable. Hosted models can still be used for inference through their model ID, but may not expose downloadable weights.
 
 ## Billing & Credits
 

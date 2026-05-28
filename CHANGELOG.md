@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **`tt models download`** — Show an interactive progress bar with transfer rate and ETA for model artifact downloads.
+
 ## 0.4.11
 
 ### Added

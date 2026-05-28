@@ -221,6 +221,116 @@ describe("models commands", () => {
       rmSync(outputPath);
     });
 
+    it("renders an interactive progress bar with ETA", async () => {
+      const outputPath = join(tmpdir(), `tt-model-download-progress-${process.pid}.tar.gz`);
+      rmSync(outputPath, { force: true });
+      const originalIsTTY = process.stderr.isTTY;
+      const originalColumns = process.stderr.columns;
+      Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+      Object.defineProperty(process.stderr, "columns", { value: 160, configurable: true });
+      const writeSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+      try {
+        vi.mocked(client.get)
+          .mockResolvedValueOnce({
+            data: [mockModel],
+            meta: { page: 1, per_page: 100, total: 1 },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              url: "https://signed.example/model.tar.gz",
+              filename: "model.tar.gz",
+              expires_at: "2026-01-01T00:10:00Z",
+            },
+          });
+        vi.spyOn(globalThis, "fetch").mockResolvedValue(
+          new Response("artifact-bytes", {
+            status: 200,
+            headers: { "content-length": "14" },
+          }),
+        );
+        vi.spyOn(console, "log").mockImplementation(() => {});
+
+        const program = buildProgram();
+        await program.parseAsync([
+          "node",
+          "tt",
+          "models",
+          "download",
+          "model-1234",
+          "--output",
+          outputPath,
+        ]);
+
+        const progressOutput = writeSpy.mock.calls.map((call) => String(call[0])).join("");
+        expect(progressOutput).toContain("Downloading [");
+        expect(progressOutput).toContain("100.0%");
+        expect(progressOutput).toContain("ETA");
+      } finally {
+        writeSpy.mockRestore();
+        Object.defineProperty(process.stderr, "isTTY", {
+          value: originalIsTTY,
+          configurable: true,
+        });
+        Object.defineProperty(process.stderr, "columns", {
+          value: originalColumns,
+          configurable: true,
+        });
+        rmSync(outputPath, { force: true });
+      }
+    });
+
+    it("does not render progress in JSON mode", async () => {
+      const outputPath = join(tmpdir(), `tt-model-download-json-${process.pid}.tar.gz`);
+      rmSync(outputPath, { force: true });
+      const originalIsTTY = process.stderr.isTTY;
+      Object.defineProperty(process.stderr, "isTTY", { value: true, configurable: true });
+      const writeSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+      try {
+        setJsonMode(true);
+        vi.mocked(client.get)
+          .mockResolvedValueOnce({
+            data: [mockModel],
+            meta: { page: 1, per_page: 100, total: 1 },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              url: "https://signed.example/model.tar.gz",
+              filename: "model.tar.gz",
+              expires_at: "2026-01-01T00:10:00Z",
+            },
+          });
+        vi.spyOn(globalThis, "fetch").mockResolvedValue(
+          new Response("artifact-bytes", {
+            status: 200,
+            headers: { "content-length": "14" },
+          }),
+        );
+        vi.spyOn(console, "log").mockImplementation(() => {});
+
+        const program = buildProgram();
+        await program.parseAsync([
+          "node",
+          "tt",
+          "models",
+          "download",
+          "model-1234",
+          "--output",
+          outputPath,
+        ]);
+
+        expect(writeSpy).not.toHaveBeenCalled();
+      } finally {
+        writeSpy.mockRestore();
+        Object.defineProperty(process.stderr, "isTTY", {
+          value: originalIsTTY,
+          configurable: true,
+        });
+        rmSync(outputPath, { force: true });
+      }
+    });
+
     it("refuses to overwrite without --force", async () => {
       const outputPath = join(tmpdir(), `tt-model-download-existing-${process.pid}.tar.gz`);
       rmSync(outputPath, { force: true });

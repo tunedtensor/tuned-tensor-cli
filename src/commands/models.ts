@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { existsSync, mkdirSync, statSync, createWriteStream, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { get, del, type ClientOpts } from "../client.js";
 import { resolveModelId } from "../resolve.js";
@@ -41,6 +41,81 @@ function resolveOutputPath(output: string | undefined, filename: string): string
   return output;
 }
 
+function parseContentLength(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function formatBytes(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const precision = unit === 0 || value >= 10 ? 0 : 1;
+  return `${value.toFixed(precision)} ${units[unit]}`;
+}
+
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "--";
+  const rounded = Math.max(1, Math.round(seconds));
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.floor((rounded % 3600) / 60);
+  const secs = rounded % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${secs}s`;
+  return `${secs}s`;
+}
+
+function chunkLength(chunk: unknown): number {
+  if (typeof chunk === "string") return Buffer.byteLength(chunk);
+  if (chunk instanceof Uint8Array) return chunk.byteLength;
+  return Buffer.byteLength(String(chunk));
+}
+
+function createDownloadProgress(totalBytes: number | null, enabled: boolean) {
+  const stream = process.stderr;
+  const start = Date.now();
+  let lastRender = 0;
+  let rendered = false;
+
+  function render(downloadedBytes: number, force = false) {
+    if (!enabled) return;
+    const now = Date.now();
+    if (!force && now - lastRender < 100 && downloadedBytes !== totalBytes) return;
+    lastRender = now;
+    rendered = true;
+
+    const elapsedSeconds = Math.max((now - start) / 1000, 0.001);
+    const rate = downloadedBytes / elapsedSeconds;
+    const rateText = `${formatBytes(rate)}/s`;
+
+    let line: string;
+    if (totalBytes != null && totalBytes > 0) {
+      const ratio = Math.min(downloadedBytes / totalBytes, 1);
+      const barWidth = 24;
+      const filled = Math.round(ratio * barWidth);
+      const bar = "#".repeat(filled) + "-".repeat(barWidth - filled);
+      const etaSeconds = rate > 0 ? (totalBytes - downloadedBytes) / rate : Number.NaN;
+      line = `Downloading [${bar}] ${(ratio * 100).toFixed(1).padStart(5)}% ${formatBytes(downloadedBytes)}/${formatBytes(totalBytes)} ${rateText} ETA ${formatDuration(etaSeconds)}`;
+    } else {
+      line = `Downloading ${formatBytes(downloadedBytes)} ${rateText} elapsed ${formatDuration(elapsedSeconds)}`;
+    }
+
+    const columns = stream.columns || 120;
+    stream.write(`\r\x1b[K${line.slice(0, Math.max(columns - 1, 0))}`);
+  }
+
+  function stop() {
+    if (enabled && rendered) stream.write("\n");
+  }
+
+  return { render, stop };
+}
+
 async function downloadUrlToFile(url: string, outputPath: string): Promise<number | null> {
   const res = await fetch(url);
   if (!res.ok) {
@@ -52,10 +127,27 @@ async function downloadUrlToFile(url: string, outputPath: string): Promise<numbe
 
   mkdirSync(dirname(outputPath), { recursive: true });
   const file = createWriteStream(outputPath);
+  const contentLength = parseContentLength(res.headers.get("content-length"));
+  const progress = createDownloadProgress(
+    contentLength,
+    !isJsonMode() && process.stderr.isTTY === true,
+  );
+  let downloadedBytes = 0;
+  const progressStream = new Transform({
+    transform(chunk, _encoding, callback) {
+      downloadedBytes += chunkLength(chunk);
+      progress.render(downloadedBytes);
+      callback(null, chunk);
+    },
+  });
 
   try {
-    await pipeline(Readable.fromWeb(res.body), file);
+    progress.render(0, true);
+    await pipeline(Readable.fromWeb(res.body), progressStream, file);
+    progress.render(downloadedBytes, true);
+    progress.stop();
   } catch (err) {
+    progress.stop();
     try {
       unlinkSync(outputPath);
     } catch {
@@ -64,8 +156,7 @@ async function downloadUrlToFile(url: string, outputPath: string): Promise<numbe
     throw err;
   }
 
-  const length = res.headers.get("content-length");
-  return length ? Number(length) : null;
+  return contentLength;
 }
 
 export function registerModelsCommands(parent: Command) {
