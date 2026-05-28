@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.4.11
+
+### Added
+
+- **`tt runs diagnose`** — Show live run diagnostics from the Tuned Tensor API, including epoch progress, loss, pace, ETA, latest update time, and plain-language insights.
+
+### Changed
+
+- **Model details** — Label hosted model identifiers without exposing backend storage/provider names in normal CLI output.
+
 ## 0.4.10
 
 ### Added
