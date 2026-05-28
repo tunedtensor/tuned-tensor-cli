@@ -133,7 +133,7 @@ export function registerModelsCommands(parent: Command) {
         ["Name", data.name],
         ["Base Model", data.base_model],
         ["Provider", data.provider],
-        ["Provider Model", data.provider_model_id],
+        ["Hosted Model", data.provider_model_id],
         ["Description", data.description ?? undefined],
         ["Created", formatDate(data.created_at)],
       ]);

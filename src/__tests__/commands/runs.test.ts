@@ -292,4 +292,54 @@ describe("runs commands", () => {
       );
     });
   });
+
+  describe("runs diagnose", () => {
+    it("fetches live diagnostics without exposing backend terms", async () => {
+      vi.mocked(client.get).mockResolvedValue({
+        data: {
+          run_id: RUN_UUID,
+          status: "training",
+          stage: "training_running",
+          stage_label: "Training model",
+          progress_pct: 55,
+          status_message: "Training is running.",
+          summary: "Latest training update arrived 1 minute ago.",
+          insights: [
+            "Training has reached epoch 0.0810 of 2.00.",
+            "Current pace is about 0.0405 epoch every 5 minutes. Estimated training time remaining is about 4.0 hours.",
+          ],
+          training: {
+            state: "running",
+            started_at: "2026-05-28T12:00:00Z",
+            completed_at: null,
+            last_updated_at: "2026-05-28T12:05:00Z",
+            curve: {
+              target_epochs: 2,
+              latest_epoch: 0.08095,
+              latest_loss: 1.9,
+              previous_loss: 2.1,
+              epoch_rate_per_minute: 0.008094,
+              estimated_minutes_remaining: 237.1,
+              latest_log_at: "2026-05-28T12:05:00Z",
+              samples: [],
+            },
+          },
+          generated_at: "2026-05-28T12:06:00Z",
+        },
+      });
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "runs", "diagnose", RUN_UUID]);
+
+      expect(client.get).toHaveBeenCalledWith(
+        `/runs/${RUN_UUID}/diagnostics`,
+        undefined,
+        expect.anything(),
+      );
+      const output = spy.mock.calls.flat().join("\n");
+      expect(output).toContain("0.0809 / 2.00");
+      expect(output).toContain("0.0405 epoch / 5m");
+      expect(output).not.toMatch(/sagemaker|s3:\/\/|aws|ec2/i);
+    });
+  });
 });
