@@ -55,6 +55,39 @@ interface RunEvent {
   occurred_at: string;
 }
 
+interface RunDiagnostics {
+  run_id: string;
+  status: string;
+  stage: string | null;
+  stage_label: string | null;
+  progress_pct: number | null;
+  status_message: string | null;
+  summary: string;
+  insights: string[];
+  training: {
+    state: string;
+    started_at: string | null;
+    completed_at: string | null;
+    last_updated_at: string | null;
+    curve: {
+      target_epochs: number | null;
+      latest_epoch: number | null;
+      latest_loss: number | null;
+      previous_loss: number | null;
+      epoch_rate_per_minute: number | null;
+      estimated_minutes_remaining: number | null;
+      latest_log_at: string | null;
+      samples: {
+        timestamp: string;
+        epoch: number;
+        loss?: number;
+        learning_rate?: number;
+      }[];
+    };
+  };
+  generated_at: string;
+}
+
 function formatProgress(run: Run): string | undefined {
   if (run.progress_pct == null && !run.stage_label) return undefined;
   const label = run.stage_label ?? run.current_stage ?? "Progress";
@@ -68,6 +101,46 @@ function getEvalScore(run: Run): number | undefined {
 function formatEvalScore(run: Run): string | undefined {
   const score = getEvalScore(run);
   return score == null ? undefined : (score * 100).toFixed(1) + "%";
+}
+
+function formatMinutes(minutes?: number | null): string | undefined {
+  if (minutes == null) return undefined;
+  if (minutes < 60) return `${Math.max(1, Math.round(minutes))}m`;
+  return `${(minutes / 60).toFixed(1)}h`;
+}
+
+function formatEpochProgress(diagnostics: RunDiagnostics): string | undefined {
+  const curve = diagnostics.training.curve;
+  if (curve.latest_epoch == null) return undefined;
+  if (curve.target_epochs == null) return curve.latest_epoch.toFixed(4);
+  return `${curve.latest_epoch.toFixed(4)} / ${curve.target_epochs.toFixed(2)}`;
+}
+
+function printDiagnostics(diagnostics: RunDiagnostics) {
+  const curve = diagnostics.training.curve;
+  const perFive = curve.epoch_rate_per_minute == null
+    ? undefined
+    : (curve.epoch_rate_per_minute * 5).toFixed(4);
+
+  printDetail([
+    ["Run", shortId(diagnostics.run_id)],
+    ["Status", formatStatus(diagnostics.status)],
+    ["Stage", diagnostics.stage_label ?? diagnostics.stage ?? undefined],
+    ["Summary", diagnostics.summary],
+    ["Training", diagnostics.training.state],
+    ["Epoch", formatEpochProgress(diagnostics)],
+    ["Latest Loss", curve.latest_loss == null ? undefined : curve.latest_loss.toFixed(4)],
+    ["Pace", perFive ? `${perFive} epoch / 5m` : undefined],
+    ["ETA", formatMinutes(curve.estimated_minutes_remaining)],
+    ["Latest Update", formatDate(diagnostics.training.last_updated_at)],
+  ]);
+
+  if (diagnostics.insights.length) {
+    console.log("\nInsights:");
+    for (const insight of diagnostics.insights) {
+      console.log(`  - ${insight}`);
+    }
+  }
 }
 
 export function registerRunsCommands(parent: Command) {
@@ -177,7 +250,7 @@ export function registerRunsCommands(parent: Command) {
     .description("Start a new run for a behaviour spec")
     .argument("<spec-id>", "Behaviour spec ID (full UUID or 8+ char prefix)")
     .option("--no-augment", "Disable data augmentation")
-    .option("--no-llm-judge", "Disable Bedrock LLM judging")
+    .option("--no-llm-judge", "Disable LLM judging")
     .option("--epochs <n>", "Number of training epochs")
     .option("--lr <rate>", "Learning rate")
     .option("--batch-size <n>", "Batch size")
@@ -287,5 +360,22 @@ export function registerRunsCommands(parent: Command) {
         ["Error", run.error ?? undefined],
         ["Completed", formatDate(run.completed_at)],
       ]);
+    });
+
+  runs
+    .command("diagnose")
+    .description("Show live run diagnostics")
+    .argument("<id>", "Run ID (full UUID or 8+ char prefix)")
+    .action(async (id: string) => {
+      const opts = parent.opts() as ClientOpts;
+      const fullId = await resolveRunId(id, opts);
+      const { data } = await get<RunDiagnostics>(
+        `/runs/${fullId}/diagnostics`,
+        undefined,
+        opts,
+      );
+
+      if (isJsonMode()) return printJson(data);
+      printDiagnostics(data);
     });
 }
