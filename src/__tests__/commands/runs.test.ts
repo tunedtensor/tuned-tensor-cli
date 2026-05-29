@@ -310,6 +310,7 @@ describe("runs commands", () => {
           ],
           training: {
             state: "running",
+            phase: "Training",
             started_at: "2026-05-28T12:00:00Z",
             completed_at: null,
             last_updated_at: "2026-05-28T12:05:00Z",
@@ -318,6 +319,7 @@ describe("runs commands", () => {
               latest_epoch: 0.08095,
               latest_loss: 1.9,
               previous_loss: 2.1,
+              latest_token_accuracy: 0.5848,
               epoch_rate_per_minute: 0.008094,
               estimated_minutes_remaining: 237.1,
               latest_log_at: "2026-05-28T12:05:00Z",
@@ -338,6 +340,7 @@ describe("runs commands", () => {
       );
       const output = spy.mock.calls.flat().join("\n");
       expect(output).toContain("0.0809 / 2.00");
+      expect(output).toContain("58.5%");
       expect(output).toContain("0.0405 epoch / 5m");
       expect(output).not.toMatch(/sagemaker|s3:\/\/|aws|ec2/i);
     });

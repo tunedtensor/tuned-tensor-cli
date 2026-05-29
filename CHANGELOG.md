@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.13
+
+### Changed
+
+- **`tt runs diagnose`** — Show the live training phase and token accuracy returned by the diagnostics API, alongside epoch progress, loss, pace, ETA, and latest update time.
+
 ## 0.4.12
 
 ### Added
