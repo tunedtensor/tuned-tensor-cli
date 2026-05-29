@@ -1,10 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.4.12
 
 ### Added
 
 - **`tt models download`** — Show an interactive progress bar with transfer rate and ETA for model artifact downloads.
+- **`tt models setup-runtime`** — Install an isolated local Python runtime for reference model serving.
+- **`tt models serve`** — Serve fine-tuned model IDs, extracted model directories, or `.tar.gz` artifacts through a local OpenAI-compatible chat completions API. The server auto-applies the behaviour spec prompt from `tunedtensor.json` by default and supports `--device auto|cpu|cuda|mps`.
 
 ## 0.4.11
 

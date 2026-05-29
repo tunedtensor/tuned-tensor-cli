@@ -100,6 +100,9 @@ tt models base
 tt models list
 tt models get <model-id>
 tt models download <model-id> --output model.tar.gz
+tt models setup-runtime
+tt models serve <model-id> --spec tunedtensor.json
+tt models serve ./model --port 8000
 ```
 
 Use `--dataset <dataset-id-or-prefix>` with `tt runs start` to train from an uploaded dataset instead of inline spec examples. Add `--train-ratio`, `--validation-ratio`, and `--test-ratio` to override the default 80/10/10 split.
@@ -109,6 +112,21 @@ Use `--max-eval-examples <n>` and `--max-test-eval-examples <n>` with `tt runs s
 Use `--no-llm-judge` with `tt runs start` to opt out of LLM judging for a new run.
 
 `tt models download` downloads models that have a Tuned Tensor-hosted artifact. In interactive terminals it shows download progress, transfer rate, and ETA; `--json` output remains machine-readable. Hosted models can still be used for inference through their model ID, but may not expose downloadable weights.
+
+`tt models setup-runtime` installs an isolated local Python runtime for reference serving. It chooses Python 3.10-3.12, creates a managed venv in the Tuned Tensor cache, and installs `torch`, `transformers`, `accelerate`, and `safetensors`. This can take a few minutes the first time.
+
+`tt models serve` starts a local OpenAI-compatible reference server for a model ID, an extracted model directory, or a `.tar.gz` artifact. It auto-detects `tunedtensor.json` in the current directory or model directory and applies the compiled behavior spec as the default system prompt, so inference matches the prompt contract used during training. Use `--spec <path>` to point at a specific spec, or `--no-spec-prompt` when you intentionally want raw model behavior. If no compatible Python serving runtime is available, run `tt models setup-runtime` first.
+
+```bash
+tt models setup-runtime
+tt models serve <model-id> --spec tunedtensor.json
+tt models serve <model-id> --spec tunedtensor.json --device mps  # Apple Silicon
+tt models serve <model-id> --spec tunedtensor.json --device cuda # NVIDIA GPU
+
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Hello"}]}'
+```
 
 ## Billing & Credits
 
