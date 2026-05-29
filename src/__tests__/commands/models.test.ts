@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Command } from "commander";
-import { existsSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { registerModelsCommands } from "../../commands/models.js";
@@ -363,6 +363,90 @@ describe("models commands", () => {
       ).rejects.toThrow("Output file already exists");
 
       rmSync(outputPath, { force: true });
+    });
+  });
+
+  describe("models serve", () => {
+    it("prints a local reference server command with the spec prompt enabled", async () => {
+      setJsonMode(true);
+      const root = join(tmpdir(), `tt-model-serve-${process.pid}`);
+      const modelDir = join(root, "model");
+      const cacheDir = join(root, "cache");
+      const specPath = join(root, "tunedtensor.json");
+      rmSync(root, { recursive: true, force: true });
+      mkdirSync(modelDir, { recursive: true });
+      writeFileSync(join(modelDir, "config.json"), "{}");
+      writeFileSync(
+        specPath,
+        JSON.stringify({
+          name: "Support Agent",
+          base_model: "Qwen/Qwen3.5-2B",
+          system_prompt: "You are a careful support agent.",
+          guidelines: ["Ask one clarifying question when needed."],
+          constraints: ["Do not invent account data."],
+          examples: [{ input: "Hi", output: "Hello." }],
+        }),
+      );
+
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        const program = buildProgram();
+        await program.parseAsync([
+          "node",
+          "tt",
+          "models",
+          "serve",
+          modelDir,
+          "--spec",
+          specPath,
+          "--cache-dir",
+          cacheDir,
+          "--print-command",
+        ]);
+
+        const parsed = JSON.parse(spy.mock.calls[0][0]);
+        expect(parsed.command).toBe("python3");
+        expect(parsed.args[0]).toContain("openai_reference_server.py");
+        expect(parsed.env_keys).toContain("TT_MODEL_PATH");
+        expect(parsed.env_keys).toContain("TT_SYSTEM_PROMPT");
+        expect(client.get).not.toHaveBeenCalled();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("can disable the auto-applied spec prompt", async () => {
+      setJsonMode(true);
+      const root = join(tmpdir(), `tt-model-serve-no-spec-${process.pid}`);
+      const modelDir = join(root, "model");
+      const cacheDir = join(root, "cache");
+      rmSync(root, { recursive: true, force: true });
+      mkdirSync(modelDir, { recursive: true });
+      writeFileSync(join(modelDir, "config.json"), "{}");
+
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        const program = buildProgram();
+        await program.parseAsync([
+          "node",
+          "tt",
+          "models",
+          "serve",
+          modelDir,
+          "--no-spec-prompt",
+          "--cache-dir",
+          cacheDir,
+          "--print-command",
+        ]);
+
+        const parsed = JSON.parse(spy.mock.calls[0][0]);
+        expect(parsed.env_keys).toContain("TT_MODEL_PATH");
+        expect(parsed.env_keys).not.toContain("TT_SYSTEM_PROMPT");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     });
   });
 });

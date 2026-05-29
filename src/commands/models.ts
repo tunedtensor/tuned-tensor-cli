@@ -1,11 +1,26 @@
 import { Command } from "commander";
-import { existsSync, mkdirSync, statSync, createWriteStream, unlinkSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { spawn, execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  statSync,
+  createWriteStream,
+  unlinkSync,
+  readFileSync,
+  writeFileSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve, basename } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { get, del, type ClientOpts } from "../client.js";
 import { resolveModelId } from "../resolve.js";
 import { SUPPORTED_BASE_MODELS } from "../base-models.js";
+import { DEFAULT_SPEC_FILE } from "./init.js";
+import type { LocalSpec } from "../eval/types.js";
 import {
   printTable,
   printDetail,
@@ -15,6 +30,7 @@ import {
   formatDate,
   shortId,
   truncate,
+  printWarning,
 } from "../output.js";
 
 interface Model {
@@ -32,6 +48,245 @@ interface ModelDownload {
   filename: string;
   expires_at: string;
 }
+
+interface ServeTarget {
+  modelPath: string;
+  modelName: string;
+  source: "local-directory" | "local-archive" | "downloaded-model";
+  modelId?: string;
+}
+
+const REFERENCE_SERVER_SCRIPT = String.raw`#!/usr/bin/env python3
+import json
+import os
+import time
+import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+MODEL_PATH = os.environ["TT_MODEL_PATH"]
+MODEL_NAME = os.environ.get("TT_MODEL_NAME", os.path.basename(MODEL_PATH.rstrip("/")) or "tuned-tensor-model")
+SYSTEM_PROMPT = os.environ.get("TT_SYSTEM_PROMPT", "").strip()
+HOST = os.environ.get("TT_HOST", "127.0.0.1")
+PORT = int(os.environ.get("TT_PORT", "8000"))
+DEFAULT_MAX_TOKENS = int(os.environ.get("TT_MAX_TOKENS", "512"))
+DEFAULT_TEMPERATURE = float(os.environ.get("TT_TEMPERATURE", "0.7"))
+TRUST_REMOTE_CODE = os.environ.get("TT_TRUST_REMOTE_CODE", "false").lower() in {"1", "true", "yes", "y"}
+REQUESTED_DEVICE = os.environ.get("TT_DEVICE", "auto").lower()
+
+
+def choose_device(torch):
+    if REQUESTED_DEVICE not in {"auto", "cpu", "cuda", "mps"}:
+        raise RuntimeError("TT_DEVICE must be one of: auto, cpu, cuda, mps")
+    if REQUESTED_DEVICE == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("TT_DEVICE=cuda requested, but CUDA is not available")
+    if REQUESTED_DEVICE == "mps" and not (
+        hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+    ):
+        raise RuntimeError("TT_DEVICE=mps requested, but Apple MPS is not available")
+    if REQUESTED_DEVICE != "auto":
+        return REQUESTED_DEVICE
+    if torch.cuda.is_available():
+        return "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def load_model():
+    try:
+        import torch
+        from transformers import (
+            AutoModelForCausalLM,
+            AutoModelForImageTextToText,
+            AutoProcessor,
+            AutoTokenizer,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "Missing Python serving dependencies. Install them with: "
+            "python -m pip install torch transformers accelerate"
+        ) from exc
+
+    try:
+        processor = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=TRUST_REMOTE_CODE)
+    except Exception:
+        processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=TRUST_REMOTE_CODE)
+    tokenizer = getattr(processor, "tokenizer", processor)
+    if getattr(tokenizer, "pad_token", None) is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    device = choose_device(torch)
+    kwargs = {
+        "trust_remote_code": TRUST_REMOTE_CODE,
+        "torch_dtype": "auto",
+        "low_cpu_mem_usage": True,
+    }
+    if device == "cuda":
+        kwargs["device_map"] = "auto"
+    elif device == "mps":
+        kwargs["torch_dtype"] = torch.float16
+
+    try:
+        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, **kwargs)
+    except Exception:
+        model = AutoModelForImageTextToText.from_pretrained(MODEL_PATH, **kwargs)
+    if device != "cuda":
+        model.to(device)
+    model.eval()
+    return torch, tokenizer, model, device
+
+
+torch, tokenizer, model, DEVICE = load_model()
+
+
+def content_to_text(content):
+    if isinstance(content, str):
+        return content
+    return json.dumps(content, ensure_ascii=False)
+
+
+def normalize_messages(raw_messages):
+    messages = []
+    for item in raw_messages:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        if role not in {"system", "user", "assistant", "tool"}:
+            continue
+        messages.append({"role": role, "content": content_to_text(item.get("content", ""))})
+
+    if SYSTEM_PROMPT and not any(message["role"] == "system" for message in messages):
+        messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+    return messages
+
+
+def render_prompt(messages):
+    chat_template = getattr(tokenizer, "chat_template", None)
+    if hasattr(tokenizer, "apply_chat_template") and chat_template:
+        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+    rendered = []
+    for message in messages:
+        rendered.append(f"{message['role'].upper()}: {message['content']}")
+    rendered.append("ASSISTANT:")
+    return "\n".join(rendered)
+
+
+def generate_completion(messages, max_tokens, temperature):
+    prompt = render_prompt(messages)
+    inputs = tokenizer(prompt, return_tensors="pt")
+    input_device = getattr(model, "device", None)
+    if input_device is None:
+        input_device = next(model.parameters()).device
+    inputs = {key: value.to(input_device) for key, value in inputs.items()}
+
+    generate_kwargs = {
+        **inputs,
+        "max_new_tokens": max_tokens,
+        "pad_token_id": tokenizer.pad_token_id or tokenizer.eos_token_id,
+    }
+    if temperature > 0:
+        generate_kwargs["do_sample"] = True
+        generate_kwargs["temperature"] = temperature
+    else:
+        generate_kwargs["do_sample"] = False
+
+    with torch.no_grad():
+        output_ids = model.generate(**generate_kwargs)
+
+    prompt_tokens = int(inputs["input_ids"].shape[-1])
+    completion_ids = output_ids[0][prompt_tokens:]
+    content = tokenizer.decode(completion_ids, skip_special_tokens=True).strip()
+    return content, prompt_tokens, int(completion_ids.shape[-1])
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "TunedTensorReferenceServer/0.1"
+
+    def send_json(self, status, payload):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "authorization, content-type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_OPTIONS(self):
+        self.send_json(204, {})
+
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_json(200, {
+                "status": "ok",
+                "model": MODEL_NAME,
+                "spec_prompt": bool(SYSTEM_PROMPT),
+                "device": DEVICE,
+            })
+            return
+        self.send_json(404, {"error": {"message": "Not found"}})
+
+    def do_POST(self):
+        if self.path not in {"/v1/chat/completions", "/chat/completions"}:
+            self.send_json(404, {"error": {"message": "Not found"}})
+            return
+
+        try:
+            length = int(self.headers.get("content-length", "0"))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if body.get("stream"):
+                self.send_json(400, {"error": {"message": "Streaming is not supported by tt models serve yet."}})
+                return
+
+            raw_messages = body.get("messages")
+            if not isinstance(raw_messages, list) or not raw_messages:
+                self.send_json(400, {"error": {"message": "Request must include a non-empty messages array."}})
+                return
+
+            max_tokens = int(body.get("max_tokens") or DEFAULT_MAX_TOKENS)
+            temperature = float(body.get("temperature") if body.get("temperature") is not None else DEFAULT_TEMPERATURE)
+            messages = normalize_messages(raw_messages)
+            content, prompt_tokens, completion_tokens = generate_completion(messages, max_tokens, temperature)
+
+            self.send_json(200, {
+                "id": "chatcmpl-" + uuid.uuid4().hex,
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": body.get("model") or MODEL_NAME,
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop",
+                }],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
+                },
+            })
+        except Exception as exc:
+            self.send_json(500, {"error": {"message": str(exc)}})
+
+    def log_message(self, fmt, *args):
+        print("%s - %s" % (self.address_string(), fmt % args))
+
+
+def main():
+    print(f"Serving {MODEL_NAME} from {MODEL_PATH}")
+    print(f"Listening on http://{HOST}:{PORT}/v1/chat/completions")
+    if SYSTEM_PROMPT:
+        print("Behavior spec prompt: enabled")
+    else:
+        print("Behavior spec prompt: disabled")
+    print(f"Device: {DEVICE}")
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()
+`;
 
 function resolveOutputPath(output: string | undefined, filename: string): string {
   if (!output) return filename;
@@ -159,6 +414,237 @@ async function downloadUrlToFile(url: string, outputPath: string): Promise<numbe
   return contentLength;
 }
 
+function defaultCacheDir(): string {
+  const root = process.env.XDG_CACHE_HOME || join(homedir(), ".cache");
+  return join(root, "tuned-tensor", "models");
+}
+
+function runtimeDir(cacheDir: string): string {
+  return join(cacheDir, "_runtime");
+}
+
+function runtimePythonPath(cacheDir: string): string {
+  const dir = runtimeDir(cacheDir);
+  return process.platform === "win32"
+    ? join(dir, "Scripts", "python.exe")
+    : join(dir, "bin", "python");
+}
+
+function resolveServePython(cacheDir: string, explicitPython?: string): string {
+  if (explicitPython) return explicitPython;
+  const managedPython = runtimePythonPath(cacheDir);
+  return existsSync(managedPython) ? managedPython : "python3";
+}
+
+function commandExists(command: string): boolean {
+  try {
+    execFileSync(command, ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function pythonMinorVersion(command: string): number | null {
+  try {
+    const out = execFileSync(
+      command,
+      ["-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    const [major, minor] = out.split(".").map((part) => Number(part));
+    if (major !== 3 || !Number.isFinite(minor)) return null;
+    return minor;
+  } catch {
+    return null;
+  }
+}
+
+function pickRuntimePython(explicitPython?: string): string {
+  const candidates = explicitPython
+    ? [explicitPython]
+    : ["python3.12", "python3.11", "python3.10", "python3"];
+  for (const candidate of candidates) {
+    if (!commandExists(candidate)) continue;
+    const minor = pythonMinorVersion(candidate);
+    if (minor != null && minor >= 10 && minor <= 12) return candidate;
+    if (explicitPython) {
+      throw new Error(
+        `${candidate} is Python 3.${minor ?? "?"}. The local serving runtime requires Python 3.10, 3.11, or 3.12 because torch wheels may not be available for newer versions.`,
+      );
+    }
+  }
+  throw new Error(
+    "Could not find Python 3.10, 3.11, or 3.12. Install one, then run `tt models setup-runtime --python <path>`.",
+  );
+}
+
+function ensureServingRuntime(python: string, cacheDir: string): void {
+  const check = `
+import importlib.util
+import json
+required = ["torch", "transformers", "accelerate", "safetensors"]
+missing = [name for name in required if importlib.util.find_spec(name) is None]
+print(json.dumps({"missing": missing}))
+`;
+  let missing: string[];
+  try {
+    const out = execFileSync(python, ["-c", check], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    missing = JSON.parse(out).missing;
+  } catch (err) {
+    const suffix = python === runtimePythonPath(cacheDir)
+      ? " Re-run `tt models setup-runtime` to repair it."
+      : " Run `tt models setup-runtime` to create an isolated serving runtime.";
+    throw new Error(`Python serving runtime check failed for ${python}.${suffix}`);
+  }
+
+  if (missing.length > 0) {
+    const managedPython = runtimePythonPath(cacheDir);
+    const installHint = python === managedPython
+      ? "Run `tt models setup-runtime --force` to repair it."
+      : "Run `tt models setup-runtime` first, or pass --python <path> to a Python environment with the serving dependencies installed.";
+    throw new Error(
+      `Python serving runtime is missing: ${missing.join(", ")}. ${installHint}`,
+    );
+  }
+}
+
+function setupRuntimeCommands(python: string, venvDir: string, deps: string[]): string[][] {
+  const venvPython = process.platform === "win32"
+    ? join(venvDir, "Scripts", "python.exe")
+    : join(venvDir, "bin", "python");
+  return [
+    [python, "-m", "venv", venvDir],
+    [venvPython, "-m", "pip", "install", "--upgrade", "pip"],
+    [venvPython, "-m", "pip", "install", ...deps],
+  ];
+}
+
+function safeSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "model";
+}
+
+function directoryHasFiles(path: string): boolean {
+  return existsSync(path) && statSync(path).isDirectory() && readdirSync(path).length > 0;
+}
+
+function extractArchive(archivePath: string, targetDir: string, force: boolean): string {
+  if (directoryHasFiles(targetDir) && !force) return targetDir;
+  if (existsSync(targetDir)) rmSync(targetDir, { recursive: true, force: true });
+  mkdirSync(targetDir, { recursive: true });
+  execFileSync("tar", ["-xzf", archivePath, "-C", targetDir], { stdio: "inherit" });
+  return targetDir;
+}
+
+function localArchiveCacheDir(archivePath: string, cacheDir: string): string {
+  const resolved = resolve(archivePath);
+  const digest = createHash("sha256").update(resolved).digest("hex").slice(0, 12);
+  return join(cacheDir, `local-${safeSegment(basename(archivePath))}-${digest}`);
+}
+
+function buildSystemPrompt(spec: Pick<LocalSpec, "system_prompt" | "guidelines" | "constraints">): string {
+  const parts: string[] = [];
+  if (spec.system_prompt?.trim()) parts.push(spec.system_prompt.trim());
+  if (Array.isArray(spec.guidelines) && spec.guidelines.length > 0) {
+    parts.push(`Guidelines:\n${spec.guidelines.map((g) => `- ${g}`).join("\n")}`);
+  }
+  if (Array.isArray(spec.constraints) && spec.constraints.length > 0) {
+    parts.push(`Constraints:\n${spec.constraints.map((c) => `- ${c}`).join("\n")}`);
+  }
+  return parts.join("\n\n");
+}
+
+function findSpecPath(explicitPath: string | undefined, modelPath: string): string | null {
+  const candidates = explicitPath
+    ? [explicitPath]
+    : [join(process.cwd(), DEFAULT_SPEC_FILE), join(modelPath, DEFAULT_SPEC_FILE)];
+  for (const candidate of candidates) {
+    const resolved = resolve(candidate);
+    if (existsSync(resolved) && statSync(resolved).isFile()) return resolved;
+  }
+  return null;
+}
+
+function loadSystemPromptFromSpec(specPath: string): string {
+  const spec = JSON.parse(readFileSync(specPath, "utf8")) as LocalSpec;
+  return buildSystemPrompt(spec);
+}
+
+function writeReferenceServerScript(cacheDir: string): string {
+  const scriptDir = join(cacheDir, "_server");
+  mkdirSync(scriptDir, { recursive: true });
+  const scriptPath = join(scriptDir, "openai_reference_server.py");
+  writeFileSync(scriptPath, REFERENCE_SERVER_SCRIPT, "utf8");
+  return scriptPath;
+}
+
+async function resolveServeTarget(
+  target: string,
+  opts: ClientOpts,
+  cacheDir: string,
+  forceDownload: boolean,
+): Promise<ServeTarget> {
+  if (existsSync(target)) {
+    const resolved = resolve(target);
+    const stats = statSync(resolved);
+    if (stats.isDirectory()) {
+      return {
+        modelPath: resolved,
+        modelName: basename(resolved),
+        source: "local-directory",
+      };
+    }
+    if (stats.isFile() && (resolved.endsWith(".tar.gz") || resolved.endsWith(".tgz"))) {
+      const extractDir = join(localArchiveCacheDir(resolved, cacheDir), "model");
+      return {
+        modelPath: extractArchive(resolved, extractDir, forceDownload),
+        modelName: basename(resolved).replace(/\.t(ar\.)?gz$/, ""),
+        source: "local-archive",
+      };
+    }
+    throw new Error(`Unsupported model path: ${target}. Use a model directory or .tar.gz artifact.`);
+  }
+
+  const fullId = await resolveModelId(target, opts);
+  const { data: model } = await get<Model>(`/models/${fullId}`, undefined, opts);
+  const { data } = await get<ModelDownload>(`/models/${fullId}/download`, undefined, opts);
+  const modelCacheDir = join(cacheDir, fullId);
+  const archivePath = join(modelCacheDir, data.filename);
+  const extractDir = join(modelCacheDir, "model");
+
+  if (!existsSync(archivePath) || forceDownload) {
+    await downloadUrlToFile(data.url, archivePath);
+  }
+  extractArchive(archivePath, extractDir, forceDownload);
+
+  return {
+    modelPath: extractDir,
+    modelName: model.name || fullId,
+    source: "downloaded-model",
+    modelId: fullId,
+  };
+}
+
+function quoteCommandPart(part: string): string {
+  if (/^[a-zA-Z0-9_./:=@-]+$/.test(part)) return part;
+  return `'${part.replace(/'/g, "'\\''")}'`;
+}
+
+function printServeCommand(command: string, args: string[], env: Record<string, string>) {
+  const envKeys = Object.keys(env).sort();
+  const commandLine = [command, ...args].map(quoteCommandPart).join(" ");
+  if (isJsonMode()) {
+    return printJson({ command, args, env_keys: envKeys, command_line: commandLine });
+  }
+  printDetail([
+    ["Command", commandLine],
+    ["Environment", envKeys.join(", ")],
+  ]);
+}
+
 export function registerModelsCommands(parent: Command) {
   const models = parent.command("models").description("Manage fine-tuned models");
 
@@ -264,6 +750,149 @@ export function registerModelsCommands(parent: Command) {
 
       const size = bytes == null ? "" : ` (${bytes} bytes)`;
       printSuccess(`Model downloaded to ${outputPath}${size}`);
+    });
+
+  models
+    .command("setup-runtime")
+    .description("Install an isolated Python runtime for local model serving")
+    .option("--python <path>", "Python 3.10-3.12 executable to create the runtime")
+    .option("--cache-dir <path>", "Cache directory for the managed runtime")
+    .option("-f, --force", "Recreate the runtime if it already exists")
+    .option("--print-command", "Print the setup commands without running them")
+    .action(async (cmdOpts) => {
+      const cacheDir = resolve(cmdOpts.cacheDir || defaultCacheDir());
+      const venvDir = runtimeDir(cacheDir);
+      const venvPython = runtimePythonPath(cacheDir);
+      const python = pickRuntimePython(cmdOpts.python);
+      const deps = ["torch", "transformers", "accelerate", "safetensors"];
+      const commands = setupRuntimeCommands(python, venvDir, deps);
+
+      if (cmdOpts.printCommand) {
+        const commandLines = commands.map((cmd) => cmd.map(quoteCommandPart).join(" "));
+        if (isJsonMode()) {
+          return printJson({
+            python,
+            runtime_dir: venvDir,
+            runtime_python: venvPython,
+            commands: commandLines,
+          });
+        }
+        printDetail([
+          ["Python", python],
+          ["Runtime", venvDir],
+          ["Commands", commandLines.join("\n")],
+        ]);
+        return;
+      }
+
+      if (existsSync(venvDir) && cmdOpts.force) {
+        rmSync(venvDir, { recursive: true, force: true });
+      }
+      if (!existsSync(venvPython)) {
+        mkdirSync(cacheDir, { recursive: true });
+        execFileSync(commands[0][0], commands[0].slice(1), { stdio: "inherit" });
+      }
+
+      execFileSync(commands[1][0], commands[1].slice(1), { stdio: "inherit" });
+      execFileSync(commands[2][0], commands[2].slice(1), { stdio: "inherit" });
+      ensureServingRuntime(venvPython, cacheDir);
+
+      if (isJsonMode()) {
+        return printJson({
+          runtime_dir: venvDir,
+          runtime_python: venvPython,
+          installed: true,
+          dependencies: deps,
+        });
+      }
+
+      printSuccess(`Serving runtime ready at ${venvDir}`);
+      console.log(`Use it with: tt models serve <model-id> --spec ${DEFAULT_SPEC_FILE}`);
+    });
+
+  models
+    .command("serve")
+    .description("Serve a downloaded model with an OpenAI-compatible local API")
+    .argument("<target>", "Model ID/prefix, model directory, or .tar.gz artifact")
+    .option("--spec <path>", "Behavior spec JSON to apply as the default system prompt")
+    .option("--no-spec-prompt", "Do not auto-apply a behavior spec system prompt")
+    .option("--host <host>", "Host to bind", "127.0.0.1")
+    .option("--port <port>", "Port to bind", "8000")
+    .option("--python <path>", "Python executable")
+    .option("--cache-dir <path>", "Cache directory for downloaded/extracted models")
+    .option("--device <device>", "Inference device: auto, cpu, cuda, or mps", "auto")
+    .option("--force-download", "Re-download and re-extract model artifacts")
+    .option("--max-tokens <n>", "Default max completion tokens", "512")
+    .option("--temperature <n>", "Default sampling temperature", "0.7")
+    .option("--trust-remote-code", "Pass trust_remote_code=True to transformers")
+    .option("--print-command", "Print the underlying Python command without starting it")
+    .action(async (target: string, cmdOpts) => {
+      const opts = parent.opts() as ClientOpts;
+      const cacheDir = resolve(cmdOpts.cacheDir || defaultCacheDir());
+      mkdirSync(cacheDir, { recursive: true });
+      const python = resolveServePython(cacheDir, cmdOpts.python);
+      if (!cmdOpts.printCommand) ensureServingRuntime(python, cacheDir);
+
+      const serveTarget = await resolveServeTarget(
+        target,
+        opts,
+        cacheDir,
+        Boolean(cmdOpts.forceDownload),
+      );
+      const serverScript = writeReferenceServerScript(cacheDir);
+
+      let specPath: string | null = null;
+      let systemPrompt = "";
+      if (cmdOpts.specPrompt !== false) {
+        specPath = findSpecPath(cmdOpts.spec, serveTarget.modelPath);
+        if (cmdOpts.spec && !specPath) {
+          throw new Error(`Spec file not found: ${cmdOpts.spec}`);
+        }
+        if (specPath) {
+          systemPrompt = loadSystemPromptFromSpec(specPath);
+        }
+      }
+
+      const env: Record<string, string> = {
+        TT_MODEL_PATH: serveTarget.modelPath,
+        TT_MODEL_NAME: serveTarget.modelName,
+        TT_HOST: cmdOpts.host,
+        TT_PORT: String(cmdOpts.port),
+        TT_MAX_TOKENS: String(cmdOpts.maxTokens),
+        TT_TEMPERATURE: String(cmdOpts.temperature),
+        TT_TRUST_REMOTE_CODE: cmdOpts.trustRemoteCode ? "true" : "false",
+        TT_DEVICE: String(cmdOpts.device),
+      };
+      if (systemPrompt) env.TT_SYSTEM_PROMPT = systemPrompt;
+
+      const args = [serverScript];
+      if (cmdOpts.printCommand) return printServeCommand(python, args, env);
+
+      if (!isJsonMode()) {
+        printSuccess(`Serving ${serveTarget.modelName} from ${serveTarget.modelPath}`);
+        if (systemPrompt && specPath) {
+          printSuccess(`Behavior spec prompt loaded from ${specPath}`);
+        } else if (cmdOpts.specPrompt !== false) {
+          printWarning(
+            `No ${DEFAULT_SPEC_FILE} found. Pass --spec <path> to preserve the behavior prompt.`,
+          );
+        }
+        console.log(`OpenAI-compatible endpoint: http://${cmdOpts.host}:${cmdOpts.port}/v1/chat/completions`);
+        console.log(`Health check: http://${cmdOpts.host}:${cmdOpts.port}/health`);
+        console.log(`Python runtime: ${python}`);
+      }
+
+      await new Promise<void>((resolvePromise, reject) => {
+        const child = spawn(python, args, {
+          stdio: "inherit",
+          env: { ...process.env, ...env },
+        });
+        child.on("error", reject);
+        child.on("exit", (code, signal) => {
+          if (code === 0) return resolvePromise();
+          reject(new Error(`Model server exited with ${signal ?? `code ${code}`}`));
+        });
+      });
     });
 
   models
