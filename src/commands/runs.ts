@@ -66,6 +66,7 @@ interface RunDiagnostics {
   insights: string[];
   training: {
     state: string;
+    phase: string | null;
     started_at: string | null;
     completed_at: string | null;
     last_updated_at: string | null;
@@ -74,6 +75,7 @@ interface RunDiagnostics {
       latest_epoch: number | null;
       latest_loss: number | null;
       previous_loss: number | null;
+      latest_token_accuracy: number | null;
       epoch_rate_per_minute: number | null;
       estimated_minutes_remaining: number | null;
       latest_log_at: string | null;
@@ -82,6 +84,7 @@ interface RunDiagnostics {
         epoch: number;
         loss?: number;
         learning_rate?: number;
+        token_accuracy?: number;
       }[];
     };
   };
@@ -128,8 +131,15 @@ function printDiagnostics(diagnostics: RunDiagnostics) {
     ["Stage", diagnostics.stage_label ?? diagnostics.stage ?? undefined],
     ["Summary", diagnostics.summary],
     ["Training", diagnostics.training.state],
+    ["Phase", diagnostics.training.phase ?? undefined],
     ["Epoch", formatEpochProgress(diagnostics)],
     ["Latest Loss", curve.latest_loss == null ? undefined : curve.latest_loss.toFixed(4)],
+    [
+      "Token Accuracy",
+      curve.latest_token_accuracy == null
+        ? undefined
+        : (curve.latest_token_accuracy * 100).toFixed(1) + "%",
+    ],
     ["Pace", perFive ? `${perFive} epoch / 5m` : undefined],
     ["ETA", formatMinutes(curve.estimated_minutes_remaining)],
     ["Latest Update", formatDate(diagnostics.training.last_updated_at)],
