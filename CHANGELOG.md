@@ -82,7 +82,7 @@
 
 ### Fixed
 
-- **Spec base models** — Align CLI defaults and validation with the Tuned Tensor API enum: `Qwen/Qwen3.5-2B`, `google/gemma-4-E2B-it`, and `google/gemma-4-26B-A4B-it`. Unsupported models now fail locally instead of bubbling up as generic API errors.
+- **Spec base models** — Align CLI defaults and validation with the Tuned Tensor API enum. Unsupported models now fail locally instead of bubbling up as generic API errors.
 
 ### Docs
 
