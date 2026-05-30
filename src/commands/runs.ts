@@ -24,7 +24,7 @@ interface Run {
   progress_pct?: number | null;
   status_message?: string | null;
   hyperparameters: Record<string, unknown> | null;
-  eval_summary: { avg_score?: number; mean_score?: number; pass_rate?: number } | null;
+  eval_summary: RunEvalSummary | null;
   error: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -33,6 +33,41 @@ interface Run {
   _spec_name?: string;
   _evals?: RunEval[];
   _events?: RunEvent[];
+}
+
+interface RunEvalSummary {
+  avg_score?: number;
+  mean_score?: number;
+  pass_rate?: number;
+  output_diagnostics?: RunOutputDiagnostics;
+}
+
+interface EvalOutputDiagnostics {
+  total: number;
+  avg_output_chars?: number;
+  max_output_chars?: number;
+  starts_json_count: number;
+  starts_json_rate: number;
+  valid_json_count: number;
+  valid_json_rate: number;
+  strict_json_count: number;
+  strict_json_rate: number;
+  expected_schema_keys_count: number;
+  expected_schema_keys_rate: number;
+  non_json_prefix_count: number;
+  non_json_prefix_rate: number;
+  visible_reasoning_prefix_count: number;
+  visible_reasoning_prefix_rate: number;
+}
+
+interface RunOutputDiagnostics {
+  baseline: EvalOutputDiagnostics;
+  candidate: EvalOutputDiagnostics;
+  test?: {
+    baseline: EvalOutputDiagnostics;
+    candidate: EvalOutputDiagnostics;
+  };
+  insights?: string[];
 }
 
 interface RunEval {
@@ -64,6 +99,7 @@ interface RunDiagnostics {
   status_message: string | null;
   summary: string;
   insights: string[];
+  output_diagnostics?: RunOutputDiagnostics;
   training: {
     state: string;
     phase: string | null;
@@ -104,6 +140,15 @@ function getEvalScore(run: Run): number | undefined {
 function formatEvalScore(run: Run): string | undefined {
   const score = getEvalScore(run);
   return score == null ? undefined : (score * 100).toFixed(1) + "%";
+}
+
+function formatPercent(rate: number | undefined): string | undefined {
+  return rate == null ? undefined : (rate * 100).toFixed(1) + "%";
+}
+
+function formatCountRate(count: number | undefined, total: number | undefined, rate: number | undefined): string | undefined {
+  if (count == null || total == null || rate == null) return undefined;
+  return `${formatPercent(rate)} (${count}/${total})`;
 }
 
 function formatMinutes(minutes?: number | null): string | undefined {
@@ -147,6 +192,83 @@ function printDiagnostics(diagnostics: RunDiagnostics) {
 
   if (diagnostics.insights.length) {
     console.log("\nInsights:");
+    for (const insight of diagnostics.insights) {
+      console.log(`  - ${insight}`);
+    }
+  }
+
+  printEvalOutputDiagnostics(diagnostics.output_diagnostics);
+}
+
+function printEvalOutputDiagnostics(diagnostics: RunOutputDiagnostics | undefined) {
+  if (!diagnostics) return;
+  const candidate = diagnostics.candidate;
+  const baseline = diagnostics.baseline;
+
+  console.log("\nOutput Diagnostics:");
+  printDetail([
+    ["Tuned Valid JSON", formatCountRate(candidate.valid_json_count, candidate.total, candidate.valid_json_rate)],
+    ["Tuned Strict JSON", formatCountRate(candidate.strict_json_count, candidate.total, candidate.strict_json_rate)],
+    [
+      "Tuned Schema Keys",
+      formatCountRate(candidate.expected_schema_keys_count, candidate.total, candidate.expected_schema_keys_rate),
+    ],
+    [
+      "Tuned Non-JSON Prefix",
+      formatCountRate(candidate.non_json_prefix_count, candidate.total, candidate.non_json_prefix_rate),
+    ],
+    [
+      "Tuned Reasoning Prefix",
+      formatCountRate(
+        candidate.visible_reasoning_prefix_count,
+        candidate.total,
+        candidate.visible_reasoning_prefix_rate,
+      ),
+    ],
+    ["Tuned Avg Output", candidate.avg_output_chars == null ? undefined : `${candidate.avg_output_chars} chars`],
+    ["Base Valid JSON", formatCountRate(baseline.valid_json_count, baseline.total, baseline.valid_json_rate)],
+    [
+      "Base Reasoning Prefix",
+      formatCountRate(
+        baseline.visible_reasoning_prefix_count,
+        baseline.total,
+        baseline.visible_reasoning_prefix_rate,
+      ),
+    ],
+  ]);
+
+  if (diagnostics.test) {
+    console.log("\nTest Output Diagnostics:");
+    printDetail([
+      [
+        "Tuned Valid JSON",
+        formatCountRate(
+          diagnostics.test.candidate.valid_json_count,
+          diagnostics.test.candidate.total,
+          diagnostics.test.candidate.valid_json_rate,
+        ),
+      ],
+      [
+        "Tuned Strict JSON",
+        formatCountRate(
+          diagnostics.test.candidate.strict_json_count,
+          diagnostics.test.candidate.total,
+          diagnostics.test.candidate.strict_json_rate,
+        ),
+      ],
+      [
+        "Tuned Reasoning Prefix",
+        formatCountRate(
+          diagnostics.test.candidate.visible_reasoning_prefix_count,
+          diagnostics.test.candidate.total,
+          diagnostics.test.candidate.visible_reasoning_prefix_rate,
+        ),
+      ],
+    ]);
+  }
+
+  if (diagnostics.insights?.length) {
+    console.log("\nEvaluation Insights:");
     for (const insight of diagnostics.insights) {
       console.log(`  - ${insight}`);
     }
@@ -229,6 +351,8 @@ export function registerRunsCommands(parent: Command) {
           console.log(`  ${k}: ${v}`);
         }
       }
+
+      printEvalOutputDiagnostics(data.eval_summary?.output_diagnostics);
 
       if (data._events?.length) {
         console.log("\nLatest Updates:");

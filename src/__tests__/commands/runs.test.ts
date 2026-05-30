@@ -119,6 +119,60 @@ describe("runs commands", () => {
       expect(spy.mock.calls.flat().join("\n")).toContain("85.0%");
     });
 
+    it("displays output diagnostics when the API provides them", async () => {
+      vi.mocked(client.get).mockResolvedValue({
+        data: {
+          ...mockRun,
+          eval_summary: {
+            avg_score: 0.08,
+            pass_rate: 0.01,
+            output_diagnostics: {
+              baseline: {
+                total: 200,
+                valid_json_count: 200,
+                valid_json_rate: 1,
+                strict_json_count: 200,
+                strict_json_rate: 1,
+                expected_schema_keys_count: 200,
+                expected_schema_keys_rate: 1,
+                non_json_prefix_count: 0,
+                non_json_prefix_rate: 0,
+                visible_reasoning_prefix_count: 0,
+                visible_reasoning_prefix_rate: 0,
+              },
+              candidate: {
+                total: 200,
+                avg_output_chars: 1096,
+                valid_json_count: 0,
+                valid_json_rate: 0,
+                strict_json_count: 0,
+                strict_json_rate: 0,
+                expected_schema_keys_count: 0,
+                expected_schema_keys_rate: 0,
+                non_json_prefix_count: 200,
+                non_json_prefix_rate: 1,
+                visible_reasoning_prefix_count: 181,
+                visible_reasoning_prefix_rate: 0.905,
+              },
+              insights: [
+                "Tuned model output format is the main issue: 100% of primary eval responses did not start with JSON.",
+              ],
+            },
+          },
+        },
+      });
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "runs", "get", RUN_UUID]);
+
+      const output = spy.mock.calls.flat().join("\n");
+      expect(output).toContain("Output Diagnostics");
+      expect(output).toContain("Tuned Valid JSON");
+      expect(output).toContain("0.0% (0/200)");
+      expect(output).toContain("90.5% (181/200)");
+      expect(output).toContain("Tuned model output format is the main issue");
+    });
+
     it("outputs JSON when json mode is on", async () => {
       setJsonMode(true);
       vi.mocked(client.get).mockResolvedValue({ data: mockRun });
@@ -308,6 +362,38 @@ describe("runs commands", () => {
             "Training has reached epoch 0.0810 of 2.00.",
             "Current pace is about 0.0405 epoch every 5 minutes. Estimated training time remaining is about 4.0 hours.",
           ],
+          output_diagnostics: {
+            baseline: {
+              total: 200,
+              valid_json_count: 200,
+              valid_json_rate: 1,
+              strict_json_count: 200,
+              strict_json_rate: 1,
+              expected_schema_keys_count: 200,
+              expected_schema_keys_rate: 1,
+              non_json_prefix_count: 0,
+              non_json_prefix_rate: 0,
+              visible_reasoning_prefix_count: 0,
+              visible_reasoning_prefix_rate: 0,
+            },
+            candidate: {
+              total: 200,
+              avg_output_chars: 1096,
+              valid_json_count: 0,
+              valid_json_rate: 0,
+              strict_json_count: 0,
+              strict_json_rate: 0,
+              expected_schema_keys_count: 0,
+              expected_schema_keys_rate: 0,
+              non_json_prefix_count: 200,
+              non_json_prefix_rate: 1,
+              visible_reasoning_prefix_count: 181,
+              visible_reasoning_prefix_rate: 0.905,
+            },
+            insights: [
+              "Tuned model output format is the main issue: 100% of primary eval responses did not start with JSON.",
+            ],
+          },
           training: {
             state: "running",
             phase: "Training",
@@ -342,6 +428,8 @@ describe("runs commands", () => {
       expect(output).toContain("0.0809 / 2.00");
       expect(output).toContain("58.5%");
       expect(output).toContain("0.0405 epoch / 5m");
+      expect(output).toContain("Output Diagnostics");
+      expect(output).toContain("90.5% (181/200)");
       expect(output).not.toMatch(/sagemaker|s3:\/\/|aws|ec2/i);
     });
   });
