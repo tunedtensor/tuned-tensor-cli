@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-No changes yet.
+### Added
+
+- **`tt runs get` / `tt runs diagnose`** — Show eval output diagnostics when the API provides them, including JSON validity, schema-key match, non-JSON prefix, visible reasoning prefix, average output length, and plain-language evaluation insights.
 
 ## 0.4.14
 
