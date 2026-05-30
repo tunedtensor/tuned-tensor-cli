@@ -448,5 +448,55 @@ describe("models commands", () => {
         rmSync(root, { recursive: true, force: true });
       }
     });
+
+    it("passes default JSON schema enforcement settings to the reference server", async () => {
+      setJsonMode(true);
+      const root = join(tmpdir(), `tt-model-serve-schema-${process.pid}`);
+      const modelDir = join(root, "model");
+      const cacheDir = join(root, "cache");
+      const schemaPath = join(root, "schema.json");
+      rmSync(root, { recursive: true, force: true });
+      mkdirSync(modelDir, { recursive: true });
+      writeFileSync(join(modelDir, "config.json"), "{}");
+      writeFileSync(
+        schemaPath,
+        JSON.stringify({
+          type: "object",
+          required: ["triage", "risk", "should_process"],
+          properties: {
+            triage: { type: "string", enum: ["reply", "archive", "escalate", "ignore", "review"] },
+            risk: { type: "string", enum: ["none", "spam", "phishing", "prompt_attack", "suspicious"] },
+            should_process: { type: "boolean" },
+          },
+          additionalProperties: true,
+        }),
+      );
+
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        const program = buildProgram();
+        await program.parseAsync([
+          "node",
+          "tt",
+          "models",
+          "serve",
+          modelDir,
+          "--cache-dir",
+          cacheDir,
+          "--json-schema",
+          schemaPath,
+          "--json-repair-attempts",
+          "2",
+          "--print-command",
+        ]);
+
+        const parsed = JSON.parse(spy.mock.calls[0][0]);
+        expect(parsed.env_keys).toContain("TT_JSON_SCHEMA");
+        expect(parsed.env_keys).toContain("TT_JSON_REPAIR_ATTEMPTS");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   });
 });

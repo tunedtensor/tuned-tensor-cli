@@ -72,6 +72,10 @@ DEFAULT_MAX_TOKENS = int(os.environ.get("TT_MAX_TOKENS", "512"))
 DEFAULT_TEMPERATURE = float(os.environ.get("TT_TEMPERATURE", "0.7"))
 TRUST_REMOTE_CODE = os.environ.get("TT_TRUST_REMOTE_CODE", "false").lower() in {"1", "true", "yes", "y"}
 REQUESTED_DEVICE = os.environ.get("TT_DEVICE", "auto").lower()
+JSON_REPAIR_ATTEMPTS = int(os.environ.get("TT_JSON_REPAIR_ATTEMPTS", "1"))
+DEFAULT_JSON_SCHEMA = None
+if os.environ.get("TT_JSON_SCHEMA"):
+    DEFAULT_JSON_SCHEMA = json.loads(os.environ["TT_JSON_SCHEMA"])
 
 
 def choose_device(torch):
@@ -160,6 +164,50 @@ def normalize_messages(raw_messages):
     return messages
 
 
+def response_json_contract(body):
+    response_format = body.get("response_format")
+    schema = DEFAULT_JSON_SCHEMA
+    mode = "json_schema" if schema else "text"
+
+    if isinstance(response_format, dict):
+        format_type = response_format.get("type")
+        if format_type == "json_object":
+            mode = "json_object"
+        elif format_type == "json_schema":
+            mode = "json_schema"
+            json_schema = response_format.get("json_schema")
+            if isinstance(json_schema, dict):
+                schema = json_schema.get("schema") if isinstance(json_schema.get("schema"), dict) else json_schema
+
+    return mode, schema
+
+
+def with_json_contract(messages, mode, schema):
+    if mode == "text":
+        return messages
+
+    if schema:
+        contract = (
+            "Return only a valid JSON object matching this JSON Schema. "
+            "Do not include markdown, code fences, comments, or prose outside the JSON object.\n"
+            + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+        )
+    else:
+        contract = (
+            "Return only a valid JSON object. Do not include markdown, code fences, "
+            "comments, or prose outside the JSON object."
+        )
+
+    contracted = [dict(message) for message in messages]
+    for message in contracted:
+        if message["role"] == "system":
+            message["content"] = (message["content"].rstrip() + "\n\n" + contract).strip()
+            return contracted
+
+    contracted.insert(0, {"role": "system", "content": contract})
+    return contracted
+
+
 def render_prompt(messages):
     chat_template = getattr(tokenizer, "chat_template", None)
     if hasattr(tokenizer, "apply_chat_template") and chat_template:
@@ -198,6 +246,142 @@ def generate_completion(messages, max_tokens, temperature):
     completion_ids = output_ids[0][prompt_tokens:]
     content = tokenizer.decode(completion_ids, skip_special_tokens=True).strip()
     return content, prompt_tokens, int(completion_ids.shape[-1])
+
+
+def extract_json_value(content):
+    decoder = json.JSONDecoder()
+    text = content.strip()
+    try:
+        return json.loads(text), None
+    except Exception:
+        pass
+
+    for index, char in enumerate(text):
+        if char not in "{[":
+            continue
+        try:
+            value, end = decoder.raw_decode(text[index:])
+            trailing = text[index + end :].strip()
+            if trailing:
+                continue
+            return value, None
+        except Exception:
+            continue
+    return None, "response is not valid JSON"
+
+
+def json_type_matches(value, expected):
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return (isinstance(value, int) or isinstance(value, float)) and not isinstance(value, bool)
+    if expected == "null":
+        return value is None
+    return True
+
+
+def validate_json_schema(value, schema, path="$"):
+    if not isinstance(schema, dict):
+        return []
+
+    errors = []
+    expected_type = schema.get("type")
+    if isinstance(expected_type, list):
+        if not any(json_type_matches(value, item) for item in expected_type):
+            errors.append(f"{path} has wrong type")
+            return errors
+    elif isinstance(expected_type, str) and not json_type_matches(value, expected_type):
+        errors.append(f"{path} must be {expected_type}")
+        return errors
+
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{path} must be one of {schema['enum']}")
+
+    if isinstance(value, dict):
+        required = schema.get("required") if isinstance(schema.get("required"), list) else []
+        for key in required:
+            if key not in value:
+                errors.append(f"{path}.{key} is required")
+
+        properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+        for key, child_schema in properties.items():
+            if key in value:
+                errors.extend(validate_json_schema(value[key], child_schema, f"{path}.{key}"))
+
+        if schema.get("additionalProperties") is False:
+            extras = sorted(set(value.keys()) - set(properties.keys()))
+            for key in extras:
+                errors.append(f"{path}.{key} is not allowed")
+
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        for index, item in enumerate(value):
+            errors.extend(validate_json_schema(item, schema["items"], f"{path}[{index}]"))
+
+    return errors
+
+
+def normalize_json_content(content, mode, schema):
+    if mode == "text":
+        return content, []
+
+    value, error = extract_json_value(content)
+    if error:
+        return content, [error]
+    if mode in {"json_object", "json_schema"} and not isinstance(value, dict):
+        return content, ["response must be a JSON object"]
+
+    errors = validate_json_schema(value, schema) if schema else []
+    if errors:
+        return content, errors
+
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":")), []
+
+
+def generate_validated_completion(messages, max_tokens, temperature, mode, schema):
+    contracted_messages = with_json_contract(messages, mode, schema)
+    attempts = max(0, JSON_REPAIR_ATTEMPTS) + 1
+    last_content = ""
+    last_prompt_tokens = 0
+    last_completion_tokens = 0
+    last_errors = []
+
+    for attempt in range(attempts):
+        content, prompt_tokens, completion_tokens = generate_completion(
+            contracted_messages,
+            max_tokens,
+            temperature,
+        )
+        normalized, errors = normalize_json_content(content, mode, schema)
+        if not errors:
+            return normalized, prompt_tokens, completion_tokens, []
+
+        last_content = content
+        last_prompt_tokens = prompt_tokens
+        last_completion_tokens = completion_tokens
+        last_errors = errors
+
+        if attempt < attempts - 1:
+            contracted_messages = contracted_messages + [
+                {"role": "assistant", "content": content},
+                {
+                    "role": "user",
+                    "content": (
+                        "The previous response was invalid: "
+                        + "; ".join(errors[:5])
+                        + ". Return only a corrected JSON object."
+                    ),
+                },
+            ]
+
+    return last_content, last_prompt_tokens, last_completion_tokens, last_errors
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -248,7 +432,23 @@ class Handler(BaseHTTPRequestHandler):
             max_tokens = int(body.get("max_tokens") or DEFAULT_MAX_TOKENS)
             temperature = float(body.get("temperature") if body.get("temperature") is not None else DEFAULT_TEMPERATURE)
             messages = normalize_messages(raw_messages)
-            content, prompt_tokens, completion_tokens = generate_completion(messages, max_tokens, temperature)
+            json_mode, json_schema = response_json_contract(body)
+            content, prompt_tokens, completion_tokens, validation_errors = generate_validated_completion(
+                messages,
+                max_tokens,
+                temperature,
+                json_mode,
+                json_schema,
+            )
+            if validation_errors:
+                self.send_json(422, {
+                    "error": {
+                        "message": "Model did not produce valid JSON for the requested response_format.",
+                        "details": validation_errors,
+                        "content": content,
+                    }
+                })
+                return
 
             self.send_json(200, {
                 "id": "chatcmpl-" + uuid.uuid4().hex,
@@ -573,6 +773,20 @@ function loadSystemPromptFromSpec(specPath: string): string {
   return buildSystemPrompt(spec);
 }
 
+function loadJsonSchemaForServe(schemaPath: string): string {
+  const resolved = resolve(schemaPath);
+  if (!existsSync(resolved) || !statSync(resolved).isFile()) {
+    throw new Error(`JSON schema file not found: ${schemaPath}`);
+  }
+
+  try {
+    const schema = JSON.parse(readFileSync(resolved, "utf8"));
+    return JSON.stringify(schema);
+  } catch (err) {
+    throw new Error(`JSON schema file is not valid JSON: ${schemaPath}`);
+  }
+}
+
 function writeReferenceServerScript(cacheDir: string): string {
   const scriptDir = join(cacheDir, "_server");
   mkdirSync(scriptDir, { recursive: true });
@@ -824,6 +1038,8 @@ export function registerModelsCommands(parent: Command) {
     .option("--force-download", "Re-download and re-extract model artifacts")
     .option("--max-tokens <n>", "Default max completion tokens", "512")
     .option("--temperature <n>", "Default sampling temperature", "0.7")
+    .option("--json-schema <path>", "JSON Schema file to enforce by default for chat completions")
+    .option("--json-repair-attempts <n>", "Number of JSON/schema repair retries", "1")
     .option("--trust-remote-code", "Pass trust_remote_code=True to transformers")
     .option("--print-command", "Print the underlying Python command without starting it")
     .action(async (target: string, cmdOpts) => {
@@ -860,10 +1076,12 @@ export function registerModelsCommands(parent: Command) {
         TT_PORT: String(cmdOpts.port),
         TT_MAX_TOKENS: String(cmdOpts.maxTokens),
         TT_TEMPERATURE: String(cmdOpts.temperature),
+        TT_JSON_REPAIR_ATTEMPTS: String(cmdOpts.jsonRepairAttempts),
         TT_TRUST_REMOTE_CODE: cmdOpts.trustRemoteCode ? "true" : "false",
         TT_DEVICE: String(cmdOpts.device),
       };
       if (systemPrompt) env.TT_SYSTEM_PROMPT = systemPrompt;
+      if (cmdOpts.jsonSchema) env.TT_JSON_SCHEMA = loadJsonSchemaForServe(cmdOpts.jsonSchema);
 
       const args = [serverScript];
       if (cmdOpts.printCommand) return printServeCommand(python, args, env);
