@@ -1,6 +1,12 @@
 # tt - Tuned Tensor CLI
 
-`tt` is the command-line tool for [Tuned Tensor](https://www.tunedtensor.com), used to define behavior specs, validate them, and launch fine-tuning runs.
+`tt` is the command-line tool for [Tuned Tensor](https://www.tunedtensor.com).
+Use it to define behaviour specs, validate them, launch fine-tuning runs,
+manage datasets, and download or serve trained models.
+
+The main CLI documentation lives at
+[tunedtensor.com/docs/cli](https://tunedtensor.com/docs/cli). This README is a
+short install and development reference.
 
 ## Install
 
@@ -12,7 +18,7 @@ tt --version
 Run from source:
 
 ```bash
-git clone https://github.com/tuned-tensor/tuned-tensor-cli.git
+git clone https://github.com/tunedtensor/tuned-tensor-cli.git
 cd tuned-tensor-cli
 npm install
 npm run build
@@ -21,155 +27,31 @@ npm link
 
 ## Quick Start
 
-1) **Authenticate**
-
 ```bash
 tt auth login
-tt auth status
-```
+tt init --name "Customer Support Bot" --model Qwen/Qwen3.5-2B
 
-2) **Create a local spec**
-
-```bash
-tt init
-# or:
-tt init --name "Customer Support Bot" --model "Qwen/Qwen3.5-2B"
-```
-
-Supported spec base models are `Qwen/Qwen3.5-2B`, `Qwen/Qwen3.5-4B`, `google/gemma-4-E2B-it`, `google/gemma-4-E4B-it`, `meta-llama/Llama-3.2-3B-Instruct`, `microsoft/Phi-4-mini-instruct`, `ibm-granite/granite-3.3-2b-instruct`, and `bigcode/starcoder2-3b`.
-
-You can print the same list from the CLI:
-
-```bash
-tt models base
-tt models base --json
-```
-
-3) **Validate your spec**
-
-```bash
+# Edit tunedtensor.json, then:
 tt eval
-```
-
-4) **Push your spec**
-
-```bash
 tt push
-```
-
-5) **Start and watch a run**
-
-```bash
 tt runs start <spec-id>
-tt runs start <spec-id> --dataset <dataset-id-or-prefix> --train-ratio 0.8 --validation-ratio 0.1 --test-ratio 0.1
-tt runs start <spec-id> --no-llm-judge
 tt runs watch <run-id>
 ```
 
-Tip: use `tt specs list`, `tt datasets list`, `tt runs list`, and `tt models list` to find IDs. Spec, run, dataset, and model commands accept full UUIDs or unambiguous ID prefixes.
-
-## Typical Workflows
+Useful discovery commands:
 
 ```bash
-# Account
-tt auth status
-tt balance
-tt topup --amount 25
-
-# Specs
 tt specs list
-tt specs get <spec-id>
-tt specs create --file spec.json
-tt specs update <spec-id> --file updates.json
-
-# Runs
-tt runs list --spec <spec-id>
-tt runs get <run-id>
-tt runs start <spec-id> --epochs 5 --lr 0.0001 --batch-size 8
-tt runs start <spec-id> --dataset <dataset-id-or-prefix> --train-ratio 0.8 --validation-ratio 0.1 --test-ratio 0.1
-tt runs start <spec-id> --no-llm-judge
-tt runs cancel <run-id>
-
-# Datasets
-tt datasets upload data.jsonl --name "Support Training Set"
 tt datasets list
-tt datasets get <dataset-id>
-
-# Models
-tt models base
+tt runs list
 tt models list
-tt models get <model-id>
-tt models download <model-id> --output model.tar.gz
-tt models setup-runtime
-tt models serve <model-id> --spec tunedtensor.json
-tt models serve ./model --port 8000
+tt models base
+tt balance
 ```
 
-Use `--dataset <dataset-id-or-prefix>` with `tt runs start` to train from an uploaded dataset instead of inline spec examples. Add `--train-ratio`, `--validation-ratio`, and `--test-ratio` to override the default 80/10/10 split.
-
-Use `--max-eval-examples <n>` and `--max-test-eval-examples <n>` with `tt runs start` to cap primary and secondary test evaluation passes for larger datasets; the runs backend still clamps values to its configured ceiling.
-
-Use `--no-llm-judge` with `tt runs start` to opt out of LLM judging for a new run.
-
-`tt models download` downloads models that have a Tuned Tensor-hosted artifact. In interactive terminals it shows download progress, transfer rate, and ETA; `--json` output remains machine-readable. Hosted models can still be used for inference through their model ID, but may not expose downloadable weights.
-
-`tt models setup-runtime` installs an isolated local Python runtime for reference serving. It chooses Python 3.10-3.12, creates a managed venv in the Tuned Tensor cache, and installs `torch`, `transformers`, `accelerate`, and `safetensors`. This can take a few minutes the first time.
-
-`tt models serve` starts a local OpenAI-compatible reference server for a model ID, an extracted model directory, or a `.tar.gz` artifact. It auto-detects `tunedtensor.json` in the current directory or model directory and applies the compiled behavior spec as the default system prompt, so inference matches the prompt contract used during training. Use `--spec <path>` to point at a specific spec, or `--no-spec-prompt` when you intentionally want raw model behavior. If no compatible Python serving runtime is available, run `tt models setup-runtime` first.
-
-```bash
-tt models setup-runtime
-tt models serve <model-id> --spec tunedtensor.json
-tt models serve <model-id> --spec tunedtensor.json --device mps  # Apple Silicon
-tt models serve <model-id> --spec tunedtensor.json --device cuda # NVIDIA GPU
-
-curl http://127.0.0.1:8000/v1/chat/completions \
-  -H 'content-type: application/json' \
-  -d '{"messages":[{"role":"user","content":"Hello"}]}'
-```
-
-## Billing & Credits
-
-Tuned Tensor uses prepaid credits. New accounts start at a zero balance, so top up before starting your first fine-tuning run; you only pay for successful runs.
-
-```bash
-tt balance                 # show credit balance and recent transactions
-tt topup --amount 25       # opens Stripe Checkout in your browser
-tt topup --amount 25 --no-open  # print the URL instead
-```
-
-`tt balance` shows your current credit balance. If a run is rejected with
-`402 insufficient_credits`, top up and retry.
-
-## Spec Validation
-
-`tt eval` validates your local `tunedtensor.json`. It checks required fields, confirms examples are present, warns when guidelines are missing, and checks simple constraints against example outputs. It does not call a model or the Playground API.
-
-## Global Flags
-
-- `-k, --api-key <key>`: override stored API key
-- `-u, --base-url <url>`: override API base URL
-- `--json`: machine-readable output
-- `--no-color`: disable ANSI colors
-- `-h, --help`: command help
-
-Examples:
-
-```bash
-tt specs list --json
-tt runs get <run-id> --json
-tt runs start --help
-```
-
-## Configuration
-
-Credentials are stored in `~/.config/tuned-tensor/config.json` (respects `XDG_CONFIG_HOME`).
-
-API key precedence:
-
-1. `--api-key`
-2. `TUNED_TENSOR_API_KEY`
-3. stored config
+For the full command reference, including dataset-backed runs, evaluation caps,
+local model serving, configuration, and billing, see the
+[CLI docs](https://tunedtensor.com/docs/cli).
 
 ## Development
 
@@ -180,10 +62,6 @@ npm run dev
 npm run typecheck
 npm test
 ```
-
-## Troubleshooting
-
-If the API rejects a spec with a generic server error, check that `base_model` is one of the supported spec base models listed above.
 
 ## License
 
