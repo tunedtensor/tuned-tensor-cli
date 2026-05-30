@@ -1,10 +1,12 @@
 # Changelog
 
-## 0.4.13
+## Unreleased
 
 ### Added
 
 - **`tt models serve --json-schema`** — Enforce a default JSON Schema for local chat completions, validate model output, retry malformed JSON with `--json-repair-attempts`, and return HTTP 422 instead of a successful response when the model cannot satisfy the JSON contract.
+
+## 0.4.13
 
 ### Changed
 
