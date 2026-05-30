@@ -2,6 +2,10 @@
 
 ## 0.4.13
 
+### Added
+
+- **`tt models serve --json-schema`** — Enforce a default JSON Schema for local chat completions, validate model output, retry malformed JSON with `--json-repair-attempts`, and return HTTP 422 instead of a successful response when the model cannot satisfy the JSON contract.
+
 ### Changed
 
 - **`tt runs diagnose`** — Show the live training phase and token accuracy returned by the diagnostics API, alongside epoch progress, loss, pace, ETA, and latest update time.
