@@ -21,6 +21,7 @@ import { resolveModelId } from "../resolve.js";
 import { SUPPORTED_BASE_MODELS } from "../base-models.js";
 import { DEFAULT_SPEC_FILE } from "./init.js";
 import type { LocalSpec } from "../eval/types.js";
+import { startManagedModelServer } from "../serve-manager.js";
 import {
   printTable,
   printDetail,
@@ -847,16 +848,48 @@ function quoteCommandPart(part: string): string {
   return `'${part.replace(/'/g, "'\\''")}'`;
 }
 
-function printServeCommand(command: string, args: string[], env: Record<string, string>) {
+function parseServeInteger(value: string | number, label: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${label} must be a non-negative integer.`);
+  }
+  return parsed;
+}
+
+function printServeCommand(
+  command: string,
+  args: string[],
+  env: Record<string, string>,
+  managed?: {
+    enabled: boolean;
+    host: string;
+    port: number;
+    idle_timeout_seconds: number;
+    restart_after_requests: number;
+    gate_field: string;
+    log_file?: string;
+  },
+) {
   const envKeys = Object.keys(env).sort();
   const commandLine = [command, ...args].map(quoteCommandPart).join(" ");
   if (isJsonMode()) {
-    return printJson({ command, args, env_keys: envKeys, command_line: commandLine });
+    return printJson({ command, args, env_keys: envKeys, command_line: commandLine, managed });
   }
-  printDetail([
+  const fields: [string, string | undefined][] = [
     ["Command", commandLine],
     ["Environment", envKeys.join(", ")],
-  ]);
+  ];
+  if (managed?.enabled) {
+    fields.push(
+      ["Managed", "enabled"],
+      ["Wrapper", `http://${managed.host}:${managed.port}`],
+      ["Idle timeout", `${managed.idle_timeout_seconds}s`],
+      ["Restart after", managed.restart_after_requests === 0 ? "disabled" : `${managed.restart_after_requests} requests`],
+      ["Gate field", managed.gate_field],
+      ["Log file", managed.log_file],
+    );
+  }
+  printDetail(fields);
 }
 
 export function registerModelsCommands(parent: Command) {
@@ -1041,6 +1074,11 @@ export function registerModelsCommands(parent: Command) {
     .option("--json-schema <path>", "JSON Schema file to enforce by default for chat completions")
     .option("--json-repair-attempts <n>", "Number of JSON/schema repair retries", "1")
     .option("--trust-remote-code", "Pass trust_remote_code=True to transformers")
+    .option("--managed", "Run a local lifecycle manager in front of the model server")
+    .option("--idle-timeout <seconds>", "Managed mode idle timeout before stopping the model", "300")
+    .option("--restart-after-requests <n>", "Managed mode restart threshold; 0 disables request-count restarts", "100")
+    .option("--gate-field <field>", "Response JSON field to log as the managed serving gate result", "should_process")
+    .option("--log-file <path>", "Write managed serving JSONL request logs to a file")
     .option("--print-command", "Print the underlying Python command without starting it")
     .action(async (target: string, cmdOpts) => {
       const opts = parent.opts() as ClientOpts;
@@ -1084,10 +1122,31 @@ export function registerModelsCommands(parent: Command) {
       if (cmdOpts.jsonSchema) env.TT_JSON_SCHEMA = loadJsonSchemaForServe(cmdOpts.jsonSchema);
 
       const args = [serverScript];
-      if (cmdOpts.printCommand) return printServeCommand(python, args, env);
+      const idleTimeoutSeconds = parseServeInteger(cmdOpts.idleTimeout, "--idle-timeout");
+      const restartAfterRequests = parseServeInteger(
+        cmdOpts.restartAfterRequests,
+        "--restart-after-requests",
+      );
+      const publicPort = parseServeInteger(cmdOpts.port, "--port");
+      const managedConfig = cmdOpts.managed
+        ? {
+            enabled: true,
+            host: String(cmdOpts.host),
+            port: publicPort,
+            idle_timeout_seconds: idleTimeoutSeconds,
+            restart_after_requests: restartAfterRequests,
+            gate_field: String(cmdOpts.gateField),
+            log_file: cmdOpts.logFile ? resolve(cmdOpts.logFile) : undefined,
+          }
+        : undefined;
+      if (cmdOpts.printCommand) return printServeCommand(python, args, env, managedConfig);
 
       if (!isJsonMode()) {
-        printSuccess(`Serving ${serveTarget.modelName} from ${serveTarget.modelPath}`);
+        printSuccess(
+          cmdOpts.managed
+            ? `Serving ${serveTarget.modelName} through a managed local wrapper`
+            : `Serving ${serveTarget.modelName} from ${serveTarget.modelPath}`,
+        );
         if (systemPrompt && specPath) {
           printSuccess(`Behavior spec prompt loaded from ${specPath}`);
         } else if (cmdOpts.specPrompt !== false) {
@@ -1098,6 +1157,32 @@ export function registerModelsCommands(parent: Command) {
         console.log(`OpenAI-compatible endpoint: http://${cmdOpts.host}:${cmdOpts.port}/v1/chat/completions`);
         console.log(`Health check: http://${cmdOpts.host}:${cmdOpts.port}/health`);
         console.log(`Python runtime: ${python}`);
+        if (cmdOpts.managed) {
+          console.log(`Managed idle timeout: ${idleTimeoutSeconds}s`);
+          console.log(
+            `Managed restart threshold: ${
+              restartAfterRequests === 0 ? "disabled" : `${restartAfterRequests} requests`
+            }`,
+          );
+          console.log(`Managed gate field: ${cmdOpts.gateField}`);
+        }
+      }
+
+      if (cmdOpts.managed) {
+        await startManagedModelServer({
+          publicHost: String(cmdOpts.host),
+          publicPort,
+          python,
+          args,
+          env,
+          modelName: serveTarget.modelName,
+          modelPath: serveTarget.modelPath,
+          idleTimeoutSeconds,
+          restartAfterRequests,
+          gateField: String(cmdOpts.gateField),
+          logFile: cmdOpts.logFile ? resolve(cmdOpts.logFile) : undefined,
+        });
+        return;
       }
 
       await new Promise<void>((resolvePromise, reject) => {
