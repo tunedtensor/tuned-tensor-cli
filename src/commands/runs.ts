@@ -87,7 +87,18 @@ interface RunEvent {
   label: string;
   status: string;
   message: string | null;
+  details?: Record<string, unknown> | null;
   occurred_at: string;
+}
+
+interface BaselineEvalProgress {
+  avgScore?: number;
+  passRate?: number;
+  total?: number;
+  evalSplit?: string;
+  examplesTotal?: number;
+  examplesUsed?: number;
+  evalTruncated?: boolean;
 }
 
 interface RunDiagnostics {
@@ -149,6 +160,69 @@ function formatPercent(rate: number | undefined): string | undefined {
 function formatCountRate(count: number | undefined, total: number | undefined, rate: number | undefined): string | undefined {
   if (count == null || total == null || rate == null) return undefined;
   return `${formatPercent(rate)} (${count}/${total})`;
+}
+
+function readNumber(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function readBoolean(record: Record<string, unknown>, key: string): boolean | undefined {
+  const value = record[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function getBaselineEvalProgress(events?: RunEvent[]): BaselineEvalProgress | undefined {
+  if (!events) return undefined;
+
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (
+      event.stage !== "baseline_evaluating"
+      || event.status !== "completed"
+      || !event.details
+    ) {
+      continue;
+    }
+
+    const avgScore = readNumber(event.details, "avg_score");
+    const passRate = readNumber(event.details, "pass_rate");
+    if (avgScore == null && passRate == null) continue;
+
+    return {
+      avgScore,
+      passRate,
+      total: readNumber(event.details, "total"),
+      evalSplit: readString(event.details, "eval_split"),
+      examplesTotal: readNumber(event.details, "eval_examples_total"),
+      examplesUsed: readNumber(event.details, "eval_examples_used"),
+      evalTruncated: readBoolean(event.details, "eval_truncated"),
+    };
+  }
+
+  return undefined;
+}
+
+function formatEvalExamples(summary: BaselineEvalProgress | undefined): string | undefined {
+  if (!summary) return undefined;
+  const used = summary.examplesUsed;
+  const total = summary.examplesTotal;
+  const fallback = summary.total;
+  const count =
+    used != null && total != null && used !== total
+      ? `${used}/${total}`
+      : used != null
+        ? String(used)
+        : fallback != null
+          ? String(fallback)
+          : undefined;
+  if (!count) return undefined;
+  return summary.evalTruncated ? `${count} (capped)` : count;
 }
 
 function formatMinutes(minutes?: number | null): string | undefined {
@@ -325,6 +399,7 @@ export function registerRunsCommands(parent: Command) {
       const opts = parent.opts() as ClientOpts;
       const fullId = await resolveRunId(id, opts);
       const { data } = await get<Run>(`/runs/${fullId}`, undefined, opts);
+      const baselineEval = getBaselineEvalProgress(data._events);
 
       if (isJsonMode()) return printJson(data);
 
@@ -339,6 +414,10 @@ export function registerRunsCommands(parent: Command) {
         ["Pass Rate", data.eval_summary?.pass_rate != null
           ? (data.eval_summary.pass_rate * 100).toFixed(1) + "%"
           : undefined],
+        ["Base Score", formatPercent(baselineEval?.avgScore)],
+        ["Base Pass Rate", formatPercent(baselineEval?.passRate)],
+        ["Base Eval Split", baselineEval?.evalSplit],
+        ["Base Eval Examples", formatEvalExamples(baselineEval)],
         ["Error", data.error ?? undefined],
         ["Started", formatDate(data.started_at)],
         ["Completed", formatDate(data.completed_at)],

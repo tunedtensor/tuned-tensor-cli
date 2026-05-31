@@ -119,6 +119,46 @@ describe("runs commands", () => {
       expect(spy.mock.calls.flat().join("\n")).toContain("85.0%");
     });
 
+    it("displays completed baseline eval metrics from run events", async () => {
+      vi.mocked(client.get).mockResolvedValue({
+        data: {
+          ...mockRun,
+          status: "training",
+          eval_summary: null,
+          _events: [
+            {
+              id: "event-1",
+              stage: "baseline_evaluating",
+              label: "Evaluating base model",
+              status: "completed",
+              message: "Baseline evaluation completed.",
+              details: {
+                avg_score: 0.528,
+                pass_rate: 0.575,
+                total: 200,
+                eval_split: "validation",
+                eval_examples_total: 1000,
+                eval_examples_used: 200,
+                eval_truncated: true,
+              },
+              occurred_at: "2026-05-31T10:05:00.000Z",
+            },
+          ],
+        },
+      });
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "runs", "get", RUN_UUID]);
+
+      const output = spy.mock.calls.flat().join("\n");
+      expect(output).toContain("Base Score");
+      expect(output).toContain("52.8%");
+      expect(output).toContain("Base Pass Rate");
+      expect(output).toContain("57.5%");
+      expect(output).toContain("validation");
+      expect(output).toContain("200/1000 (capped)");
+    });
+
     it("displays output diagnostics when the API provides them", async () => {
       vi.mocked(client.get).mockResolvedValue({
         data: {
