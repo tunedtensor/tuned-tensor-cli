@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.4.15
 
 ### Added
 
 - **`tt runs get` / `tt runs diagnose`** — Show eval output diagnostics when the API provides them, including JSON validity, schema-key match, non-JSON prefix, visible reasoning prefix, average output length, and plain-language evaluation insights.
+- **`tt models serve --managed`** — Run a lightweight local lifecycle wrapper in front of the reference server. Managed serving starts the model on demand, serializes generation requests, stops the model after an idle timeout, restarts after a request threshold or health failure, and logs JSONL request metrics including schema validity and gate-field results.
 
 ## 0.4.14
 

@@ -498,5 +498,54 @@ describe("models commands", () => {
         rmSync(root, { recursive: true, force: true });
       }
     });
+
+    it("prints managed serving settings without starting the wrapper", async () => {
+      setJsonMode(true);
+      const root = join(tmpdir(), `tt-model-serve-managed-${process.pid}`);
+      const modelDir = join(root, "model");
+      const cacheDir = join(root, "cache");
+      const logPath = join(root, "managed.jsonl");
+      rmSync(root, { recursive: true, force: true });
+      mkdirSync(modelDir, { recursive: true });
+      writeFileSync(join(modelDir, "config.json"), "{}");
+
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        const program = buildProgram();
+        await program.parseAsync([
+          "node",
+          "tt",
+          "models",
+          "serve",
+          modelDir,
+          "--cache-dir",
+          cacheDir,
+          "--managed",
+          "--idle-timeout",
+          "120",
+          "--restart-after-requests",
+          "7",
+          "--gate-field",
+          "decision.allowed",
+          "--log-file",
+          logPath,
+          "--print-command",
+        ]);
+
+        const parsed = JSON.parse(spy.mock.calls[0][0]);
+        expect(parsed.managed).toMatchObject({
+          enabled: true,
+          host: "127.0.0.1",
+          port: 8000,
+          idle_timeout_seconds: 120,
+          restart_after_requests: 7,
+          gate_field: "decision.allowed",
+          log_file: logPath,
+        });
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   });
 });
