@@ -38,6 +38,12 @@ tt runs start <spec-id>
 tt runs watch <run-id>
 ```
 
+To continue training from a completed fine-tuned model artifact:
+
+```bash
+tt runs start <spec-id> --parent-model <model-id>
+```
+
 Useful discovery commands:
 
 ```bash
@@ -49,8 +55,8 @@ tt models base
 tt balance
 ```
 
-For the full command reference, including dataset-backed runs, evaluation caps,
-local model serving, configuration, and billing, see the
+For the full command reference, including dataset-backed runs, continued
+fine-tuning, evaluation caps, local model serving, configuration, and billing, see the
 [CLI docs](https://tunedtensor.com/docs/cli).
 
 ## Development

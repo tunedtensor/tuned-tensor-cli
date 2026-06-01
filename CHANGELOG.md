@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.16
+
+### Added
+
+- **`tt runs start --parent-model`** — Continue fine-tuning from a completed Tuned Tensor model artifact instead of starting again from the original base model.
+
 ## 0.4.15
 
 ### Added
