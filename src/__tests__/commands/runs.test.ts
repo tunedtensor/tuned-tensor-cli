@@ -37,6 +37,7 @@ function buildProgram() {
 const SPEC_UUID = "11111111-1111-4111-8111-111111111111";
 const RUN_UUID = "33333333-3333-4333-8333-333333333333";
 const DATASET_UUID = "00000000-0000-4000-8000-000000000123";
+const MODEL_UUID = "22222222-2222-4222-8222-222222222222";
 
 const mockRun = {
   id: RUN_UUID,
@@ -310,6 +311,32 @@ describe("runs commands", () => {
       expect(client.post).toHaveBeenCalledWith(
         `/behavior-specs/${SPEC_UUID}/runs`,
         {},
+        expect.anything(),
+      );
+    });
+
+    it("resolves and passes a parent model when provided", async () => {
+      vi.mocked(client.get).mockResolvedValueOnce({
+        data: [{ id: MODEL_UUID, name: "Tuned model" }],
+        meta: { page: 1, per_page: 100, total: 1 },
+      });
+      vi.mocked(client.post).mockResolvedValue({ data: mockRun });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "runs", "start", SPEC_UUID,
+        "--parent-model", MODEL_UUID.slice(0, 8),
+      ]);
+
+      expect(client.get).toHaveBeenCalledWith(
+        "/models",
+        { page: 1, per_page: 100 },
+        expect.anything(),
+      );
+      expect(client.post).toHaveBeenCalledWith(
+        `/behavior-specs/${SPEC_UUID}/runs`,
+        { parent_model_id: MODEL_UUID },
         expect.anything(),
       );
     });
