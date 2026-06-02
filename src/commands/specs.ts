@@ -24,6 +24,7 @@ const SPEC_BODY_KEYS = new Set([
   "guidelines",
   "constraints",
   "examples",
+  "eval_cases",
 ]);
 
 const RUN_INPUT_KEYS = ["run_id", "behavior_spec_id", "spec_snapshot", "run_number"];
@@ -81,6 +82,7 @@ interface BehaviorSpec {
   system_prompt: string;
   guidelines: string[];
   examples: { input: string; output: string }[];
+  eval_cases?: unknown[];
   constraints: string[];
   base_model: string;
   created_at: string;

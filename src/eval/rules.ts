@@ -58,10 +58,111 @@ export function validateSpec(spec: LocalSpec): ValidationResult {
     });
   }
 
+  const evalCaseErrors = validateEvalCases(spec);
+  checks.push({
+    name: "Eval cases valid",
+    passed: evalCaseErrors.length === 0,
+    message:
+      evalCaseErrors.length === 0
+        ? spec.eval_cases?.length
+          ? `${spec.eval_cases.length} executable eval case(s)`
+          : undefined
+        : evalCaseErrors.join("; "),
+  });
+
   return {
     valid: checks.every((c) => c.passed),
     checks,
   };
+}
+
+export function validateEvalCases(spec: Pick<LocalSpec, "eval_cases">): string[] {
+  const errors: string[] = [];
+  const cases = spec.eval_cases ?? [];
+  for (const [caseIndex, evalCase] of cases.entries()) {
+    const label = `eval_cases[${caseIndex}]`;
+    if (!evalCase || typeof evalCase !== "object") {
+      errors.push(`${label} must be an object`);
+      continue;
+    }
+    if (typeof evalCase.input !== "string" || evalCase.input.trim().length === 0) {
+      errors.push(`${label}.input must be a non-empty string`);
+    }
+    if (evalCase.runtime !== "python") {
+      errors.push(`${label}.runtime must be "python"`);
+    }
+    if (!Array.isArray(evalCase.tests) || evalCase.tests.length === 0) {
+      errors.push(`${label}.tests must contain at least one test`);
+      continue;
+    }
+
+    for (const [testIndex, test] of evalCase.tests.entries()) {
+      const testLabel = `${label}.tests[${testIndex}]`;
+      if (!test || typeof test !== "object") {
+        errors.push(`${testLabel} must be an object`);
+        continue;
+      }
+      if (test.name !== undefined && (typeof test.name !== "string" || test.name.trim().length === 0)) {
+        errors.push(`${testLabel}.name must be a non-empty string when provided`);
+      }
+      if (test.args !== undefined && (!Array.isArray(test.args) || !test.args.every((arg) => typeof arg === "string"))) {
+        errors.push(`${testLabel}.args must be an array of strings`);
+      }
+      if (test.stdin !== undefined && typeof test.stdin !== "string") {
+        errors.push(`${testLabel}.stdin must be a string`);
+      }
+      if (
+        test.expected_exit_code !== undefined
+        && (
+          typeof test.expected_exit_code !== "number"
+          || !Number.isInteger(test.expected_exit_code)
+          || test.expected_exit_code < 0
+          || test.expected_exit_code > 255
+        )
+      ) {
+        errors.push(`${testLabel}.expected_exit_code must be an integer between 0 and 255`);
+      }
+      if (test.expected_stdout !== undefined && typeof test.expected_stdout !== "string") {
+        errors.push(`${testLabel}.expected_stdout must be a string`);
+      }
+      validateFiles(test.files, `${testLabel}.files`, errors);
+      validateFiles(test.expected_files, `${testLabel}.expected_files`, errors);
+    }
+  }
+  return errors;
+}
+
+function validateFiles(
+  files: unknown,
+  label: string,
+  errors: string[],
+): void {
+  if (files === undefined) return;
+  if (!Array.isArray(files)) {
+    errors.push(`${label} must be an array`);
+    return;
+  }
+  for (const [index, file] of files.entries()) {
+    const fileLabel = `${label}[${index}]`;
+    if (!file || typeof file !== "object") {
+      errors.push(`${fileLabel} must be an object`);
+      continue;
+    }
+    const row = file as { path?: unknown; content?: unknown };
+    if (typeof row.path !== "string" || !isSafeRelativePath(row.path)) {
+      errors.push(`${fileLabel}.path must be a safe relative path`);
+    }
+    if (row.content !== undefined && typeof row.content !== "string") {
+      errors.push(`${fileLabel}.content must be a string`);
+    }
+  }
+}
+
+function isSafeRelativePath(value: string): boolean {
+  if (value.length === 0 || value.length > 240) return false;
+  if (value.includes("\0") || value.startsWith("/")) return false;
+  const normalized = value.replace(/\\/g, "/");
+  return !normalized.split("/").some((part) => part === "" || part === "." || part === "..");
 }
 
 function checkExamplesAgainstConstraints(spec: LocalSpec): string[] {

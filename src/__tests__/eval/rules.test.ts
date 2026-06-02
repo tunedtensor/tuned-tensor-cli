@@ -58,6 +58,51 @@ describe("validateSpec", () => {
     );
     expect(constraintCheck?.passed).toBe(false);
   });
+
+  it("validates Python executable eval cases", () => {
+    const result = validateSpec({
+      ...validSpec,
+      eval_cases: [
+        {
+          input: "Write a Python script that says hello.",
+          runtime: "python",
+          tests: [
+            {
+              args: ["Ada"],
+              stdin: "",
+              files: [{ path: "fixtures/name.txt", content: "Ada" }],
+              expected_stdout: "Hello Ada\n",
+              expected_files: [{ path: "out.txt", content: "Hello Ada\n" }],
+            },
+          ],
+        },
+      ],
+    });
+
+    const check = result.checks.find((c) => c.name === "Eval cases valid");
+    expect(check?.passed).toBe(true);
+  });
+
+  it("rejects invalid executable eval case schemas", () => {
+    const result = validateSpec({
+      ...validSpec,
+      eval_cases: [
+        {
+          input: "Write code",
+          runtime: "python",
+          tests: [
+            {
+              files: [{ path: "../secret.txt", content: "nope" }],
+            },
+          ],
+        },
+      ],
+    });
+
+    const check = result.checks.find((c) => c.name === "Eval cases valid");
+    expect(check?.passed).toBe(false);
+    expect(check?.message).toContain("safe relative path");
+  });
 });
 
 describe("runAssertions", () => {
