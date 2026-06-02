@@ -5,6 +5,7 @@ import { post, put, type ClientOpts } from "../client.js";
 import { printSuccess, printJson, isJsonMode, shortId } from "../output.js";
 import { loadSpec, DEFAULT_SPEC_FILE } from "./init.js";
 import { canonicalizeSpecBaseModel } from "../base-models.js";
+import { validateEvalCases } from "../eval/rules.js";
 
 interface RemoteSpec {
   id: string;
@@ -21,8 +22,12 @@ export function registerPushCommand(parent: Command) {
       const opts = parent.opts() as ClientOpts;
       const filePath = resolve(cmdOpts.file);
       const spec = loadSpec(cmdOpts.file);
+      const evalCaseErrors = validateEvalCases(spec);
+      if (evalCaseErrors.length > 0) {
+        throw new Error(`Invalid eval_cases: ${evalCaseErrors.join("; ")}`);
+      }
 
-      const { id, eval_cases, ...rawBody } = spec as unknown as Record<string, unknown>;
+      const { id, ...rawBody } = spec as unknown as Record<string, unknown>;
       const body = canonicalizeSpecBaseModel(rawBody);
 
       let data: RemoteSpec;

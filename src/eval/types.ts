@@ -17,8 +17,23 @@ export interface Example {
 
 export interface EvalCase {
   input: string;
-  expected?: string | null;
-  assert?: string[];
+  runtime: "python";
+  tests: PythonEvalTest[];
+}
+
+export interface PythonEvalFile {
+  path: string;
+  content?: string;
+}
+
+export interface PythonEvalTest {
+  name?: string;
+  args?: string[];
+  stdin?: string;
+  files?: PythonEvalFile[];
+  expected_exit_code?: number;
+  expected_stdout?: string;
+  expected_files?: PythonEvalFile[];
 }
 
 export interface AssertionResult {

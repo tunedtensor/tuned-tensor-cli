@@ -102,7 +102,7 @@ describe("push command", () => {
     );
   });
 
-  it("strips eval_cases before pushing", async () => {
+  it("preserves Python executable eval_cases before pushing", async () => {
     const spec = {
       name: "Test Bot",
       base_model: "Qwen/Qwen3.5-2B",
@@ -110,7 +110,13 @@ describe("push command", () => {
       guidelines: [],
       constraints: [],
       examples: [{ input: "Hi", output: "Hello!" }],
-      eval_cases: [{ input: "Secret?", assert: ["not-contains:secret"] }],
+      eval_cases: [
+        {
+          input: "Write a Python script that prints hello.",
+          runtime: "python",
+          tests: [{ expected_stdout: "hello\n" }],
+        },
+      ],
     };
     writeFileSync(TEST_FILE, JSON.stringify(spec));
 
@@ -124,7 +130,33 @@ describe("push command", () => {
     ]);
 
     const body = vi.mocked(client.post).mock.calls[0][1] as Record<string, unknown>;
-    expect(body.eval_cases).toBeUndefined();
+    expect(body.eval_cases).toEqual(spec.eval_cases);
+  });
+
+  it("rejects invalid eval_cases before pushing", async () => {
+    const spec = {
+      name: "Test Bot",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Helpful",
+      guidelines: [],
+      constraints: [],
+      examples: [{ input: "Hi", output: "Hello!" }],
+      eval_cases: [
+        {
+          input: "Write code",
+          runtime: "python",
+          tests: [{ files: [{ path: "../secret.txt", content: "nope" }] }],
+        },
+      ],
+    };
+    writeFileSync(TEST_FILE, JSON.stringify(spec));
+
+    const program = buildProgram();
+    await expect(
+      program.parseAsync(["node", "tt", "push", "--file", "test-push-spec.json"]),
+    ).rejects.toThrow(/Invalid eval_cases/);
+
+    expect(client.post).not.toHaveBeenCalled();
   });
 
   it("rejects unsupported local spec model values before pushing", async () => {
