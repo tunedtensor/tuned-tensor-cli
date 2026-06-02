@@ -55,6 +55,15 @@ tt models base
 tt balance
 ```
 
+Download and try a completed model locally:
+
+```bash
+tt models setup-runtime
+tt models download <model-id>
+tt serve <model-id>
+tt serve <model-id> --spec tunedtensor.json --json-schema schema.json
+```
+
 For the full command reference, including dataset-backed runs, continued
 fine-tuning, evaluation caps, local model serving, configuration, and billing, see the
 [CLI docs](https://tunedtensor.com/docs/cli).

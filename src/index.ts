@@ -11,6 +11,7 @@ import { registerTopupCommands } from "./commands/topup.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerEvalCommand } from "./commands/eval.js";
 import { registerPushCommand } from "./commands/push.js";
+import { registerServeCommand } from "./commands/serve.js";
 
 declare const __TT_VERSION__: string;
 
@@ -46,6 +47,7 @@ registerTopupCommands(program);
 registerInitCommand(program);
 registerEvalCommand(program);
 registerPushCommand(program);
+registerServeCommand(program);
 
 // Honor --json even when parsing fails before the preAction hook runs
 // (e.g. on unknown commands). Cheap argv sniff is fine here.

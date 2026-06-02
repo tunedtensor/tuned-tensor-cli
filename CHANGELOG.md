@@ -5,6 +5,7 @@
 ### Added
 
 - **`tt runs start --parent-model`** — Continue fine-tuning from a completed Tuned Tensor model artifact instead of starting again from the original base model.
+- **`tt serve`** — Top-level shortcut for the Tuned Tensor local reference server, with the same behavior spec prompt, JSON Schema, managed lifecycle, and JSONL logging support as `tt models serve`.
 
 ## 0.4.15
 

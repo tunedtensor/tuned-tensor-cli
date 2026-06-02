@@ -892,6 +892,152 @@ function printServeCommand(
   printDetail(fields);
 }
 
+export function registerModelServeCommand(
+  command: Command,
+  root: Command,
+  registrationOpts: { description?: string; defaultPort?: string } = {},
+) {
+  command
+    .description(registrationOpts.description ?? "Serve a downloaded model with an OpenAI-compatible local API")
+    .argument("<target>", "Model ID/prefix, model directory, or .tar.gz artifact")
+    .option("--spec <path>", "Behavior spec JSON to apply as the default system prompt")
+    .option("--no-spec-prompt", "Do not auto-apply a behavior spec system prompt")
+    .option("--host <host>", "Host to bind", "127.0.0.1")
+    .option("--port <port>", "Port to bind", registrationOpts.defaultPort ?? "8000")
+    .option("--python <path>", "Python executable")
+    .option("--cache-dir <path>", "Cache directory for downloaded/extracted models")
+    .option("--device <device>", "Inference device: auto, cpu, cuda, or mps", "auto")
+    .option("--force-download", "Re-download and re-extract model artifacts")
+    .option("--max-tokens <n>", "Default max completion tokens", "512")
+    .option("--temperature <n>", "Default sampling temperature", "0.7")
+    .option("--json-schema <path>", "JSON Schema file to enforce by default for chat completions")
+    .option("--json-repair-attempts <n>", "Number of JSON/schema repair retries", "1")
+    .option("--trust-remote-code", "Pass trust_remote_code=True to transformers")
+    .option("--managed", "Run a local lifecycle manager in front of the model server")
+    .option("--idle-timeout <seconds>", "Managed mode idle timeout before stopping the model", "300")
+    .option("--restart-after-requests <n>", "Managed mode restart threshold; 0 disables request-count restarts", "100")
+    .option("--gate-field <field>", "Response JSON field to log as the managed serving gate result", "should_process")
+    .option("--log-file <path>", "Write managed serving JSONL request logs to a file")
+    .option("--print-command", "Print the underlying Python command without starting it")
+    .action(async (target: string, cmdOpts) => {
+      const opts = root.opts() as ClientOpts;
+      const cacheDir = resolve(cmdOpts.cacheDir || defaultCacheDir());
+      mkdirSync(cacheDir, { recursive: true });
+      const python = resolveServePython(cacheDir, cmdOpts.python);
+      if (!cmdOpts.printCommand) ensureServingRuntime(python, cacheDir);
+
+      const serveTarget = await resolveServeTarget(
+        target,
+        opts,
+        cacheDir,
+        Boolean(cmdOpts.forceDownload),
+      );
+      const serverScript = writeReferenceServerScript(cacheDir);
+
+      let specPath: string | null = null;
+      let systemPrompt = "";
+      if (cmdOpts.specPrompt !== false) {
+        specPath = findSpecPath(cmdOpts.spec, serveTarget.modelPath);
+        if (cmdOpts.spec && !specPath) {
+          throw new Error(`Spec file not found: ${cmdOpts.spec}`);
+        }
+        if (specPath) {
+          systemPrompt = loadSystemPromptFromSpec(specPath);
+        }
+      }
+
+      const env: Record<string, string> = {
+        TT_MODEL_PATH: serveTarget.modelPath,
+        TT_MODEL_NAME: serveTarget.modelName,
+        TT_HOST: cmdOpts.host,
+        TT_PORT: String(cmdOpts.port),
+        TT_MAX_TOKENS: String(cmdOpts.maxTokens),
+        TT_TEMPERATURE: String(cmdOpts.temperature),
+        TT_JSON_REPAIR_ATTEMPTS: String(cmdOpts.jsonRepairAttempts),
+        TT_TRUST_REMOTE_CODE: cmdOpts.trustRemoteCode ? "true" : "false",
+        TT_DEVICE: String(cmdOpts.device),
+      };
+      if (systemPrompt) env.TT_SYSTEM_PROMPT = systemPrompt;
+      if (cmdOpts.jsonSchema) env.TT_JSON_SCHEMA = loadJsonSchemaForServe(cmdOpts.jsonSchema);
+
+      const args = [serverScript];
+      const idleTimeoutSeconds = parseServeInteger(cmdOpts.idleTimeout, "--idle-timeout");
+      const restartAfterRequests = parseServeInteger(
+        cmdOpts.restartAfterRequests,
+        "--restart-after-requests",
+      );
+      const publicPort = parseServeInteger(cmdOpts.port, "--port");
+      const managedConfig = cmdOpts.managed
+        ? {
+            enabled: true,
+            host: String(cmdOpts.host),
+            port: publicPort,
+            idle_timeout_seconds: idleTimeoutSeconds,
+            restart_after_requests: restartAfterRequests,
+            gate_field: String(cmdOpts.gateField),
+            log_file: cmdOpts.logFile ? resolve(cmdOpts.logFile) : undefined,
+          }
+        : undefined;
+      if (cmdOpts.printCommand) return printServeCommand(python, args, env, managedConfig);
+
+      if (!isJsonMode()) {
+        printSuccess(
+          cmdOpts.managed
+            ? `Serving ${serveTarget.modelName} through a managed local wrapper`
+            : `Serving ${serveTarget.modelName} from ${serveTarget.modelPath}`,
+        );
+        if (systemPrompt && specPath) {
+          printSuccess(`Behavior spec prompt loaded from ${specPath}`);
+        } else if (cmdOpts.specPrompt !== false) {
+          printWarning(
+            `No ${DEFAULT_SPEC_FILE} found. Pass --spec <path> to preserve the behavior prompt.`,
+          );
+        }
+        console.log(`OpenAI-compatible endpoint: http://${cmdOpts.host}:${cmdOpts.port}/v1/chat/completions`);
+        console.log(`Health check: http://${cmdOpts.host}:${cmdOpts.port}/health`);
+        console.log(`Python runtime: ${python}`);
+        if (cmdOpts.managed) {
+          console.log(`Managed idle timeout: ${idleTimeoutSeconds}s`);
+          console.log(
+            `Managed restart threshold: ${
+              restartAfterRequests === 0 ? "disabled" : `${restartAfterRequests} requests`
+            }`,
+          );
+          console.log(`Managed gate field: ${cmdOpts.gateField}`);
+        }
+      }
+
+      if (cmdOpts.managed) {
+        await startManagedModelServer({
+          publicHost: String(cmdOpts.host),
+          publicPort,
+          python,
+          args,
+          env,
+          modelName: serveTarget.modelName,
+          modelPath: serveTarget.modelPath,
+          idleTimeoutSeconds,
+          restartAfterRequests,
+          gateField: String(cmdOpts.gateField),
+          logFile: cmdOpts.logFile ? resolve(cmdOpts.logFile) : undefined,
+        });
+        return;
+      }
+
+      await new Promise<void>((resolvePromise, reject) => {
+        const child = spawn(python, args, {
+          stdio: "inherit",
+          env: { ...process.env, ...env },
+        });
+        child.on("error", reject);
+        child.on("exit", (code, signal) => {
+          if (code === 0) return resolvePromise();
+          reject(new Error(`Model server exited with ${signal ?? `code ${code}`}`));
+        });
+      });
+    });
+}
+
 export function registerModelsCommands(parent: Command) {
   const models = parent.command("models").description("Manage fine-tuned models");
 
@@ -1057,146 +1203,7 @@ export function registerModelsCommands(parent: Command) {
       console.log(`Use it with: tt models serve <model-id> --spec ${DEFAULT_SPEC_FILE}`);
     });
 
-  models
-    .command("serve")
-    .description("Serve a downloaded model with an OpenAI-compatible local API")
-    .argument("<target>", "Model ID/prefix, model directory, or .tar.gz artifact")
-    .option("--spec <path>", "Behavior spec JSON to apply as the default system prompt")
-    .option("--no-spec-prompt", "Do not auto-apply a behavior spec system prompt")
-    .option("--host <host>", "Host to bind", "127.0.0.1")
-    .option("--port <port>", "Port to bind", "8000")
-    .option("--python <path>", "Python executable")
-    .option("--cache-dir <path>", "Cache directory for downloaded/extracted models")
-    .option("--device <device>", "Inference device: auto, cpu, cuda, or mps", "auto")
-    .option("--force-download", "Re-download and re-extract model artifacts")
-    .option("--max-tokens <n>", "Default max completion tokens", "512")
-    .option("--temperature <n>", "Default sampling temperature", "0.7")
-    .option("--json-schema <path>", "JSON Schema file to enforce by default for chat completions")
-    .option("--json-repair-attempts <n>", "Number of JSON/schema repair retries", "1")
-    .option("--trust-remote-code", "Pass trust_remote_code=True to transformers")
-    .option("--managed", "Run a local lifecycle manager in front of the model server")
-    .option("--idle-timeout <seconds>", "Managed mode idle timeout before stopping the model", "300")
-    .option("--restart-after-requests <n>", "Managed mode restart threshold; 0 disables request-count restarts", "100")
-    .option("--gate-field <field>", "Response JSON field to log as the managed serving gate result", "should_process")
-    .option("--log-file <path>", "Write managed serving JSONL request logs to a file")
-    .option("--print-command", "Print the underlying Python command without starting it")
-    .action(async (target: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
-      const cacheDir = resolve(cmdOpts.cacheDir || defaultCacheDir());
-      mkdirSync(cacheDir, { recursive: true });
-      const python = resolveServePython(cacheDir, cmdOpts.python);
-      if (!cmdOpts.printCommand) ensureServingRuntime(python, cacheDir);
-
-      const serveTarget = await resolveServeTarget(
-        target,
-        opts,
-        cacheDir,
-        Boolean(cmdOpts.forceDownload),
-      );
-      const serverScript = writeReferenceServerScript(cacheDir);
-
-      let specPath: string | null = null;
-      let systemPrompt = "";
-      if (cmdOpts.specPrompt !== false) {
-        specPath = findSpecPath(cmdOpts.spec, serveTarget.modelPath);
-        if (cmdOpts.spec && !specPath) {
-          throw new Error(`Spec file not found: ${cmdOpts.spec}`);
-        }
-        if (specPath) {
-          systemPrompt = loadSystemPromptFromSpec(specPath);
-        }
-      }
-
-      const env: Record<string, string> = {
-        TT_MODEL_PATH: serveTarget.modelPath,
-        TT_MODEL_NAME: serveTarget.modelName,
-        TT_HOST: cmdOpts.host,
-        TT_PORT: String(cmdOpts.port),
-        TT_MAX_TOKENS: String(cmdOpts.maxTokens),
-        TT_TEMPERATURE: String(cmdOpts.temperature),
-        TT_JSON_REPAIR_ATTEMPTS: String(cmdOpts.jsonRepairAttempts),
-        TT_TRUST_REMOTE_CODE: cmdOpts.trustRemoteCode ? "true" : "false",
-        TT_DEVICE: String(cmdOpts.device),
-      };
-      if (systemPrompt) env.TT_SYSTEM_PROMPT = systemPrompt;
-      if (cmdOpts.jsonSchema) env.TT_JSON_SCHEMA = loadJsonSchemaForServe(cmdOpts.jsonSchema);
-
-      const args = [serverScript];
-      const idleTimeoutSeconds = parseServeInteger(cmdOpts.idleTimeout, "--idle-timeout");
-      const restartAfterRequests = parseServeInteger(
-        cmdOpts.restartAfterRequests,
-        "--restart-after-requests",
-      );
-      const publicPort = parseServeInteger(cmdOpts.port, "--port");
-      const managedConfig = cmdOpts.managed
-        ? {
-            enabled: true,
-            host: String(cmdOpts.host),
-            port: publicPort,
-            idle_timeout_seconds: idleTimeoutSeconds,
-            restart_after_requests: restartAfterRequests,
-            gate_field: String(cmdOpts.gateField),
-            log_file: cmdOpts.logFile ? resolve(cmdOpts.logFile) : undefined,
-          }
-        : undefined;
-      if (cmdOpts.printCommand) return printServeCommand(python, args, env, managedConfig);
-
-      if (!isJsonMode()) {
-        printSuccess(
-          cmdOpts.managed
-            ? `Serving ${serveTarget.modelName} through a managed local wrapper`
-            : `Serving ${serveTarget.modelName} from ${serveTarget.modelPath}`,
-        );
-        if (systemPrompt && specPath) {
-          printSuccess(`Behavior spec prompt loaded from ${specPath}`);
-        } else if (cmdOpts.specPrompt !== false) {
-          printWarning(
-            `No ${DEFAULT_SPEC_FILE} found. Pass --spec <path> to preserve the behavior prompt.`,
-          );
-        }
-        console.log(`OpenAI-compatible endpoint: http://${cmdOpts.host}:${cmdOpts.port}/v1/chat/completions`);
-        console.log(`Health check: http://${cmdOpts.host}:${cmdOpts.port}/health`);
-        console.log(`Python runtime: ${python}`);
-        if (cmdOpts.managed) {
-          console.log(`Managed idle timeout: ${idleTimeoutSeconds}s`);
-          console.log(
-            `Managed restart threshold: ${
-              restartAfterRequests === 0 ? "disabled" : `${restartAfterRequests} requests`
-            }`,
-          );
-          console.log(`Managed gate field: ${cmdOpts.gateField}`);
-        }
-      }
-
-      if (cmdOpts.managed) {
-        await startManagedModelServer({
-          publicHost: String(cmdOpts.host),
-          publicPort,
-          python,
-          args,
-          env,
-          modelName: serveTarget.modelName,
-          modelPath: serveTarget.modelPath,
-          idleTimeoutSeconds,
-          restartAfterRequests,
-          gateField: String(cmdOpts.gateField),
-          logFile: cmdOpts.logFile ? resolve(cmdOpts.logFile) : undefined,
-        });
-        return;
-      }
-
-      await new Promise<void>((resolvePromise, reject) => {
-        const child = spawn(python, args, {
-          stdio: "inherit",
-          env: { ...process.env, ...env },
-        });
-        child.on("error", reject);
-        child.on("exit", (code, signal) => {
-          if (code === 0) return resolvePromise();
-          reject(new Error(`Model server exited with ${signal ?? `code ${code}`}`));
-        });
-      });
-    });
+  registerModelServeCommand(models.command("serve"), parent);
 
   models
     .command("delete")
