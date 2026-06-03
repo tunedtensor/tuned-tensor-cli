@@ -251,10 +251,19 @@ describe("runs commands", () => {
         "node", "tt", "runs", "start", SPEC_UUID,
         "--long-examples", "truncate",
         "--max-seq-length", "4096",
+        "--max-output-tokens", "512",
+        "--eval-reserved-output-tokens", "128",
       ]);
       expect(client.post).toHaveBeenCalledWith(
         `/behavior-specs/${SPEC_UUID}/runs`,
-        { hyperparameters: { long_examples: "truncate", max_seq_length: 4096 } },
+        {
+          hyperparameters: {
+            long_examples: "truncate",
+            max_seq_length: 4096,
+            max_output_tokens: 512,
+            eval_reserved_output_tokens: 128,
+          },
+        },
         expect.anything(),
       );
     });
