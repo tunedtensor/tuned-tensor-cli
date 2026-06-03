@@ -243,6 +243,34 @@ describe("runs commands", () => {
       );
     });
 
+    it("passes long-example controls when provided", async () => {
+      vi.mocked(client.post).mockResolvedValue({ data: mockRun });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "runs", "start", SPEC_UUID,
+        "--long-examples", "truncate",
+        "--max-seq-length", "4096",
+      ]);
+      expect(client.post).toHaveBeenCalledWith(
+        `/behavior-specs/${SPEC_UUID}/runs`,
+        { hyperparameters: { long_examples: "truncate", max_seq_length: 4096 } },
+        expect.anything(),
+      );
+    });
+
+    it("rejects unsupported long-example policies", async () => {
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await expect(
+        program.parseAsync([
+          "node", "tt", "runs", "start", SPEC_UUID,
+          "--long-examples", "clip",
+        ]),
+      ).rejects.toThrow("--long-examples must be one of: error, truncate, skip");
+      expect(client.post).not.toHaveBeenCalled();
+    });
+
     it("passes dataset and split ratios when provided", async () => {
       vi.mocked(client.post).mockResolvedValue({ data: mockRun });
       vi.spyOn(console, "log").mockImplementation(() => {});

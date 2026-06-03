@@ -55,9 +55,9 @@ tt models base
 tt balance
 ```
 
-For the full command reference, including dataset-backed runs, continued
-fine-tuning, evaluation caps, local model serving, configuration, and billing, see the
-[CLI docs](https://tunedtensor.com/docs/cli).
+For the full command reference, including dataset-backed runs, long-example
+policies, continued fine-tuning, evaluation caps, local model serving,
+configuration, and billing, see the [CLI docs](https://tunedtensor.com/docs/cli).
 
 ## Development
 
