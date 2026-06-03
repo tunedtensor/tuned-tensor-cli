@@ -127,6 +127,17 @@ interface RunDiagnostics {
   generated_at: string;
 }
 
+const LONG_EXAMPLE_POLICIES = ["error", "truncate", "skip"] as const;
+
+function parseLongExamplesPolicy(value: string): (typeof LONG_EXAMPLE_POLICIES)[number] {
+  if ((LONG_EXAMPLE_POLICIES as readonly string[]).includes(value)) {
+    return value as (typeof LONG_EXAMPLE_POLICIES)[number];
+  }
+  throw new Error(
+    `--long-examples must be one of: ${LONG_EXAMPLE_POLICIES.join(", ")}`,
+  );
+}
+
 function formatProgress(run: Run): string | undefined {
   if (run.progress_pct == null && !run.stage_label) return undefined;
   const label = run.stage_label ?? run.current_stage ?? "Progress";
@@ -397,6 +408,8 @@ export function registerRunsCommands(parent: Command) {
     .option("--lora-alpha <n>", "LoRA alpha")
     .option("--max-eval-examples <n>", "Max examples for the primary eval pass")
     .option("--max-test-eval-examples <n>", "Max examples for the secondary test eval pass")
+    .option("--long-examples <policy>", "Long training row policy: error, truncate, or skip")
+    .option("--max-seq-length <tokens>", "Maximum training sequence length in tokens")
     .action(async (specId: string, cmdOpts) => {
       const opts = parent.opts() as ClientOpts;
       const body: Record<string, unknown> = {};
@@ -429,6 +442,8 @@ export function registerRunsCommands(parent: Command) {
       if (cmdOpts.loraAlpha) hp.lora_alpha = Number(cmdOpts.loraAlpha);
       if (cmdOpts.maxEvalExamples) hp.max_eval_examples = Number(cmdOpts.maxEvalExamples);
       if (cmdOpts.maxTestEvalExamples) hp.max_test_eval_examples = Number(cmdOpts.maxTestEvalExamples);
+      if (cmdOpts.longExamples) hp.long_examples = parseLongExamplesPolicy(cmdOpts.longExamples);
+      if (cmdOpts.maxSeqLength) hp.max_seq_length = Number(cmdOpts.maxSeqLength);
       if (cmdOpts.llmJudge === false) body.use_llm_judge = false;
       if (Object.keys(hp).length) body.hyperparameters = hp;
 

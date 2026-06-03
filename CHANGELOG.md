@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`tt runs start --long-examples` / `--max-seq-length`** — Pass long-example handling and training sequence length controls through to dataset-backed runs.
+
 ## 0.4.16
 
 ### Added
