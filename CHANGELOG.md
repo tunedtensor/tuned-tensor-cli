@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **`tt runs start --max-output-tokens` / `--eval-reserved-output-tokens`** — Pass runner eval output-budget controls for long-response tasks.
+
 ## 0.4.17
 
 ### Added

@@ -410,6 +410,8 @@ export function registerRunsCommands(parent: Command) {
     .option("--max-test-eval-examples <n>", "Max examples for the secondary test eval pass")
     .option("--long-examples <policy>", "Long training row policy: error, truncate, or skip")
     .option("--max-seq-length <tokens>", "Maximum training sequence length in tokens")
+    .option("--max-output-tokens <tokens>", "Desired evaluation output budget in tokens")
+    .option("--eval-reserved-output-tokens <tokens>", "Minimum evaluation output tokens reserved per row")
     .action(async (specId: string, cmdOpts) => {
       const opts = parent.opts() as ClientOpts;
       const body: Record<string, unknown> = {};
@@ -444,6 +446,10 @@ export function registerRunsCommands(parent: Command) {
       if (cmdOpts.maxTestEvalExamples) hp.max_test_eval_examples = Number(cmdOpts.maxTestEvalExamples);
       if (cmdOpts.longExamples) hp.long_examples = parseLongExamplesPolicy(cmdOpts.longExamples);
       if (cmdOpts.maxSeqLength) hp.max_seq_length = Number(cmdOpts.maxSeqLength);
+      if (cmdOpts.maxOutputTokens) hp.max_output_tokens = Number(cmdOpts.maxOutputTokens);
+      if (cmdOpts.evalReservedOutputTokens) {
+        hp.eval_reserved_output_tokens = Number(cmdOpts.evalReservedOutputTokens);
+      }
       if (cmdOpts.llmJudge === false) body.use_llm_judge = false;
       if (Object.keys(hp).length) body.hyperparameters = hp;
 
