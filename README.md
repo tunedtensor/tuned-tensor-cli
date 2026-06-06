@@ -55,6 +55,22 @@ tt models base
 tt balance
 ```
 
+Export a model to GGUF and package it for Ollama (so it's pluggable like any
+other local model, e.g. in OpenClaw via Ollama's native `/api/chat`):
+
+```bash
+# Convert + quantize to GGUF, write a Modelfile, and run `ollama create`
+tt models export <model-id> --format gguf --quant q4_k_m --ollama
+
+# Inspect the planned llama.cpp / ollama commands without running them
+tt models export <model-id> --quant q8_0 --ollama --print-command
+```
+
+This wraps llama.cpp's `convert_hf_to_gguf.py` + `llama-quantize` and Ollama's
+`ollama create`. Point `tt` at your llama.cpp checkout with `--llama-cpp <dir>`
+(or `--convert-script` / `--quantize-bin`); with `--ollama` the behaviour spec's
+system prompt is embedded as the Modelfile `SYSTEM` block.
+
 For the full command reference, including dataset-backed runs, long-example
 policies, eval token budgets, continued fine-tuning, evaluation caps, local model serving,
 configuration, and billing, see the [CLI docs](https://tunedtensor.com/docs/cli).
