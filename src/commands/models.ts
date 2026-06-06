@@ -892,6 +892,237 @@ function printServeCommand(
   printDetail(fields);
 }
 
+// Quant types that `convert_hf_to_gguf.py` can emit directly via --outtype,
+// so they skip the separate llama-quantize step.
+const CONVERT_NATIVE_OUTTYPES = new Set([
+  "f32",
+  "f16",
+  "bf16",
+  "q8_0",
+  "tq1_0",
+  "tq2_0",
+]);
+
+// Quant types that require llama-quantize applied to an f16 intermediate.
+const QUANTIZE_TYPES = new Set([
+  "q4_0",
+  "q4_1",
+  "q5_0",
+  "q5_1",
+  "q2_k",
+  "q2_k_s",
+  "q3_k_s",
+  "q3_k_m",
+  "q3_k_l",
+  "q4_k_s",
+  "q4_k_m",
+  "q5_k_s",
+  "q5_k_m",
+  "q6_k",
+  "iq1_s",
+  "iq1_m",
+  "iq2_xxs",
+  "iq2_xs",
+  "iq2_s",
+  "iq2_m",
+  "iq3_xxs",
+  "iq3_s",
+  "iq3_m",
+  "iq4_nl",
+  "iq4_xs",
+]);
+
+interface QuantPlan {
+  quant: string;
+  requiresQuantize: boolean;
+  convertOuttype: string;
+  quantizeType?: string;
+}
+
+function planQuant(quant: string): QuantPlan {
+  const lower = quant.trim().toLowerCase();
+  if (!lower) {
+    throw new Error("--quant requires a value (e.g. q4_k_m, q8_0, f16).");
+  }
+  if (CONVERT_NATIVE_OUTTYPES.has(lower)) {
+    return { quant: lower, requiresQuantize: false, convertOuttype: lower };
+  }
+  if (QUANTIZE_TYPES.has(lower)) {
+    return {
+      quant: lower,
+      requiresQuantize: true,
+      convertOuttype: "f16",
+      quantizeType: lower.toUpperCase(),
+    };
+  }
+  const supported = [...CONVERT_NATIVE_OUTTYPES, ...QUANTIZE_TYPES].sort().join(", ");
+  throw new Error(`Unsupported --quant "${quant}". Supported types: ${supported}.`);
+}
+
+// Ollama model tags must be lowercase and limited to [a-z0-9._-].
+function ollamaSlug(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return slug || "model";
+}
+
+function firstExisting(candidates: string[]): string | null {
+  for (const candidate of candidates) {
+    if (candidate && existsSync(candidate) && statSync(candidate).isFile()) {
+      return resolve(candidate);
+    }
+  }
+  return null;
+}
+
+function llamaCppDir(explicit?: string): string | undefined {
+  return explicit || process.env.LLAMA_CPP_DIR || process.env.LLAMA_CPP_HOME || undefined;
+}
+
+function resolveConvertScript(
+  opts: { convertScript?: string; llamaCpp?: string },
+  required: boolean,
+): string {
+  if (opts.convertScript) {
+    const resolved = resolve(opts.convertScript);
+    if (required && !existsSync(resolved)) {
+      throw new Error(`Conversion script not found: ${opts.convertScript}`);
+    }
+    return resolved;
+  }
+
+  const dir = llamaCppDir(opts.llamaCpp);
+  const candidates = dir
+    ? [join(dir, "convert_hf_to_gguf.py"), join(dir, "convert-hf-to-gguf.py")]
+    : [];
+  const found = firstExisting(candidates);
+  if (found) return found;
+
+  if (required) {
+    throw new Error(
+      "Could not find convert_hf_to_gguf.py. Pass --llama-cpp <dir> (a llama.cpp checkout) " +
+        "or --convert-script <path>. Get it from https://github.com/ggml-org/llama.cpp.",
+    );
+  }
+  return dir ? join(dir, "convert_hf_to_gguf.py") : "convert_hf_to_gguf.py";
+}
+
+function resolveQuantizeBin(
+  opts: { quantizeBin?: string; llamaCpp?: string },
+  required: boolean,
+): string {
+  if (opts.quantizeBin) {
+    const resolved = resolve(opts.quantizeBin);
+    if (required && !existsSync(resolved)) {
+      throw new Error(`llama-quantize binary not found: ${opts.quantizeBin}`);
+    }
+    return resolved;
+  }
+
+  const dir = llamaCppDir(opts.llamaCpp);
+  if (dir) {
+    const candidates = [
+      join(dir, "build", "bin", "llama-quantize"),
+      join(dir, "build", "bin", "quantize"),
+      join(dir, "llama-quantize"),
+      join(dir, "quantize"),
+    ];
+    const found = firstExisting(candidates);
+    if (found) return found;
+  }
+
+  if (required && !commandExists("llama-quantize")) {
+    throw new Error(
+      "Could not find the llama-quantize binary. Build llama.cpp and pass --llama-cpp <dir> " +
+        "or --quantize-bin <path>, or add llama-quantize to your PATH.",
+    );
+  }
+  return "llama-quantize";
+}
+
+function buildModelfile(ggufBasename: string, systemPrompt: string): string {
+  const lines = [`FROM ./${ggufBasename}`];
+  if (systemPrompt.trim()) {
+    const escaped = systemPrompt.trim().replace(/"""/g, '\\"\\"\\"');
+    lines.push("", `SYSTEM """${escaped}"""`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+interface ExportStep {
+  name: "convert" | "quantize" | "ollama-create";
+  command: string;
+  args: string[];
+  command_line: string;
+}
+
+function buildExportStep(name: ExportStep["name"], command: string, args: string[]): ExportStep {
+  return {
+    name,
+    command,
+    args,
+    command_line: [command, ...args].map(quoteCommandPart).join(" "),
+  };
+}
+
+interface ExportPlan {
+  format: "gguf";
+  quant: string;
+  model: { name: string; path: string; source: ServeTarget["source"]; id?: string };
+  output_dir: string;
+  gguf_path: string;
+  intermediate_path?: string;
+  steps: ExportStep[];
+  ollama?: {
+    name: string;
+    modelfile_path: string;
+    modelfile: string;
+    create: boolean;
+  };
+}
+
+function printExportPlan(plan: ExportPlan) {
+  if (isJsonMode()) return printJson(plan);
+
+  printDetail([
+    ["Model", `${plan.model.name} (${plan.model.source})`],
+    ["Format", plan.format],
+    ["Quant", plan.quant],
+    ["Output dir", plan.output_dir],
+    ["GGUF", plan.gguf_path],
+  ]);
+  console.log("\nPlanned steps:");
+  for (const step of plan.steps) {
+    console.log(`  ${step.name}: ${step.command_line}`);
+  }
+  if (plan.ollama) {
+    console.log(`\nModelfile (${plan.ollama.modelfile_path}):`);
+    console.log(plan.ollama.modelfile.replace(/^/gm, "  "));
+  }
+}
+
+function printOpenClawHints(ollamaName: string) {
+  console.log("\nUse it with OpenClaw via Ollama's native /api/chat (not /v1):");
+  console.log(
+    [
+      "  {",
+      "    models: { providers: { ollama: {",
+      '      api: "ollama",',
+      '      baseUrl: "http://127.0.0.1:11434",',
+      `      models: [{ id: "${ollamaName}" }]`,
+      "    }}}",
+      "  }",
+    ].join("\n"),
+  );
+  console.log("\nThen run it through the infer surface:");
+  console.log(
+    `  openclaw infer model run --local --model ollama/${ollamaName} \\\n` +
+      '    --prompt "<payload>" --json',
+  );
+}
+
 export function registerModelsCommands(parent: Command) {
   const models = parent.command("models").description("Manage fine-tuned models");
 
@@ -997,6 +1228,193 @@ export function registerModelsCommands(parent: Command) {
 
       const size = bytes == null ? "" : ` (${bytes} bytes)`;
       printSuccess(`Model downloaded to ${outputPath}${size}`);
+    });
+
+  models
+    .command("export")
+    .description("Export a fine-tuned model to GGUF and (optionally) package it for Ollama")
+    .argument("<target>", "Model ID/prefix, model directory, or .tar.gz artifact")
+    .option("--format <format>", "Export format", "gguf")
+    .option("--quant <type>", "Quantization type (e.g. q4_k_m, q8_0, f16)", "q4_k_m")
+    .option("-o, --output <dir>", "Output directory for the GGUF (and Modelfile)")
+    .option("--ollama", "Also write an Ollama Modelfile and run `ollama create`")
+    .option("--ollama-name <name>", "Ollama model name (default: tt-<slug>)")
+    .option("--no-ollama-create", "With --ollama, write the Modelfile but skip `ollama create`")
+    .option("--spec <path>", "Behavior spec JSON to embed as the Ollama SYSTEM prompt")
+    .option("--no-spec-prompt", "Do not embed a behavior spec system prompt in the Modelfile")
+    .option("--llama-cpp <dir>", "Path to a llama.cpp checkout/build (convert script + quantize binary)")
+    .option("--convert-script <path>", "Path to convert_hf_to_gguf.py")
+    .option("--quantize-bin <path>", "Path to the llama-quantize binary")
+    .option("--ollama-bin <path>", "Path to the ollama binary", "ollama")
+    .option("--python <path>", "Python executable to run the conversion script", "python3")
+    .option("--cache-dir <path>", "Cache directory for downloaded/extracted models")
+    .option("--force-download", "Re-download and re-extract model artifacts")
+    .option("-f, --force", "Overwrite existing GGUF/Modelfile outputs")
+    .option("--keep-intermediate", "Keep the intermediate f16 GGUF after quantization")
+    .option("--print-command", "Print the planned commands without executing them")
+    .action(async (target: string, cmdOpts) => {
+      const opts = parent.opts() as ClientOpts;
+
+      const format = String(cmdOpts.format).toLowerCase();
+      if (format !== "gguf") {
+        throw new Error(`Unsupported --format "${cmdOpts.format}". Only "gguf" is supported.`);
+      }
+      const quantPlan = planQuant(String(cmdOpts.quant));
+      const printOnly = Boolean(cmdOpts.printCommand);
+
+      const cacheDir = resolve(cmdOpts.cacheDir || defaultCacheDir());
+      mkdirSync(cacheDir, { recursive: true });
+      const serveTarget = await resolveServeTarget(
+        target,
+        opts,
+        cacheDir,
+        Boolean(cmdOpts.forceDownload),
+      );
+
+      const slug = ollamaSlug(serveTarget.modelName);
+      const outputDir = resolve(cmdOpts.output || join(process.cwd(), `${slug}-gguf`));
+      const finalPath = join(outputDir, `${slug}.${quantPlan.quant}.gguf`);
+      const intermediatePath = quantPlan.requiresQuantize
+        ? join(outputDir, `${slug}.f16.gguf`)
+        : undefined;
+
+      const convertScript = resolveConvertScript(cmdOpts, !printOnly);
+      const convertOutfile = intermediatePath ?? finalPath;
+      const steps: ExportStep[] = [
+        buildExportStep("convert", cmdOpts.python, [
+          convertScript,
+          serveTarget.modelPath,
+          "--outfile",
+          convertOutfile,
+          "--outtype",
+          quantPlan.convertOuttype,
+        ]),
+      ];
+
+      let quantizeBin: string | undefined;
+      if (quantPlan.requiresQuantize) {
+        quantizeBin = resolveQuantizeBin(cmdOpts, !printOnly);
+        steps.push(
+          buildExportStep("quantize", quantizeBin, [
+            intermediatePath as string,
+            finalPath,
+            quantPlan.quantizeType as string,
+          ]),
+        );
+      }
+
+      const wantOllama = Boolean(cmdOpts.ollama);
+      const ollamaName = cmdOpts.ollamaName || `tt-${slug}`;
+      let ollamaInfo: ExportPlan["ollama"];
+      let modelfileContent = "";
+      let modelfilePath = "";
+      if (wantOllama) {
+        let systemPrompt = "";
+        if (cmdOpts.specPrompt !== false) {
+          const specPath = findSpecPath(cmdOpts.spec, serveTarget.modelPath);
+          if (cmdOpts.spec && !specPath) {
+            throw new Error(`Spec file not found: ${cmdOpts.spec}`);
+          }
+          if (specPath) systemPrompt = loadSystemPromptFromSpec(specPath);
+        }
+        modelfilePath = join(outputDir, "Modelfile");
+        modelfileContent = buildModelfile(basename(finalPath), systemPrompt);
+        const createModel = cmdOpts.ollamaCreate !== false;
+        if (createModel) {
+          steps.push(
+            buildExportStep("ollama-create", cmdOpts.ollamaBin, [
+              "create",
+              ollamaName,
+              "-f",
+              modelfilePath,
+            ]),
+          );
+        }
+        ollamaInfo = {
+          name: ollamaName,
+          modelfile_path: modelfilePath,
+          modelfile: modelfileContent,
+          create: createModel,
+        };
+      }
+
+      const plan: ExportPlan = {
+        format: "gguf",
+        quant: quantPlan.quant,
+        model: {
+          name: serveTarget.modelName,
+          path: serveTarget.modelPath,
+          source: serveTarget.source,
+          id: serveTarget.modelId,
+        },
+        output_dir: outputDir,
+        gguf_path: finalPath,
+        intermediate_path: intermediatePath,
+        steps,
+        ollama: ollamaInfo,
+      };
+
+      if (printOnly) return printExportPlan(plan);
+
+      if (existsSync(finalPath) && !cmdOpts.force) {
+        throw new Error(`Output already exists: ${finalPath}. Use --force to overwrite.`);
+      }
+
+      mkdirSync(outputDir, { recursive: true });
+
+      const runStep = (command: string, args: string[]) =>
+        execFileSync(command, args, { stdio: "inherit" });
+
+      if (!isJsonMode()) printSuccess(`Converting ${serveTarget.modelName} → ${quantPlan.convertOuttype} GGUF`);
+      runStep(cmdOpts.python, [
+        convertScript,
+        serveTarget.modelPath,
+        "--outfile",
+        convertOutfile,
+        "--outtype",
+        quantPlan.convertOuttype,
+      ]);
+
+      if (quantPlan.requiresQuantize && quantizeBin) {
+        if (!isJsonMode()) printSuccess(`Quantizing → ${quantPlan.quantizeType}`);
+        runStep(quantizeBin, [
+          intermediatePath as string,
+          finalPath,
+          quantPlan.quantizeType as string,
+        ]);
+        if (!cmdOpts.keepIntermediate && intermediatePath && existsSync(intermediatePath)) {
+          rmSync(intermediatePath, { force: true });
+        }
+      }
+
+      if (ollamaInfo) {
+        writeFileSync(modelfilePath, modelfileContent, "utf8");
+        if (!isJsonMode()) printSuccess(`Wrote Modelfile to ${modelfilePath}`);
+        if (ollamaInfo.create) {
+          if (!isJsonMode()) printSuccess(`Creating Ollama model ${ollamaName}`);
+          runStep(cmdOpts.ollamaBin, ["create", ollamaName, "-f", modelfilePath]);
+        }
+      }
+
+      if (isJsonMode()) {
+        return printJson({
+          format: "gguf",
+          quant: quantPlan.quant,
+          output_dir: outputDir,
+          gguf_path: finalPath,
+          ollama: ollamaInfo
+            ? { name: ollamaName, modelfile_path: modelfilePath, created: ollamaInfo.create }
+            : undefined,
+        });
+      }
+
+      printSuccess(`GGUF written to ${finalPath}`);
+      if (ollamaInfo?.create) {
+        console.log(`Run it: ollama run ${ollamaName}`);
+        printOpenClawHints(ollamaName);
+      } else if (ollamaInfo) {
+        console.log(`Create the Ollama model: ollama create ${ollamaName} -f ${modelfilePath}`);
+      }
     });
 
   models

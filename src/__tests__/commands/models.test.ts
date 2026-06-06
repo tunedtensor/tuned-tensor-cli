@@ -548,4 +548,250 @@ describe("models commands", () => {
       }
     });
   });
+
+  describe("models export", () => {
+    function makeModelDir(label: string) {
+      const root = join(tmpdir(), `tt-model-export-${label}-${process.pid}`);
+      const modelDir = join(root, "model");
+      const cacheDir = join(root, "cache");
+      rmSync(root, { recursive: true, force: true });
+      mkdirSync(modelDir, { recursive: true });
+      writeFileSync(join(modelDir, "config.json"), "{}");
+      return { root, modelDir, cacheDir };
+    }
+
+    it("plans a two-step convert + quantize for a k-quant", async () => {
+      setJsonMode(true);
+      const { root, modelDir, cacheDir } = makeModelDir("kquant");
+      const outputDir = join(root, "out");
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        const program = buildProgram();
+        await program.parseAsync([
+          "node",
+          "tt",
+          "models",
+          "export",
+          modelDir,
+          "--quant",
+          "q4_k_m",
+          "--output",
+          outputDir,
+          "--cache-dir",
+          cacheDir,
+          "--convert-script",
+          "/opt/llama.cpp/convert_hf_to_gguf.py",
+          "--quantize-bin",
+          "/opt/llama.cpp/llama-quantize",
+          "--print-command",
+        ]);
+
+        const plan = JSON.parse(spy.mock.calls[0][0]);
+        expect(plan.format).toBe("gguf");
+        expect(plan.quant).toBe("q4_k_m");
+        expect(plan.steps).toHaveLength(2);
+        expect(plan.steps[0].name).toBe("convert");
+        expect(plan.steps[0].command_line).toContain("convert_hf_to_gguf.py");
+        expect(plan.steps[0].command_line).toContain("--outtype f16");
+        expect(plan.steps[1].name).toBe("quantize");
+        expect(plan.steps[1].command_line).toContain("llama-quantize");
+        expect(plan.steps[1].command_line).toContain("Q4_K_M");
+        expect(plan.gguf_path.endsWith("q4_k_m.gguf")).toBe(true);
+        expect(plan.ollama).toBeUndefined();
+        expect(client.get).not.toHaveBeenCalled();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("uses a single convert step for convert-native outtypes like f16", async () => {
+      setJsonMode(true);
+      const { root, modelDir, cacheDir } = makeModelDir("f16");
+      const outputDir = join(root, "out");
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        const program = buildProgram();
+        await program.parseAsync([
+          "node",
+          "tt",
+          "models",
+          "export",
+          modelDir,
+          "--quant",
+          "f16",
+          "--output",
+          outputDir,
+          "--cache-dir",
+          cacheDir,
+          "--convert-script",
+          "/opt/llama.cpp/convert_hf_to_gguf.py",
+          "--print-command",
+        ]);
+
+        const plan = JSON.parse(spy.mock.calls[0][0]);
+        expect(plan.steps).toHaveLength(1);
+        expect(plan.steps[0].name).toBe("convert");
+        expect(plan.steps[0].command_line).toContain("--outtype f16");
+        expect(plan.intermediate_path).toBeUndefined();
+        expect(plan.gguf_path.endsWith("f16.gguf")).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("writes a Modelfile with the spec prompt and an ollama create step with --ollama", async () => {
+      setJsonMode(true);
+      const root = join(tmpdir(), `tt-model-export-ollama-${process.pid}`);
+      const modelDir = join(root, "PR Circuit Breaker");
+      const cacheDir = join(root, "cache");
+      rmSync(root, { recursive: true, force: true });
+      mkdirSync(modelDir, { recursive: true });
+      writeFileSync(join(modelDir, "config.json"), "{}");
+      const outputDir = join(root, "out");
+      const specPath = join(root, "tunedtensor.json");
+      writeFileSync(
+        specPath,
+        JSON.stringify({
+          name: "PR Circuit Breaker",
+          base_model: "Qwen/Qwen3.5-2B",
+          system_prompt: "You triage PRs.",
+          guidelines: ["Be terse."],
+          constraints: ["Never approve risky diffs."],
+          examples: [{ input: "Hi", output: "Hello." }],
+        }),
+      );
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        const program = buildProgram();
+        await program.parseAsync([
+          "node",
+          "tt",
+          "models",
+          "export",
+          modelDir,
+          "--quant",
+          "q4_k_m",
+          "--output",
+          outputDir,
+          "--cache-dir",
+          cacheDir,
+          "--ollama",
+          "--spec",
+          specPath,
+          "--convert-script",
+          "/opt/llama.cpp/convert_hf_to_gguf.py",
+          "--quantize-bin",
+          "/opt/llama.cpp/llama-quantize",
+          "--print-command",
+        ]);
+
+        const plan = JSON.parse(spy.mock.calls[0][0]);
+        expect(plan.ollama).toBeDefined();
+        expect(plan.ollama.name).toBe("tt-pr-circuit-breaker");
+        expect(plan.ollama.create).toBe(true);
+        expect(plan.ollama.modelfile).toContain("FROM ./");
+        expect(plan.ollama.modelfile).toContain("SYSTEM");
+        expect(plan.ollama.modelfile).toContain("You triage PRs.");
+        expect(plan.ollama.modelfile).toContain("Never approve risky diffs.");
+        const createStep = plan.steps.find((s: { name: string }) => s.name === "ollama-create");
+        expect(createStep.command_line).toContain("ollama create tt-pr-circuit-breaker");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("honors a custom --ollama-name and --no-ollama-create", async () => {
+      setJsonMode(true);
+      const { root, modelDir, cacheDir } = makeModelDir("ollama-name");
+      const outputDir = join(root, "out");
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        const program = buildProgram();
+        await program.parseAsync([
+          "node",
+          "tt",
+          "models",
+          "export",
+          modelDir,
+          "--output",
+          outputDir,
+          "--cache-dir",
+          cacheDir,
+          "--ollama",
+          "--ollama-name",
+          "tt-custom",
+          "--no-ollama-create",
+          "--no-spec-prompt",
+          "--convert-script",
+          "/opt/llama.cpp/convert_hf_to_gguf.py",
+          "--quantize-bin",
+          "/opt/llama.cpp/llama-quantize",
+          "--print-command",
+        ]);
+
+        const plan = JSON.parse(spy.mock.calls[0][0]);
+        expect(plan.ollama.name).toBe("tt-custom");
+        expect(plan.ollama.create).toBe(false);
+        expect(plan.ollama.modelfile).not.toContain("SYSTEM");
+        expect(plan.steps.find((s: { name: string }) => s.name === "ollama-create")).toBeUndefined();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects unsupported quant types", async () => {
+      setJsonMode(true);
+      const { root, modelDir, cacheDir } = makeModelDir("badquant");
+
+      try {
+        const program = buildProgram();
+        await expect(
+          program.parseAsync([
+            "node",
+            "tt",
+            "models",
+            "export",
+            modelDir,
+            "--quant",
+            "q9_bogus",
+            "--cache-dir",
+            cacheDir,
+            "--print-command",
+          ]),
+        ).rejects.toThrow(/Unsupported --quant/);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects unsupported export formats", async () => {
+      setJsonMode(true);
+      const { root, modelDir, cacheDir } = makeModelDir("badformat");
+
+      try {
+        const program = buildProgram();
+        await expect(
+          program.parseAsync([
+            "node",
+            "tt",
+            "models",
+            "export",
+            modelDir,
+            "--format",
+            "onnx",
+            "--cache-dir",
+            cacheDir,
+            "--print-command",
+          ]),
+        ).rejects.toThrow(/Unsupported --format/);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+  });
 });

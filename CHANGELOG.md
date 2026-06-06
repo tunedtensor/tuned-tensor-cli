@@ -2,8 +2,11 @@
 
 ## Unreleased
 
+## 0.4.18
+
 ### Added
 
+- **`tt models export`** — Export a fine-tuned model to GGUF and optionally package it for Ollama. Wraps llama.cpp's `convert_hf_to_gguf.py` + `llama-quantize` to turn the download → convert → quantize → Modelfile → `ollama create` flow into one command. Convert-native outtypes (`f16`/`f32`/`bf16`/`q8_0`/`tq*`) use a single conversion step; K-quants/IQ-quants (e.g. `q4_k_m`, `q5_k_m`, `q6_k`) convert to an f16 intermediate and then quantize. `--ollama` writes a Modelfile (`FROM ./model.gguf` plus the behaviour spec's system prompt as `SYSTEM`) and runs `ollama create tt-<slug>`; `--ollama-name` and `--no-ollama-create` override the tag/creation. `--print-command` shows the full plan without executing, and llama.cpp tooling is located via `--llama-cpp`/`--convert-script`/`--quantize-bin` or `LLAMA_CPP_DIR`.
 - **`tt runs start --max-output-tokens` / `--eval-reserved-output-tokens`** — Pass runner eval output-budget controls for long-response tasks.
 
 ## 0.4.17
