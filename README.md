@@ -34,6 +34,7 @@ tt init --name "Customer Support Bot" --model Qwen/Qwen3.5-2B
 # Edit tunedtensor.json, then:
 tt eval
 tt push
+tt runs estimate <spec-id>
 tt runs start <spec-id>
 tt runs watch <run-id>
 ```
@@ -72,8 +73,9 @@ This wraps llama.cpp's `convert_hf_to_gguf.py` + `llama-quantize` and Ollama's
 system prompt is embedded as the Modelfile `SYSTEM` block.
 
 For the full command reference, including dataset-backed runs, long-example
-policies, eval token budgets, continued fine-tuning, evaluation caps, local model serving,
-configuration, and billing, see the [CLI docs](https://tunedtensor.com/docs/cli).
+policies, eval token budgets, preflight run estimates, continued fine-tuning,
+evaluation caps, local model serving, configuration, and billing, see the
+[CLI docs](https://tunedtensor.com/docs/cli).
 
 ## Development
 

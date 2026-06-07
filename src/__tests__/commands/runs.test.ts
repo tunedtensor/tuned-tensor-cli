@@ -55,6 +55,19 @@ const mockRun = {
   _evals: [],
 };
 
+const mockEstimate = {
+  estimated_training_tokens: 120_000,
+  estimated_cost_cents: 22,
+  estimated_epochs: 4,
+  duration: {
+    estimated_minutes: 58,
+    range_minutes: { low: 42, high: 78 },
+    confidence: "medium",
+    sample_count: 12,
+    basis: "matched_model",
+  },
+};
+
 beforeEach(() => {
   setJsonMode(false);
   process.env.TUNED_TENSOR_API_KEY = FAKE_KEY;
@@ -182,6 +195,110 @@ describe("runs commands", () => {
       await program.parseAsync(["node", "tt", "runs", "get", RUN_UUID]);
       const output = JSON.parse(spy.mock.calls[0][0]);
       expect(output.id).toBe(mockRun.id);
+    });
+  });
+
+  describe("runs estimate", () => {
+    it("estimates a run with default options", async () => {
+      vi.mocked(client.post).mockResolvedValue({ data: mockEstimate });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "runs", "estimate", SPEC_UUID]);
+      expect(client.post).toHaveBeenCalledWith(
+        `/behavior-specs/${SPEC_UUID}/runs/estimate`,
+        {},
+        expect.anything(),
+      );
+    });
+
+    it("passes the same run configuration options as start", async () => {
+      vi.mocked(client.post).mockResolvedValue({ data: mockEstimate });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "runs", "estimate", SPEC_UUID,
+        "--no-augment",
+        "--no-llm-judge",
+        "--epochs", "5",
+        "--lr", "0.0001",
+        "--batch-size", "8",
+        "--lora-rank", "16",
+        "--lora-alpha", "32",
+        "--long-examples", "truncate",
+        "--max-seq-length", "4096",
+      ]);
+      expect(client.post).toHaveBeenCalledWith(
+        `/behavior-specs/${SPEC_UUID}/runs/estimate`,
+        {
+          augment: false,
+          use_llm_judge: false,
+          hyperparameters: {
+            n_epochs: 5,
+            learning_rate: 0.0001,
+            batch_size: 8,
+            lora_rank: 16,
+            lora_alpha: 32,
+            long_examples: "truncate",
+            max_seq_length: 4096,
+          },
+        },
+        expect.anything(),
+      );
+    });
+
+    it("resolves dataset and spec prefixes before estimating", async () => {
+      vi.mocked(client.get)
+        .mockResolvedValueOnce({
+          data: [{ id: DATASET_UUID, name: "Training data" }],
+          meta: { page: 1, per_page: 100, total: 1 },
+        })
+        .mockResolvedValueOnce({
+          data: [{ id: SPEC_UUID, name: "Match" }],
+          meta: { page: 1, per_page: 100, total: 1 },
+        });
+      vi.mocked(client.post).mockResolvedValue({ data: mockEstimate });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "runs", "estimate", SPEC_UUID.slice(0, 8),
+        "--dataset", DATASET_UUID.slice(0, 8),
+        "--train-ratio", "0.7",
+        "--validation-ratio", "0.2",
+        "--test-ratio", "0.1",
+      ]);
+
+      expect(client.post).toHaveBeenCalledWith(
+        `/behavior-specs/${SPEC_UUID}/runs/estimate`,
+        {
+          dataset_id: DATASET_UUID,
+          split_ratios: { train: 0.7, validation: 0.2, test: 0.1 },
+        },
+        expect.anything(),
+      );
+    });
+
+    it("prints estimate details for humans", async () => {
+      vi.mocked(client.post).mockResolvedValue({ data: mockEstimate });
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "runs", "estimate", SPEC_UUID]);
+      const output = spy.mock.calls.flat().join("\n");
+      expect(output).toContain("Estimated Time");
+      expect(output).toContain("58m (42m-1.3h)");
+      expect(output).toContain("$0.22");
+      expect(output).toContain("medium");
+    });
+
+    it("outputs JSON when json mode is on", async () => {
+      setJsonMode(true);
+      vi.mocked(client.post).mockResolvedValue({ data: mockEstimate });
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "runs", "estimate", SPEC_UUID]);
+      const output = JSON.parse(spy.mock.calls[0][0]);
+      expect(output.duration.confidence).toBe("medium");
+      expect(output.estimated_cost_cents).toBe(22);
     });
   });
 
