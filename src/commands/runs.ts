@@ -127,6 +127,22 @@ interface RunDiagnostics {
   generated_at: string;
 }
 
+interface RunEstimate {
+  estimated_training_tokens: number;
+  estimated_cost_cents: number;
+  estimated_epochs: number;
+  duration: {
+    estimated_minutes: number;
+    range_minutes: {
+      low: number;
+      high: number;
+    };
+    confidence: "low" | "medium" | "high";
+    sample_count: number;
+    basis: "matched_model" | "all_completed_runs" | "fallback";
+  };
+}
+
 const LONG_EXAMPLE_POLICIES = ["error", "truncate", "skip"] as const;
 
 function parseLongExamplesPolicy(value: string): (typeof LONG_EXAMPLE_POLICIES)[number] {
@@ -166,6 +182,33 @@ function formatMinutes(minutes?: number | null): string | undefined {
   if (minutes == null) return undefined;
   if (minutes < 60) return `${Math.max(1, Math.round(minutes))}m`;
   return `${(minutes / 60).toFixed(1)}h`;
+}
+
+function formatCents(cents: number): string {
+  const dollars = cents / 100;
+  if (Math.abs(dollars) >= 100) return `$${dollars.toFixed(0)}`;
+  return `$${dollars.toFixed(2)}`;
+}
+
+function formatEstimateRange(estimate: RunEstimate): string {
+  const duration = estimate.duration;
+  return `${formatMinutes(duration.estimated_minutes)} (${formatMinutes(duration.range_minutes.low)}-${formatMinutes(duration.range_minutes.high)})`;
+}
+
+function printRunEstimate(estimate: RunEstimate) {
+  printDetail([
+    ["Estimated Time", formatEstimateRange(estimate)],
+    ["Confidence", estimate.duration.confidence],
+    ["History Samples", String(estimate.duration.sample_count)],
+    ["Basis", estimate.duration.basis.replaceAll("_", " ")],
+    ["Estimated Cost", formatCents(estimate.estimated_cost_cents)],
+    ["Training Tokens", `${(estimate.estimated_training_tokens / 1000).toFixed(1)}k`],
+    ["Epochs", String(estimate.estimated_epochs)],
+  ]);
+
+  console.log(
+    "\nDuration is a rough historical range. Final cost uses provider-reported training tokens.",
+  );
 }
 
 function formatEpochProgress(diagnostics: RunDiagnostics): string | undefined {
@@ -286,6 +329,74 @@ function printEvalOutputDiagnostics(diagnostics: RunOutputDiagnostics | undefine
   }
 }
 
+function addRunConfigurationOptions(command: Command): Command {
+  return command
+    .option("--no-augment", "Disable data augmentation")
+    .option("--no-llm-judge", "Disable LLM judging")
+    .option("--epochs <n>", "Number of training epochs")
+    .option("--lr <rate>", "Learning rate")
+    .option("--batch-size <n>", "Batch size")
+    .option("--dataset <id>", "Dataset ID to use instead of inline spec examples (full UUID or 4+ char prefix)")
+    .option("--parent-model <id>", "Fine-tuned model ID to continue training from (full UUID or 4+ char prefix)")
+    .option("--train-ratio <ratio>", "Dataset training split ratio (default: 0.8 when any split ratio is set)")
+    .option("--validation-ratio <ratio>", "Dataset validation split ratio (default: 0.1 when any split ratio is set)")
+    .option("--test-ratio <ratio>", "Dataset test split ratio (default: 0.1 when any split ratio is set)")
+    .option("--lora-rank <n>", "LoRA rank")
+    .option("--lora-alpha <n>", "LoRA alpha")
+    .option("--max-eval-examples <n>", "Max examples for the primary eval pass")
+    .option("--max-test-eval-examples <n>", "Max examples for the secondary test eval pass")
+    .option("--long-examples <policy>", "Long training row policy: error, truncate, or skip")
+    .option("--max-seq-length <tokens>", "Maximum training sequence length in tokens")
+    .option("--max-output-tokens <tokens>", "Desired evaluation output budget in tokens")
+    .option("--eval-reserved-output-tokens <tokens>", "Minimum evaluation output tokens reserved per row");
+}
+
+async function buildRunRequestBody(
+  cmdOpts: Record<string, unknown>,
+  opts: ClientOpts,
+): Promise<Record<string, unknown>> {
+  const body: Record<string, unknown> = {};
+
+  if (cmdOpts.augment === false) body.augment = false;
+  if (cmdOpts.dataset) body.dataset_id = await resolveDatasetId(String(cmdOpts.dataset), opts);
+  if (cmdOpts.parentModel) {
+    body.parent_model_id = await resolveModelId(String(cmdOpts.parentModel), opts);
+  }
+
+  const splitRatioOptions = [
+    cmdOpts.trainRatio,
+    cmdOpts.validationRatio,
+    cmdOpts.testRatio,
+  ];
+  if (splitRatioOptions.some((value) => value != null)) {
+    body.split_ratios = {
+      train: cmdOpts.trainRatio != null ? Number(cmdOpts.trainRatio) : 0.8,
+      validation:
+        cmdOpts.validationRatio != null ? Number(cmdOpts.validationRatio) : 0.1,
+      test: cmdOpts.testRatio != null ? Number(cmdOpts.testRatio) : 0.1,
+    };
+  }
+
+  const hp: Record<string, unknown> = {};
+  if (cmdOpts.epochs) hp.n_epochs = Number(cmdOpts.epochs);
+  if (cmdOpts.lr) hp.learning_rate = Number(cmdOpts.lr);
+  if (cmdOpts.batchSize) hp.batch_size = Number(cmdOpts.batchSize);
+  if (cmdOpts.loraRank) hp.lora_rank = Number(cmdOpts.loraRank);
+  if (cmdOpts.loraAlpha) hp.lora_alpha = Number(cmdOpts.loraAlpha);
+  if (cmdOpts.maxEvalExamples) hp.max_eval_examples = Number(cmdOpts.maxEvalExamples);
+  if (cmdOpts.maxTestEvalExamples) hp.max_test_eval_examples = Number(cmdOpts.maxTestEvalExamples);
+  if (cmdOpts.longExamples) hp.long_examples = parseLongExamplesPolicy(String(cmdOpts.longExamples));
+  if (cmdOpts.maxSeqLength) hp.max_seq_length = Number(cmdOpts.maxSeqLength);
+  if (cmdOpts.maxOutputTokens) hp.max_output_tokens = Number(cmdOpts.maxOutputTokens);
+  if (cmdOpts.evalReservedOutputTokens) {
+    hp.eval_reserved_output_tokens = Number(cmdOpts.evalReservedOutputTokens);
+  }
+  if (cmdOpts.llmJudge === false) body.use_llm_judge = false;
+  if (Object.keys(hp).length) body.hyperparameters = hp;
+
+  return body;
+}
+
 export function registerRunsCommands(parent: Command) {
   const runs = parent.command("runs").description("Manage runs");
 
@@ -390,69 +501,35 @@ export function registerRunsCommands(parent: Command) {
       }
     });
 
-  runs
-    .command("start")
-    .description("Start a new run for a behaviour spec")
-    .argument("<spec-id>", "Behaviour spec ID (full UUID or 8+ char prefix)")
-    .option("--no-augment", "Disable data augmentation")
-    .option("--no-llm-judge", "Disable LLM judging")
-    .option("--epochs <n>", "Number of training epochs")
-    .option("--lr <rate>", "Learning rate")
-    .option("--batch-size <n>", "Batch size")
-    .option("--dataset <id>", "Dataset ID to use instead of inline spec examples (full UUID or 4+ char prefix)")
-    .option("--parent-model <id>", "Fine-tuned model ID to continue training from (full UUID or 4+ char prefix)")
-    .option("--train-ratio <ratio>", "Dataset training split ratio (default: 0.8 when any split ratio is set)")
-    .option("--validation-ratio <ratio>", "Dataset validation split ratio (default: 0.1 when any split ratio is set)")
-    .option("--test-ratio <ratio>", "Dataset test split ratio (default: 0.1 when any split ratio is set)")
-    .option("--lora-rank <n>", "LoRA rank")
-    .option("--lora-alpha <n>", "LoRA alpha")
-    .option("--max-eval-examples <n>", "Max examples for the primary eval pass")
-    .option("--max-test-eval-examples <n>", "Max examples for the secondary test eval pass")
-    .option("--long-examples <policy>", "Long training row policy: error, truncate, or skip")
-    .option("--max-seq-length <tokens>", "Maximum training sequence length in tokens")
-    .option("--max-output-tokens <tokens>", "Desired evaluation output budget in tokens")
-    .option("--eval-reserved-output-tokens <tokens>", "Minimum evaluation output tokens reserved per row")
+  addRunConfigurationOptions(
+    runs
+      .command("estimate")
+      .description("Estimate run cost and duration before starting")
+      .argument("<spec-id>", "Behaviour spec ID (full UUID or 8+ char prefix)"),
+  )
     .action(async (specId: string, cmdOpts) => {
       const opts = parent.opts() as ClientOpts;
-      const body: Record<string, unknown> = {};
+      const body = await buildRunRequestBody(cmdOpts, opts);
+      const fullSpecId = await resolveSpecId(specId, opts);
+      const { data } = await post<RunEstimate>(
+        `/behavior-specs/${fullSpecId}/runs/estimate`,
+        body,
+        opts,
+      );
 
-      if (cmdOpts.augment === false) body.augment = false;
-      if (cmdOpts.dataset) body.dataset_id = await resolveDatasetId(cmdOpts.dataset, opts);
-      if (cmdOpts.parentModel) {
-        body.parent_model_id = await resolveModelId(cmdOpts.parentModel, opts);
-      }
+      if (isJsonMode()) return printJson(data);
+      printRunEstimate(data);
+    });
 
-      const splitRatioOptions = [
-        cmdOpts.trainRatio,
-        cmdOpts.validationRatio,
-        cmdOpts.testRatio,
-      ];
-      if (splitRatioOptions.some((value) => value != null)) {
-        body.split_ratios = {
-          train: cmdOpts.trainRatio != null ? Number(cmdOpts.trainRatio) : 0.8,
-          validation:
-            cmdOpts.validationRatio != null ? Number(cmdOpts.validationRatio) : 0.1,
-          test: cmdOpts.testRatio != null ? Number(cmdOpts.testRatio) : 0.1,
-        };
-      }
-
-      const hp: Record<string, unknown> = {};
-      if (cmdOpts.epochs) hp.n_epochs = Number(cmdOpts.epochs);
-      if (cmdOpts.lr) hp.learning_rate = Number(cmdOpts.lr);
-      if (cmdOpts.batchSize) hp.batch_size = Number(cmdOpts.batchSize);
-      if (cmdOpts.loraRank) hp.lora_rank = Number(cmdOpts.loraRank);
-      if (cmdOpts.loraAlpha) hp.lora_alpha = Number(cmdOpts.loraAlpha);
-      if (cmdOpts.maxEvalExamples) hp.max_eval_examples = Number(cmdOpts.maxEvalExamples);
-      if (cmdOpts.maxTestEvalExamples) hp.max_test_eval_examples = Number(cmdOpts.maxTestEvalExamples);
-      if (cmdOpts.longExamples) hp.long_examples = parseLongExamplesPolicy(cmdOpts.longExamples);
-      if (cmdOpts.maxSeqLength) hp.max_seq_length = Number(cmdOpts.maxSeqLength);
-      if (cmdOpts.maxOutputTokens) hp.max_output_tokens = Number(cmdOpts.maxOutputTokens);
-      if (cmdOpts.evalReservedOutputTokens) {
-        hp.eval_reserved_output_tokens = Number(cmdOpts.evalReservedOutputTokens);
-      }
-      if (cmdOpts.llmJudge === false) body.use_llm_judge = false;
-      if (Object.keys(hp).length) body.hyperparameters = hp;
-
+  addRunConfigurationOptions(
+    runs
+      .command("start")
+      .description("Start a new run for a behaviour spec")
+      .argument("<spec-id>", "Behaviour spec ID (full UUID or 8+ char prefix)"),
+  )
+    .action(async (specId: string, cmdOpts) => {
+      const opts = parent.opts() as ClientOpts;
+      const body = await buildRunRequestBody(cmdOpts, opts);
       const fullSpecId = await resolveSpecId(specId, opts);
       const { data } = await post<Run>(
         `/behavior-specs/${fullSpecId}/runs`,

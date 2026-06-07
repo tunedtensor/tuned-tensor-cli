@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **`tt runs estimate`** — Preview estimated training tokens, cost, and rough wall-clock duration before starting a run. The command accepts the same run-configuration flags as `tt runs start` and calls the preflight estimate API.
+
 ## 0.4.18
 
 ### Added
