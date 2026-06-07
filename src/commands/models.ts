@@ -13,7 +13,7 @@ import {
   rmSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve, basename } from "node:path";
+import { dirname, join, resolve, basename, normalize, isAbsolute } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { get, del, type ClientOpts } from "../client.js";
@@ -732,8 +732,33 @@ function directoryHasFiles(path: string): boolean {
   return existsSync(path) && statSync(path).isDirectory() && readdirSync(path).length > 0;
 }
 
+export function validateArchiveEntryPath(entry: string): string {
+  const normalized = normalize(entry).replace(/^[\\/]+/, "");
+  if (
+    !entry.trim() ||
+    isAbsolute(entry) ||
+    normalized === ".." ||
+    normalized.startsWith(`..${"/"}`) ||
+    normalized.startsWith(`..${"\\"}`)
+  ) {
+    throw new Error(`Unsafe archive entry path: ${entry}`);
+  }
+  return normalized;
+}
+
+function validateArchiveEntries(archivePath: string) {
+  const listing = execFileSync("tar", ["-tzf", archivePath], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  for (const entry of listing.split(/\r?\n/)) {
+    if (entry.trim()) validateArchiveEntryPath(entry);
+  }
+}
+
 function extractArchive(archivePath: string, targetDir: string, force: boolean): string {
   if (directoryHasFiles(targetDir) && !force) return targetDir;
+  validateArchiveEntries(archivePath);
   if (existsSync(targetDir)) rmSync(targetDir, { recursive: true, force: true });
   mkdirSync(targetDir, { recursive: true });
   execFileSync("tar", ["-xzf", archivePath, "-C", targetDir], { stdio: "inherit" });

@@ -3,7 +3,7 @@ import { Command } from "commander";
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { registerModelsCommands } from "../../commands/models.js";
+import { registerModelsCommands, validateArchiveEntryPath } from "../../commands/models.js";
 import * as client from "../../client.js";
 import { setJsonMode } from "../../output.js";
 
@@ -46,6 +46,19 @@ beforeEach(() => {
 });
 
 describe("models commands", () => {
+  describe("archive extraction safety", () => {
+    it("rejects tar entries that would escape the extraction directory", () => {
+      expect(() => validateArchiveEntryPath("../escape.txt")).toThrow(/unsafe archive entry/i);
+      expect(() => validateArchiveEntryPath("nested/../../escape.txt")).toThrow(/unsafe archive entry/i);
+      expect(() => validateArchiveEntryPath("/absolute/escape.txt")).toThrow(/unsafe archive entry/i);
+    });
+
+    it("allows normal nested model artifact entries", () => {
+      expect(validateArchiveEntryPath("model/config.json")).toBe("model/config.json");
+      expect(validateArchiveEntryPath("./model/tokenizer.json")).toBe("model/tokenizer.json");
+    });
+  });
+
   describe("models base", () => {
     it("lists supported base models without an API request", async () => {
       const spy = vi.spyOn(console, "log").mockImplementation(() => {});
