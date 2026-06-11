@@ -56,6 +56,18 @@ tt models base
 tt balance
 ```
 
+Label real, unlabeled data with a teacher model (JSONL with `{"input": ...}`
+rows, or CSV with `--input-column`). The teacher drafts outputs under your
+spec's system prompt; you review before anything trains:
+
+```bash
+tt label upload tickets.csv --spec <spec-id> --input-column body --start
+tt label rows <job-id> --status labeled     # review the teacher's drafts
+tt label accept <job-id> --all              # or accept/reject/edit by row
+tt label promote <job-id> --name tickets-v1 # becomes a validated dataset
+tt runs start <spec-id> --dataset <dataset-id>
+```
+
 Export a model to GGUF and package it for Ollama (so it's pluggable like any
 other local model, e.g. in OpenClaw via Ollama's native `/api/chat`):
 

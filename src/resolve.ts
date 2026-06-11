@@ -29,15 +29,16 @@ export function isFullUuid(value: string): boolean {
 
 async function resolvePrefix<T extends Identifiable>(
   prefix: string,
-  kind: "spec" | "run" | "dataset" | "model",
+  kind: "spec" | "run" | "dataset" | "model" | "labeling job",
   listPath: string,
   describe: (item: T) => string,
   opts?: ClientOpts,
+  listCmdOverride?: string,
 ): Promise<string> {
   if (isFullUuid(prefix)) return prefix;
 
   const noun = kind;
-  const listCmd = `tt ${kind}s list --json`;
+  const listCmd = listCmdOverride ?? `tt ${kind}s list --json`;
 
   if (prefix.length < MIN_PREFIX_LEN) {
     throw new ResolveError(
@@ -112,5 +113,19 @@ export function resolveModelId(prefix: string, opts?: ClientOpts): Promise<strin
     "/models",
     (m) => `${m.id}${m.name ? `  (${m.name})` : ""}`,
     opts,
+  );
+}
+
+export function resolveLabelingJobId(
+  prefix: string,
+  opts?: ClientOpts,
+): Promise<string> {
+  return resolvePrefix<Identifiable>(
+    prefix,
+    "labeling job",
+    "/labeling-jobs",
+    (j) => `${j.id}${j.name ? `  (${j.name})` : ""}`,
+    opts,
+    "tt label list --json",
   );
 }

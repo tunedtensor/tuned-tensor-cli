@@ -4,6 +4,7 @@ import { registerAuthCommands } from "./commands/auth.js";
 import { registerSpecsCommands } from "./commands/specs.js";
 import { registerRunsCommands } from "./commands/runs.js";
 import { registerDatasetsCommands } from "./commands/datasets.js";
+import { registerLabelCommands } from "./commands/label.js";
 import { registerModelsCommands } from "./commands/models.js";
 
 import { registerBalanceCommands } from "./commands/balance.js";
@@ -39,6 +40,7 @@ registerAuthCommands(program);
 registerSpecsCommands(program);
 registerRunsCommands(program);
 registerDatasetsCommands(program);
+registerLabelCommands(program);
 registerModelsCommands(program);
 
 registerBalanceCommands(program);
