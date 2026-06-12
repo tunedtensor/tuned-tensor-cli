@@ -184,45 +184,58 @@ describe("label upload", () => {
   });
 });
 
-describe("label run", () => {
-  it("loops until awaiting_review", async () => {
-    vi.mocked(client.post)
+describe("label watch", () => {
+  it("polls the job until awaiting_review without any process calls", async () => {
+    vi.useFakeTimers();
+    vi.mocked(client.get)
       .mockResolvedValueOnce({
         data: {
-          locked: false,
+          ...mockJob,
           status: "labeling",
           counts: { ...doneCounts, pending: 2, labeled: 1 },
-          batch_labeled: 1,
-          actual_cost_cents: null,
         },
       })
       .mockResolvedValueOnce({
         data: {
-          locked: false,
+          ...mockJob,
           status: "awaiting_review",
-          counts: doneCounts,
-          batch_labeled: 2,
+          labeled_count: 3,
           actual_cost_cents: 9,
+          counts: doneCounts,
         },
       });
-    vi.mocked(client.get).mockResolvedValue({
-      data: { ...mockJob, status: "awaiting_review", labeled_count: 3, actual_cost_cents: 9 },
-    });
 
     const program = buildProgram();
-    await program.parseAsync(["node", "tt", "label", "run", JOB_UUID]);
+    const parsePromise = program.parseAsync(["node", "tt", "label", "watch", JOB_UUID]);
+    await vi.advanceTimersByTimeAsync(6000);
+    await parsePromise;
+    vi.useRealTimers();
 
-    expect(client.post).toHaveBeenCalledTimes(2);
-    expect(client.post).toHaveBeenCalledWith(
-      `/labeling-jobs/${JOB_UUID}/process`,
-      {},
-      expect.anything(),
-    );
+    expect(client.post).not.toHaveBeenCalled();
+    expect(client.get).toHaveBeenCalledTimes(2);
     expect(client.get).toHaveBeenCalledWith(
       `/labeling-jobs/${JOB_UUID}`,
       undefined,
       expect.anything(),
     );
+  });
+
+  it("sets a non-zero exit code when labeling fails", async () => {
+    vi.mocked(client.get).mockResolvedValue({
+      data: {
+        ...mockJob,
+        status: "failed",
+        error: "All rows failed teacher labeling",
+        counts: doneCounts,
+      },
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const program = buildProgram();
+    await program.parseAsync(["node", "tt", "label", "watch", JOB_UUID]);
+
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
   });
 });
 

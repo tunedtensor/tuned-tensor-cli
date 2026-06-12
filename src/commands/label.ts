@@ -53,14 +53,6 @@ interface LabelingRow {
   error: string | null;
 }
 
-interface ProcessResult {
-  locked: boolean;
-  status: string;
-  counts: RowCounts;
-  batch_labeled: number;
-  actual_cost_cents: number | null;
-}
-
 interface UploadUrl {
   path: string;
   upload_url: string;
@@ -197,31 +189,33 @@ function printJobDetail(job: LabelingJob, counts?: RowCounts) {
   }
 }
 
-async function runProcessLoop(jobId: string, opts: ClientOpts): Promise<LabelingJob> {
+/**
+ * Poll the job until the server-side Step Functions workflow finishes.
+ * Labeling runs entirely in the cloud — closing the CLI does not stop it;
+ * watch just re-attaches to progress.
+ */
+async function watchJob(jobId: string, opts: ClientOpts): Promise<LabelingJob & { counts: RowCounts }> {
   for (;;) {
-    const { data } = await post<ProcessResult>(
-      `/labeling-jobs/${jobId}/process`,
-      {},
+    const { data } = await get<LabelingJob & { counts: RowCounts }>(
+      `/labeling-jobs/${jobId}`,
+      undefined,
       opts,
     );
 
-    const done = data.counts.total - data.counts.pending;
     if (!isJsonMode()) {
-      process.stdout.write(
-        `\rLabeling ${done}/${data.counts.total} rows${data.locked ? " (another worker is active)" : ""}   `,
-      );
+      if (data.status === "preparing") {
+        process.stdout.write("\rPreparing - parsing the source file...   ");
+      } else {
+        const done = data.counts.total - data.counts.pending;
+        process.stdout.write(`\rLabeling ${done}/${data.counts.total} rows   `);
+      }
     }
 
-    if (data.status !== "labeling") {
+    if (data.status !== "preparing" && data.status !== "labeling") {
       if (!isJsonMode()) process.stdout.write("\n");
-      const { data: job } = await get<LabelingJob>(
-        `/labeling-jobs/${jobId}`,
-        undefined,
-        opts,
-      );
-      return job;
+      return data;
     }
-    if (data.locked) await sleep(5000);
+    await sleep(5000);
   }
 }
 
@@ -282,7 +276,7 @@ export function registerLabelCommands(parent: Command) {
     .requiredOption("-s, --spec <id>", "Behaviour spec the teacher labels under")
     .option("-c, --input-column <name>", "CSV column that holds the input text")
     .option("-n, --name <name>", "Job name (defaults to filename)")
-    .option("--start", "Run the labeling loop immediately after upload")
+    .option("--watch", "Block and show progress until labeling finishes")
     .action(async (file: string, cmdOpts) => {
       const opts = parent.opts() as ClientOpts;
 
@@ -329,16 +323,16 @@ export function registerLabelCommands(parent: Command) {
         opts,
       );
 
-      if (!cmdOpts.start) {
+      if (!cmdOpts.watch) {
         if (isJsonMode()) return printJson(job);
         printSuccess(
-          `Labeling job created: ${job.name} (${shortId(job.id)}) — ${job.row_count} rows, est. ${formatCents(job.est_cost_cents)}`,
+          `Labeling started: ${job.name} (${shortId(job.id)}) — est. ${formatCents(job.est_cost_cents)}. Runs in the cloud; no need to stay connected.`,
         );
-        console.log(`Run \`tt label run ${shortId(job.id)}\` to start labeling.`);
+        console.log(`Follow progress with \`tt label watch ${shortId(job.id)}\`.`);
         return;
       }
 
-      const finished = await runProcessLoop(job.id, opts);
+      const finished = await watchJob(job.id, opts);
       if (isJsonMode()) return printJson(finished);
       printSuccess(
         `Labeling ${finished.status === "awaiting_review" ? "complete" : finished.status}: ${finished.labeled_count}/${finished.row_count} rows labeled.`,
@@ -349,13 +343,13 @@ export function registerLabelCommands(parent: Command) {
     });
 
   label
-    .command("run")
-    .description("Drive the labeling loop until the job is ready for review")
+    .command("watch")
+    .description("Watch a labeling job until it is ready for review")
     .argument("<id>", "Labeling job ID (full UUID or 4+ char prefix)")
     .action(async (id: string) => {
       const opts = parent.opts() as ClientOpts;
       const jobId = await resolveLabelingJobId(id, opts);
-      const job = await runProcessLoop(jobId, opts);
+      const job = await watchJob(jobId, opts);
 
       if (isJsonMode()) return printJson(job);
       if (job.status === "awaiting_review") {
@@ -364,6 +358,7 @@ export function registerLabelCommands(parent: Command) {
         );
       } else {
         printError(`Labeling ended with status: ${job.status}${job.error ? ` — ${job.error}` : ""}`);
+        process.exitCode = 1;
       }
     });
 
