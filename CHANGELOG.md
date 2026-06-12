@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.4.20
+
+### Added
+
+- **`tt label`** — Teacher-label real, unlabeled data into training datasets. `tt label upload` sends a JSONL (`{"input": ...}` per line) or CSV file (`--input-column` picks the text column; up to 50,000 rows / 50 MB) and starts a managed cloud labeling workflow that drafts an output per row with a teacher model under the behaviour spec's system prompt — no need to stay connected. `tt label watch` re-attaches to progress; `tt label rows` / `accept` / `reject` / `edit` review the teacher's drafts by row index; `tt label promote` turns accepted+edited rows into a validated dataset ready for `tt runs start --dataset`; `tt label list` / `status` / `cancel` manage jobs. Labeling reserves credits up front and settles against actual teacher token usage.
+
 ## 0.4.19
 
 ### Added
