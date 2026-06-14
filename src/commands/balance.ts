@@ -81,6 +81,14 @@ export function registerBalanceCommands(parent: Command) {
 
       printDetail([
         ["Credits", balanceLine],
+        [
+          "Reserved",
+          balance.reserved_cents > 0 ? formatCents(balance.reserved_cents) : undefined,
+        ],
+        [
+          "Available",
+          balance.reserved_cents > 0 ? formatCents(balance.available_cents) : undefined,
+        ],
         ["Lifetime top-ups", formatCents(balance.lifetime_topup_cents)],
       ]);
 

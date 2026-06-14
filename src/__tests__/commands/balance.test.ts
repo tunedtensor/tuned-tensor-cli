@@ -86,10 +86,10 @@ describe("balance command", () => {
     const out = spy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(out).toContain("$4.80");
     expect(out).toContain("Credits");
-    expect(out).not.toContain("$3.00");
-    expect(out).not.toContain("$1.80");
-    expect(out).not.toContain("Available");
-    expect(out).not.toContain("Reserved");
+    expect(out).toContain("$3.00");
+    expect(out).toContain("$1.80");
+    expect(out).toContain("Available");
+    expect(out).toContain("Reserved");
     expect(out).not.toContain("Total balance");
     expect(out).toContain("Top-up");
     expect(out).toContain("Run");
