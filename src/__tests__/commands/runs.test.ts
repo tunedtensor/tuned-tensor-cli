@@ -57,7 +57,7 @@ const mockRun = {
 
 const mockEstimate = {
   estimated_training_tokens: 120_000,
-  estimated_cost_cents: 22,
+  estimated_cost_cents: 822,
   estimated_epochs: 4,
   duration: {
     estimated_minutes: 58,
@@ -286,7 +286,7 @@ describe("runs commands", () => {
       const output = spy.mock.calls.flat().join("\n");
       expect(output).toContain("Estimated Time");
       expect(output).toContain("58m (42m-1.3h)");
-      expect(output).toContain("$0.22");
+      expect(output).toContain("$8.22");
       expect(output).toContain("medium");
     });
 
@@ -298,7 +298,7 @@ describe("runs commands", () => {
       await program.parseAsync(["node", "tt", "runs", "estimate", SPEC_UUID]);
       const output = JSON.parse(spy.mock.calls[0][0]);
       expect(output.duration.confidence).toBe("medium");
-      expect(output.estimated_cost_cents).toBe(22);
+      expect(output.estimated_cost_cents).toBe(822);
     });
   });
 

@@ -207,7 +207,7 @@ function printRunEstimate(estimate: RunEstimate) {
   ]);
 
   console.log(
-    "\nDuration is a rough historical range. Final cost uses provider-reported training tokens.",
+    "\nDuration is a rough historical range. Final cost includes run infrastructure plus provider-reported training tokens when available.",
   );
 }
 
