@@ -36,6 +36,8 @@ interface DatasetUploadUrl {
   headers?: Record<string, string>;
 }
 
+type DatasetFormat = "jsonl" | "document_ocr_jsonl";
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -102,10 +104,65 @@ function formatCodepoint(code: number): string {
   return `U+${code.toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
-function validateDatasetFile(file: string): void {
+function detectRowFormat(record: Record<string, unknown>): DatasetFormat | null {
+  const input = record.input as Record<string, unknown> | undefined;
+  if (
+    input &&
+    typeof input === "object" &&
+    typeof input.prompt === "string" &&
+    Array.isArray(input.assets) &&
+    input.assets.length > 0 &&
+    typeof record.output === "string"
+  ) {
+    return "document_ocr_jsonl";
+  }
+  if (
+    typeof record.input === "string" ||
+    typeof record.output === "string" ||
+    !("input" in record) ||
+    !("output" in record)
+  ) {
+    return "jsonl";
+  }
+  return null;
+}
+
+function validateDocumentOcrRow(record: Record<string, unknown>, rowNumber: number, errors: string[]): void {
+  const input = record.input as Record<string, unknown>;
+  const assets = input.assets as unknown[];
+  if (typeof input.prompt !== "string" || input.prompt.trim().length === 0) {
+    errors.push(`Row ${rowNumber}: OCR input.prompt must be a non-empty string`);
+  }
+  if (assets.length > 8) {
+    errors.push(`Row ${rowNumber}: OCR rows support at most 8 image assets`);
+  }
+  for (const [assetIndex, asset] of assets.entries()) {
+    if (!asset || typeof asset !== "object" || Array.isArray(asset)) {
+      errors.push(`Row ${rowNumber}: asset ${assetIndex + 1} must be an object`);
+      continue;
+    }
+    const a = asset as Record<string, unknown>;
+    const hasReference =
+      typeof a.data_uri === "string" ||
+      typeof a.uri === "string" ||
+      typeof a.path === "string";
+    if (!hasReference) {
+      errors.push(`Row ${rowNumber}: asset ${assetIndex + 1} must include data_uri, uri, or path`);
+    }
+  }
+}
+
+function parseDatasetFormat(value: string | undefined): DatasetFormat | undefined {
+  if (!value) return undefined;
+  if (value === "jsonl" || value === "document_ocr_jsonl") return value;
+  throw new Error("--format must be one of: jsonl, document_ocr_jsonl");
+}
+
+function validateDatasetFile(file: string, requestedFormat?: DatasetFormat): DatasetFormat {
   const lines = readFileSync(file, "utf8").split(/\r?\n/);
   const errors: string[] = [];
   let rowCount = 0;
+  let detectedFormat: DatasetFormat | null = null;
 
   for (const [index, rawLine] of lines.entries()) {
     const line = rawLine.trim();
@@ -132,6 +189,28 @@ function validateDatasetFile(file: string): void {
       errors.push(
         `Row ${rowNumber}: found OpenAI SFT-style "messages"; Tuned Tensor datasets require flat "input" and "output" strings`,
       );
+      continue;
+    }
+
+    const rowFormat = detectRowFormat(record);
+    if (!rowFormat) {
+      errors.push(
+        `Row ${rowNumber}: expected text {"input": string, "output": string} or OCR {"input":{"prompt": string, "assets": [...]}, "output": string}`,
+      );
+      continue;
+    }
+    detectedFormat ??= rowFormat;
+    if (requestedFormat && rowFormat !== requestedFormat) {
+      errors.push(`Row ${rowNumber}: expected ${requestedFormat} row, found ${rowFormat}`);
+      continue;
+    }
+    if (detectedFormat !== rowFormat) {
+      errors.push(`Row ${rowNumber}: cannot mix ${detectedFormat} and ${rowFormat} rows in one dataset`);
+      continue;
+    }
+
+    if (rowFormat === "document_ocr_jsonl") {
+      validateDocumentOcrRow(record, rowNumber, errors);
       continue;
     }
 
@@ -162,9 +241,10 @@ function validateDatasetFile(file: string): void {
     const preview = errors.slice(0, 5).join("\n");
     const suffix = errors.length > 5 ? `\n...and ${errors.length - 5} more error(s)` : "";
     throw new Error(
-      `Invalid dataset format. Each JSONL row must be {"input": "...", "output": "..."}.\n${preview}${suffix}`,
+      `Invalid dataset format. Each JSONL row must be a valid text or document OCR example.\n${preview}${suffix}`,
     );
   }
+  return detectedFormat ?? requestedFormat ?? "jsonl";
 }
 
 export function registerDatasetsCommands(parent: Command) {
@@ -238,6 +318,7 @@ export function registerDatasetsCommands(parent: Command) {
     .argument("<file>", "Path to JSONL file")
     .option("-n, --name <name>", "Dataset name (defaults to filename)")
     .option("-d, --description <desc>", "Dataset description")
+    .option("--format <format>", "Dataset format: jsonl or document_ocr_jsonl")
     .action(async (file: string, cmdOpts) => {
       const opts = parent.opts() as ClientOpts;
 
@@ -246,7 +327,7 @@ export function registerDatasetsCommands(parent: Command) {
         process.exit(1);
       }
 
-      validateDatasetFile(file);
+      const format = validateDatasetFile(file, parseDatasetFormat(cmdOpts.format));
 
       const name = cmdOpts.name || file.split("/").pop()!.replace(/\.jsonl?$/, "");
       const fileBytes = readFileSync(file);
@@ -258,6 +339,7 @@ export function registerDatasetsCommands(parent: Command) {
           filename: file.split("/").pop()!,
           size: statSync(file).size,
           contentType: "application/jsonl",
+          format,
         },
         opts,
       );

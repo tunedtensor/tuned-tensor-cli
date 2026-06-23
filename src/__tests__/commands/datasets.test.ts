@@ -173,6 +173,7 @@ describe("datasets commands", () => {
         expect.objectContaining({
           name: expect.stringContaining("tt-test-upload"),
           filename: expect.stringContaining("tt-test-upload"),
+          format: "jsonl",
         }),
         expect.anything(),
       );
@@ -187,6 +188,50 @@ describe("datasets commands", () => {
           path: "s3://tt-runs/users/user-1/datasets/upload.jsonl",
           name: expect.stringContaining("tt-test-upload"),
         }),
+        expect.anything(),
+      );
+    });
+
+    it("uploads a document OCR JSONL file", async () => {
+      writeFileSync(
+        tmpFile,
+        `${JSON.stringify({
+          input: {
+            prompt: "Extract invoice fields as JSON.",
+            assets: [
+              {
+                mime_type: "image/png",
+                data_uri: "data:image/png;base64,iVBORw0KGgo=",
+              },
+            ],
+          },
+          output: "{\"invoice_number\":\"INV-123\"}",
+        })}\n`,
+      );
+      vi.mocked(client.post)
+        .mockResolvedValueOnce({
+          data: {
+            path: "s3://tt-runs/users/user-1/datasets/upload.jsonl",
+            upload_url: "https://uploads.example.com/upload.jsonl",
+            method: "PUT",
+            headers: { "Content-Type": "application/jsonl" },
+          },
+        })
+        .mockResolvedValueOnce({
+          data: { ...mockDataset, format: "document_ocr_jsonl", row_count: 1 },
+        });
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "datasets", "upload", tmpFile, "--format", "document_ocr_jsonl",
+      ]);
+
+      expect(client.post).toHaveBeenNthCalledWith(
+        1,
+        "/datasets/upload-url",
+        expect.objectContaining({ format: "document_ocr_jsonl" }),
         expect.anything(),
       );
     });
