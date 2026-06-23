@@ -51,6 +51,19 @@ describe("init command", () => {
     expect(content.base_model).toBe("Qwen/Qwen3.5-2B");
   });
 
+  it("canonicalizes Qwen3-VL aliases", async () => {
+    const program = buildProgram();
+    await program.parseAsync([
+      "node", "tt", "init",
+      "--file", "test-init-spec.json",
+      "--name", "OCR Bot",
+      "--model", "qwen/qwen3-vl-2b",
+    ]);
+
+    const content = JSON.parse(readFileSync(TEST_FILE, "utf-8"));
+    expect(content.base_model).toBe("Qwen/Qwen3-VL-2B-Instruct");
+  });
+
   it("rejects unsupported models", async () => {
     const program = buildProgram();
     await expect(
