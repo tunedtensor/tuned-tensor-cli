@@ -37,6 +37,7 @@ interface DatasetUploadUrl {
 }
 
 type DatasetFormat = "jsonl" | "document_ocr_jsonl";
+const DOCUMENT_OCR_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -132,6 +133,23 @@ function validateDocumentOcrRow(record: Record<string, unknown>, rowNumber: numb
   const assets = input.assets as unknown[];
   if (typeof input.prompt !== "string" || input.prompt.trim().length === 0) {
     errors.push(`Row ${rowNumber}: OCR input.prompt must be a non-empty string`);
+  } else {
+    const hit = findControlChar(input.prompt);
+    if (hit) {
+      errors.push(
+        `Row ${rowNumber}: OCR input.prompt contains invisible control character ${formatCodepoint(hit.codepoint)} (${hit.name}) at offset ${hit.offset} — strip or escape before uploading; some training paths split on it`,
+      );
+    }
+  }
+  if (typeof record.output !== "string" || record.output.trim().length === 0) {
+    errors.push(`Row ${rowNumber}: OCR output must be a non-empty string`);
+  } else {
+    const hit = findControlChar(record.output);
+    if (hit) {
+      errors.push(
+        `Row ${rowNumber}: OCR output contains invisible control character ${formatCodepoint(hit.codepoint)} (${hit.name}) at offset ${hit.offset} — strip or escape before uploading; some training paths split on it`,
+      );
+    }
   }
   if (assets.length > 8) {
     errors.push(`Row ${rowNumber}: OCR rows support at most 8 image assets`);
@@ -142,12 +160,37 @@ function validateDocumentOcrRow(record: Record<string, unknown>, rowNumber: numb
       continue;
     }
     const a = asset as Record<string, unknown>;
+    if (a.type !== undefined && a.type !== "image") {
+      errors.push(`Row ${rowNumber}: asset ${assetIndex + 1} type must be "image"`);
+    }
+    if (a.mime_type !== undefined && (
+      typeof a.mime_type !== "string" || !DOCUMENT_OCR_MIME_TYPES.has(a.mime_type)
+    )) {
+      errors.push(
+        `Row ${rowNumber}: asset ${assetIndex + 1} mime_type must be one of image/png, image/jpeg, image/webp`,
+      );
+    }
+    if (a.page !== undefined && (
+      typeof a.page !== "number" || !Number.isInteger(a.page) || a.page < 1
+    )) {
+      errors.push(`Row ${rowNumber}: asset ${assetIndex + 1} page must be a positive integer`);
+    }
     const hasReference =
-      typeof a.data_uri === "string" ||
-      typeof a.uri === "string" ||
-      typeof a.path === "string";
+      (typeof a.data_uri === "string" && a.data_uri.trim().length > 0) ||
+      (typeof a.uri === "string" && a.uri.trim().length > 0) ||
+      (typeof a.path === "string" && a.path.trim().length > 0);
     if (!hasReference) {
       errors.push(`Row ${rowNumber}: asset ${assetIndex + 1} must include data_uri, uri, or path`);
+    }
+    if (typeof a.data_uri === "string") {
+      const match = /^data:(image\/(?:png|jpeg|webp));base64,[A-Za-z0-9+/=\s]+$/.exec(a.data_uri);
+      if (!match) {
+        errors.push(
+          `Row ${rowNumber}: asset ${assetIndex + 1} data_uri must be a base64 image/png, image/jpeg, or image/webp data URI`,
+        );
+      } else if (typeof a.mime_type === "string" && a.mime_type !== match[1]) {
+        errors.push(`Row ${rowNumber}: asset ${assetIndex + 1} mime_type does not match data_uri media type`);
+      }
     }
   }
 }

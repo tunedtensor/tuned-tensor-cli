@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.4.21
+
+### Added
+
+- **`tt models serve` multimodal inputs** — Preserve OpenAI-style image content parts, load image data URIs/URLs/local paths with Pillow, and route requests with images through the model processor so local reference serving can exercise vision-language artifacts such as Qwen3-VL.
+
+### Changed
+
+- **`tt models setup-runtime`** — Install and check Pillow alongside torch/transformers so the managed local runtime is ready for image inputs.
+- **`tt datasets upload --format document_ocr_jsonl`** — Validate OCR asset metadata locally before upload, including image MIME/data URI shape, page numbers, non-empty OCR outputs, and invisible control characters in OCR prompts/outputs.
+
 ## 0.4.20
 
 ### Added

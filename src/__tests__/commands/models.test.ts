@@ -421,6 +421,10 @@ describe("models commands", () => {
         const parsed = JSON.parse(spy.mock.calls[0][0]);
         expect(parsed.command).toBe("python3");
         expect(parsed.args[0]).toContain("openai_reference_server.py");
+        const script = readFileSync(parsed.args[0], "utf8");
+        expect(script).toContain("AutoProcessor.from_pretrained");
+        expect(script).toContain("normalize_content_part");
+        expect(script).toContain("processor(text=[prompt], images=images, return_tensors=\"pt\")");
         expect(parsed.env_keys).toContain("TT_MODEL_PATH");
         expect(parsed.env_keys).toContain("TT_SYSTEM_PROMPT");
         expect(client.get).not.toHaveBeenCalled();

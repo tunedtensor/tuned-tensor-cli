@@ -236,6 +236,55 @@ describe("datasets commands", () => {
       );
     });
 
+    it("rejects malformed document OCR assets before uploading", async () => {
+      writeFileSync(
+        tmpFile,
+        `${JSON.stringify({
+          input: {
+            prompt: "Extract invoice fields as JSON.",
+            assets: [
+              {
+                type: "document",
+                mime_type: "application/pdf",
+                data_uri: "not-a-data-uri",
+                page: 0,
+              },
+            ],
+          },
+          output: "",
+        })}\n`,
+      );
+      const program = buildProgram();
+
+      await expect(
+        program.parseAsync([
+          "node", "tt", "datasets", "upload", tmpFile, "--format", "document_ocr_jsonl",
+        ]),
+      ).rejects.toThrow(/type must be "image".*mime_type.*page.*data_uri/s);
+      expect(client.post).not.toHaveBeenCalled();
+    });
+
+    it("rejects OCR rows containing invisible controls before uploading", async () => {
+      writeFileSync(
+        tmpFile,
+        `${JSON.stringify({
+          input: {
+            prompt: "subjectbody",
+            assets: [{ data_uri: "data:image/png;base64,iVBORw0KGgo=" }],
+          },
+          output: "{}",
+        })}\n`,
+      );
+      const program = buildProgram();
+
+      await expect(
+        program.parseAsync([
+          "node", "tt", "datasets", "upload", tmpFile, "--format", "document_ocr_jsonl",
+        ]),
+      ).rejects.toThrow(/OCR input\.prompt.*U\+0085.*NEXT LINE/s);
+      expect(client.post).not.toHaveBeenCalled();
+    });
+
     it("exits when file does not exist", async () => {
       vi.spyOn(console, "error").mockImplementation(() => {});
       vi.spyOn(process, "exit").mockImplementation((code) => {
