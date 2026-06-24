@@ -62,7 +62,10 @@ import json
 import os
 import time
 import uuid
+import base64
+from io import BytesIO
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.request import urlopen
 
 MODEL_PATH = os.environ["TT_MODEL_PATH"]
 MODEL_NAME = os.environ.get("TT_MODEL_NAME", os.path.basename(MODEL_PATH.rstrip("/")) or "tuned-tensor-model")
@@ -113,9 +116,9 @@ def load_model():
         ) from exc
 
     try:
-        processor = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=TRUST_REMOTE_CODE)
-    except Exception:
         processor = AutoProcessor.from_pretrained(MODEL_PATH, trust_remote_code=TRUST_REMOTE_CODE)
+    except Exception:
+        processor = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=TRUST_REMOTE_CODE)
     tokenizer = getattr(processor, "tokenizer", processor)
     if getattr(tokenizer, "pad_token", None) is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -132,22 +135,43 @@ def load_model():
         kwargs["torch_dtype"] = torch.float16
 
     try:
-        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, **kwargs)
-    except Exception:
         model = AutoModelForImageTextToText.from_pretrained(MODEL_PATH, **kwargs)
+    except Exception:
+        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, **kwargs)
     if device != "cuda":
         model.to(device)
     model.eval()
-    return torch, tokenizer, model, device
+    return torch, processor, tokenizer, model, device
 
 
-torch, tokenizer, model, DEVICE = load_model()
+torch, processor, tokenizer, model, DEVICE = load_model()
 
 
-def content_to_text(content):
+def normalize_content_part(part):
+    if not isinstance(part, dict):
+        return {"type": "text", "text": str(part)}
+    part_type = part.get("type")
+    if part_type == "text":
+        return {"type": "text", "text": str(part.get("text", ""))}
+    if part_type in {"image", "image_url"}:
+        image_url = part.get("image_url")
+        url = None
+        if isinstance(image_url, dict):
+            url = image_url.get("url")
+        elif isinstance(image_url, str):
+            url = image_url
+        url = url or part.get("image") or part.get("data_uri") or part.get("uri") or part.get("path")
+        if isinstance(url, str) and url.strip():
+            return {"type": "image", "image": url.strip()}
+    return {"type": "text", "text": json.dumps(part, ensure_ascii=False)}
+
+
+def normalize_content(content):
     if isinstance(content, str):
         return content
-    return json.dumps(content, ensure_ascii=False)
+    if isinstance(content, list):
+        return [normalize_content_part(part) for part in content]
+    return str(content) if content is not None else ""
 
 
 def normalize_messages(raw_messages):
@@ -158,7 +182,7 @@ def normalize_messages(raw_messages):
         role = item.get("role")
         if role not in {"system", "user", "assistant", "tool"}:
             continue
-        messages.append({"role": role, "content": content_to_text(item.get("content", ""))})
+        messages.append({"role": role, "content": normalize_content(item.get("content", ""))})
 
     if SYSTEM_PROMPT and not any(message["role"] == "system" for message in messages):
         messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
@@ -202,7 +226,10 @@ def with_json_contract(messages, mode, schema):
     contracted = [dict(message) for message in messages]
     for message in contracted:
         if message["role"] == "system":
-            message["content"] = (message["content"].rstrip() + "\n\n" + contract).strip()
+            content = message.get("content", "")
+            if not isinstance(content, str):
+                content = json.dumps(content, ensure_ascii=False)
+            message["content"] = (content.rstrip() + "\n\n" + contract).strip()
             return contracted
 
     contracted.insert(0, {"role": "system", "content": contract})
@@ -221,13 +248,71 @@ def render_prompt(messages):
     return "\n".join(rendered)
 
 
-def generate_completion(messages, max_tokens, temperature):
-    prompt = render_prompt(messages)
-    inputs = tokenizer(prompt, return_tensors="pt")
+def load_image(value):
+    try:
+        from PIL import Image
+    except Exception as exc:
+        raise RuntimeError(
+            "Multimodal requests require Pillow. Install the serving runtime with "
+            "'tt models setup-runtime --force' or install pillow in the selected Python environment."
+        ) from exc
+
+    if value.startswith("data:image/"):
+        _, payload = value.split(",", 1)
+        return Image.open(BytesIO(base64.b64decode(payload))).convert("RGB")
+    if value.startswith("http://") or value.startswith("https://"):
+        with urlopen(value, timeout=30) as response:
+            return Image.open(BytesIO(response.read())).convert("RGB")
+    return Image.open(value).convert("RGB")
+
+
+def resolve_message_images(messages):
+    resolved = []
+    images = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            resolved.append(message)
+            continue
+
+        parts = []
+        for part in content:
+            if not isinstance(part, dict) or part.get("type") != "image":
+                parts.append(part)
+                continue
+            image_ref = part.get("image") or part.get("data_uri") or part.get("uri") or part.get("path")
+            if not isinstance(image_ref, str) or not image_ref.strip():
+                raise RuntimeError("Image content part must include image, image_url.url, data_uri, uri, or path")
+            images.append(load_image(image_ref.strip()))
+            parts.append({"type": "image"})
+        resolved.append({**message, "content": parts})
+    return resolved, images
+
+
+def move_inputs_to_device(inputs, device):
+    moved = {}
+    for key, value in inputs.items():
+        moved[key] = value.to(device) if hasattr(value, "to") else value
+    return moved
+
+
+def prepare_generation_inputs(messages):
+    resolved_messages, images = resolve_message_images(messages)
+    prompt = render_prompt(resolved_messages)
     input_device = getattr(model, "device", None)
     if input_device is None:
         input_device = next(model.parameters()).device
-    inputs = {key: value.to(input_device) for key, value in inputs.items()}
+    if images:
+        if processor is tokenizer:
+            raise RuntimeError("This model artifact did not load a multimodal processor, so image inputs are not supported.")
+        inputs = processor(text=[prompt], images=images, return_tensors="pt")
+    else:
+        inputs = tokenizer(prompt, return_tensors="pt")
+    return move_inputs_to_device(inputs, input_device)
+
+
+def generate_completion(messages, max_tokens, temperature):
+    inputs = prepare_generation_inputs(messages)
 
     generate_kwargs = {
         **inputs,
@@ -684,7 +769,7 @@ function ensureServingRuntime(python: string, cacheDir: string): void {
   const check = `
 import importlib.util
 import json
-required = ["torch", "transformers", "accelerate", "safetensors"]
+required = ["torch", "transformers", "accelerate", "safetensors", "PIL"]
 missing = [name for name in required if importlib.util.find_spec(name) is None]
 print(json.dumps({"missing": missing}))
 `;
@@ -1454,7 +1539,7 @@ export function registerModelsCommands(parent: Command) {
       const venvDir = runtimeDir(cacheDir);
       const venvPython = runtimePythonPath(cacheDir);
       const python = pickRuntimePython(cmdOpts.python);
-      const deps = ["torch", "transformers", "accelerate", "safetensors"];
+      const deps = ["torch", "transformers", "accelerate", "safetensors", "pillow"];
       const commands = setupRuntimeCommands(python, venvDir, deps);
 
       if (cmdOpts.printCommand) {
