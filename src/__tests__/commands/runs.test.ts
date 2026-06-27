@@ -68,6 +68,72 @@ const mockEstimate = {
   },
 };
 
+const mockReport = {
+  run_id: RUN_UUID,
+  status: "completed",
+  fine_tuned_model_id: MODEL_UUID,
+  baseline: {
+    total: 2,
+    eval_examples_used: 2,
+    avg_score: 0.6,
+    pass_rate: 0.5,
+    results: [
+      {
+        prompt: "Label this email.\n\nSubject: Legal notice\nBody: We will file tomorrow unless you pay this invoice.",
+        expected: "{\"triage\":\"escalate\",\"priority\":\"high\",\"should_process\":true}",
+        actual: "{\"triage\":\"escalate\",\"priority\":\"high\",\"should_process\":true}",
+        passed: true,
+        score: 1,
+        reasoning: "Base escalated the legal threat correctly.",
+      },
+      {
+        prompt: "Label this email.\n\nSubject: FYI office snacks\nBody: Donuts are in the kitchen.",
+        expected: "{\"triage\":\"archive\",\"priority\":\"low\",\"should_process\":false}",
+        actual: "{\"triage\":\"archive\",\"priority\":\"low\",\"should_process\":false}",
+        passed: true,
+        score: 1,
+      },
+    ],
+  },
+  candidate: {
+    total: 2,
+    eval_examples_used: 2,
+    avg_score: 0.4,
+    pass_rate: 0,
+    results: [
+      {
+        prompt: "Label this email.\n\nSubject: Legal notice\nBody: We will file tomorrow unless you pay this invoice.",
+        expected: "{\"triage\":\"escalate\",\"priority\":\"high\",\"should_process\":true}",
+        actual: "{\"triage\":\"reply\",\"priority\":\"normal\",\"should_process\":true}",
+        passed: false,
+        score: 0,
+        reasoning: "The tuned output under-escalated a legal threat.",
+      },
+      {
+        prompt: "Label this email.\n\nSubject: FYI office snacks\nBody: Donuts are in the kitchen.",
+        expected: "{\"triage\":\"archive\",\"priority\":\"low\",\"should_process\":false}",
+        actual: "{\"triage\":\"review\",\"priority\":\"normal\",\"should_process\":true}",
+        passed: false,
+        score: 0.2,
+        reasoning: "The tuned output over-processed a low-value FYI.",
+      },
+    ],
+  },
+  comparison: {
+    avg_score_delta: -0.2,
+    pass_rate_delta: -0.5,
+    regressions: 1,
+    improvements: 0,
+    regressed_examples: [
+      {
+        prompt: "Label this email.\n\nSubject: Legal notice\nBody: We will file tomorrow unless you pay this invoice.",
+        old_score: 1,
+        new_score: 0,
+      },
+    ],
+  },
+};
+
 beforeEach(() => {
   setJsonMode(false);
   process.env.TUNED_TENSOR_API_KEY = FAKE_KEY;
@@ -612,6 +678,60 @@ describe("runs commands", () => {
       expect(output).toContain("Output Diagnostics");
       expect(output).toContain("90.5% (181/200)");
       expect(output).not.toMatch(/sagemaker|s3:\/\/|aws|ec2/i);
+    });
+  });
+
+  describe("runs report", () => {
+    it("fetches and prints side-by-side regression outputs", async () => {
+      vi.mocked(client.get).mockResolvedValue({ data: mockReport });
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "runs", "report", RUN_UUID]);
+
+      expect(client.get).toHaveBeenCalledWith(
+        `/runs/${RUN_UUID}/report`,
+        undefined,
+        expect.anything(),
+      );
+      const output = spy.mock.calls.flat().join("\n");
+      expect(output).toContain("Primary Metrics");
+      expect(output).toContain("Primary Regressions");
+      expect(output).toContain("score 1.00 -> 0.00");
+      expect(output).toContain("Expected:");
+      expect(output).toContain('"triage":"escalate"');
+      expect(output).toContain("Base:");
+      expect(output).toContain("Tuned:");
+      expect(output).toContain('"triage":"reply"');
+      expect(output).toContain("under-escalated");
+    });
+
+    it("can show worst tuned failures instead of regressions", async () => {
+      vi.mocked(client.get).mockResolvedValue({ data: mockReport });
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "runs", "report", RUN_UUID,
+        "--mode", "failures",
+        "--limit", "1",
+      ]);
+
+      const output = spy.mock.calls.flat().join("\n");
+      expect(output).toContain("Primary Tuned Failures");
+      expect(output).toContain("tuned score 0.00");
+      expect(output).toContain("Legal notice");
+      expect(output).not.toContain("FYI office snacks");
+    });
+
+    it("outputs the raw report in JSON mode", async () => {
+      setJsonMode(true);
+      vi.mocked(client.get).mockResolvedValue({ data: mockReport });
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "runs", "report", RUN_UUID]);
+
+      const output = JSON.parse(spy.mock.calls[0][0]);
+      expect(output.run_id).toBe(RUN_UUID);
+      expect(output.comparison.regressions).toBe(1);
     });
   });
 });
