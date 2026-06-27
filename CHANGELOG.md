@@ -6,7 +6,7 @@
 
 ### Added
 
-- **`tt runs report`** — Fetch sanitized run reports through the Tuned Tensor API and show side-by-side Expected, Base, and Tuned outputs for top regressions. The command also supports `--mode failures`, `--split primary|test|all`, `--limit`, and `--json` so users can inspect failed cases without AWS access.
+- **`tt runs report`** — Fetch sanitized run reports through the Tuned Tensor API and show side-by-side Expected, Base, and Tuned outputs for top regressions. The command also supports `--mode failures`, `--split primary|test|all`, `--limit`, and `--json` so users can inspect failed cases without cloud server access.
 
 ## 0.4.21
 
