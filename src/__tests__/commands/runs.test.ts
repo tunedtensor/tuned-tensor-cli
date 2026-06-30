@@ -59,6 +59,15 @@ const mockEstimate = {
   estimated_training_tokens: 120_000,
   estimated_cost_cents: 22,
   estimated_epochs: 4,
+  billing: {
+    plan: "free",
+    free_run_eligible: true,
+    free_run_ineligibility: [],
+    free_runs_used: 0,
+    free_runs_remaining: 1,
+    free_runs_monthly_limit: 1,
+    billing_source: "free_quota",
+  },
   duration: {
     estimated_minutes: 58,
     range_minutes: { low: 42, high: 78 },
@@ -267,7 +276,7 @@ describe("runs commands", () => {
   describe("runs estimate", () => {
     it("estimates a run with default options", async () => {
       vi.mocked(client.post).mockResolvedValue({ data: mockEstimate });
-      vi.spyOn(console, "log").mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
       await program.parseAsync(["node", "tt", "runs", "estimate", SPEC_UUID]);
       expect(client.post).toHaveBeenCalledWith(
@@ -275,6 +284,11 @@ describe("runs commands", () => {
         {},
         expect.anything(),
       );
+      const output = logSpy.mock.calls.flat().join("\n");
+      expect(output).toContain("Plan");
+      expect(output).toContain("free");
+      expect(output).toContain("Free monthly quota");
+      expect(output).toContain("1/1 remaining");
     });
 
     it("passes the same run configuration options as start", async () => {

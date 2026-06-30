@@ -177,6 +177,15 @@ interface RunEstimate {
   estimated_training_tokens: number;
   estimated_cost_cents: number;
   estimated_epochs: number;
+  billing?: {
+    plan: string;
+    free_run_eligible: boolean;
+    free_run_ineligibility: string[];
+    free_runs_used: number;
+    free_runs_remaining: number;
+    free_runs_monthly_limit: number;
+    billing_source: "free_quota" | "credits";
+  };
   duration: {
     estimated_minutes: number;
     range_minutes: {
@@ -252,6 +261,7 @@ function formatEstimateRange(estimate: RunEstimate): string {
 }
 
 function printRunEstimate(estimate: RunEstimate) {
+  const billing = estimate.billing;
   printDetail([
     ["Estimated Time", formatEstimateRange(estimate)],
     ["Confidence", estimate.duration.confidence],
@@ -260,6 +270,29 @@ function printRunEstimate(estimate: RunEstimate) {
     ["Estimated Cost", formatCents(estimate.estimated_cost_cents)],
     ["Training Tokens", `${(estimate.estimated_training_tokens / 1000).toFixed(1)}k`],
     ["Epochs", String(estimate.estimated_epochs)],
+    ["Plan", billing?.plan],
+    [
+      "Billing Source",
+      billing?.billing_source === "free_quota"
+        ? "Free monthly quota"
+        : billing?.billing_source === "credits"
+          ? "Credits"
+          : undefined,
+    ],
+    [
+      "Free Runs",
+      billing
+        ? `${billing.free_runs_remaining}/${billing.free_runs_monthly_limit} remaining`
+        : undefined,
+    ],
+    [
+      "Free Eligible",
+      billing
+        ? billing.free_run_eligible
+          ? "yes"
+          : `no (${billing.free_run_ineligibility.join(", ") || "not eligible"})`
+        : undefined,
+    ],
   ]);
 
   console.log(
