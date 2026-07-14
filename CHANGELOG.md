@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.4.23
+
+### Changed
+
+- **CLI positioning** — Clarify that `tt` is the client for the optional managed Tuned Tensor service, point local CUDA and DGX Spark users to `tt-local`, and make `tt runs report` the final step in the README quickstart.
+
 ## 0.4.22
 
 ### Added

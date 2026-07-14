@@ -1,8 +1,11 @@
 # tt - Tuned Tensor CLI
 
-`tt` is the command-line tool for [Tuned Tensor](https://www.tunedtensor.com).
-Use it to define behaviour specs, validate them, launch fine-tuning runs,
-manage datasets, and download or serve trained models.
+`tt` is the command-line client for the optional managed
+[Tuned Tensor](https://www.tunedtensor.com) service. Use it to define behaviour
+specs, launch managed fine-tuning runs, inspect paired baseline-vs-tuned
+reports, and download or serve trained models. For local CUDA or DGX Spark
+training without a Tuned Tensor account, use `tt-local` from
+`@tuned-tensor/local`.
 
 The main CLI documentation lives at
 [tunedtensor.com/docs/cli](https://tunedtensor.com/docs/cli). This README is a
@@ -37,6 +40,7 @@ tt push
 tt runs estimate <spec-id>
 tt runs start <spec-id>
 tt runs watch <run-id>
+tt runs report <run-id>
 ```
 
 To continue training from a completed fine-tuned model artifact:
