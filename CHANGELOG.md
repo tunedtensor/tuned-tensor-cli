@@ -2,11 +2,17 @@
 
 ## Unreleased
 
-## 0.4.22
+## 0.4.23
 
 ### Changed
 
 - **CLI positioning** — Clarify that `tt` is the client for the optional managed Tuned Tensor service, point local CUDA and DGX Spark users to `tt-local`, and make `tt runs report` the final step in the README quickstart.
+
+## 0.4.22
+
+### Added
+
+- **`tt runs report`** — Fetch sanitized run reports through the Tuned Tensor API and show side-by-side Expected, Base, and Tuned outputs for top regressions. The command also supports `--mode failures`, `--split primary|test|all`, `--limit`, and `--json` so users can inspect failed cases without cloud server access.
 
 ## 0.4.21
 

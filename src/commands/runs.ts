@@ -127,10 +127,65 @@ interface RunDiagnostics {
   generated_at: string;
 }
 
+interface RunReportResult {
+  prompt: string;
+  expected?: string | null;
+  actual?: string | null;
+  passed?: boolean | null;
+  score?: number | null;
+  reasoning?: string | null;
+}
+
+interface RunReportEval {
+  total?: number;
+  eval_examples_used?: number;
+  avg_score?: number;
+  pass_rate?: number;
+  exact_match_rate?: number;
+  results?: RunReportResult[];
+}
+
+interface RunReportComparisonExample {
+  prompt: string;
+  old_score?: number | null;
+  new_score?: number | null;
+}
+
+interface RunReportComparison {
+  avg_score_delta?: number;
+  pass_rate_delta?: number;
+  exact_match_rate_delta?: number;
+  regressions?: number;
+  improvements?: number;
+  regressed_examples?: RunReportComparisonExample[];
+}
+
+interface RunReportSplit {
+  baseline?: RunReportEval;
+  candidate?: RunReportEval;
+  comparison?: RunReportComparison;
+}
+
+interface RunReport extends RunReportSplit {
+  run_id?: string;
+  status?: string;
+  fine_tuned_model_id?: string | null;
+  test?: RunReportSplit;
+}
+
 interface RunEstimate {
   estimated_training_tokens: number;
   estimated_cost_cents: number;
   estimated_epochs: number;
+  billing?: {
+    plan: string;
+    free_run_eligible: boolean;
+    free_run_ineligibility: string[];
+    free_runs_used: number;
+    free_runs_remaining: number;
+    free_runs_monthly_limit: number;
+    billing_source: "free_quota" | "credits";
+  };
   duration: {
     estimated_minutes: number;
     range_minutes: {
@@ -173,6 +228,16 @@ function formatPercent(rate: number | undefined): string | undefined {
   return rate == null ? undefined : (rate * 100).toFixed(1) + "%";
 }
 
+function formatPointDelta(delta: number | undefined): string | undefined {
+  if (delta == null) return undefined;
+  const points = delta * 100;
+  return `${points >= 0 ? "+" : ""}${points.toFixed(1)} pp`;
+}
+
+function formatScore(score: number | null | undefined): string {
+  return score == null ? "—" : score.toFixed(2);
+}
+
 function formatCountRate(count: number | undefined, total: number | undefined, rate: number | undefined): string | undefined {
   if (count == null || total == null || rate == null) return undefined;
   return `${formatPercent(rate)} (${count}/${total})`;
@@ -196,6 +261,7 @@ function formatEstimateRange(estimate: RunEstimate): string {
 }
 
 function printRunEstimate(estimate: RunEstimate) {
+  const billing = estimate.billing;
   printDetail([
     ["Estimated Time", formatEstimateRange(estimate)],
     ["Confidence", estimate.duration.confidence],
@@ -204,6 +270,29 @@ function printRunEstimate(estimate: RunEstimate) {
     ["Estimated Cost", formatCents(estimate.estimated_cost_cents)],
     ["Training Tokens", `${(estimate.estimated_training_tokens / 1000).toFixed(1)}k`],
     ["Epochs", String(estimate.estimated_epochs)],
+    ["Plan", billing?.plan],
+    [
+      "Billing Source",
+      billing?.billing_source === "free_quota"
+        ? "Free monthly quota"
+        : billing?.billing_source === "credits"
+          ? "Credits"
+          : undefined,
+    ],
+    [
+      "Free Runs",
+      billing
+        ? `${billing.free_runs_remaining}/${billing.free_runs_monthly_limit} remaining`
+        : undefined,
+    ],
+    [
+      "Free Eligible",
+      billing
+        ? billing.free_run_eligible
+          ? "yes"
+          : `no (${billing.free_run_ineligibility.join(", ") || "not eligible"})`
+        : undefined,
+    ],
   ]);
 
   console.log(
@@ -326,6 +415,168 @@ function printEvalOutputDiagnostics(diagnostics: RunOutputDiagnostics | undefine
     for (const insight of diagnostics.insights) {
       console.log(`  - ${insight}`);
     }
+  }
+}
+
+function compactWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function parseJsonish(value: string | null | undefined): unknown {
+  if (!value) return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function formatJsonish(value: string | null | undefined, max = 360): string {
+  const parsed = parseJsonish(value);
+  const rendered = typeof parsed === "string"
+    ? compactWhitespace(parsed)
+    : JSON.stringify(parsed);
+  return truncate(rendered ?? "—", max);
+}
+
+function formatPromptSummary(prompt: string, max = 260): string {
+  const subject = prompt.match(/^Subject:\s*(.+)$/m)?.[1]?.trim();
+  const body = prompt.match(/^Body:\s*([\s\S]+)$/m)?.[1];
+  if (subject) {
+    const bodySummary = body ? ` | Body: ${compactWhitespace(body)}` : "";
+    return truncate(`Subject: ${subject}${bodySummary}`, max);
+  }
+  return truncate(compactWhitespace(prompt), max);
+}
+
+function indexResults(results: RunReportResult[] | undefined): Map<string, RunReportResult> {
+  return new Map((results ?? []).map((result) => [result.prompt, result]));
+}
+
+function printReportMetrics(label: string, split: RunReportSplit | undefined) {
+  if (!split) return;
+  const comparison = split.comparison;
+  const baseline = split.baseline;
+  const candidate = split.candidate;
+
+  console.log(`\n${label} Metrics:`);
+  printDetail([
+    ["Base Avg", formatPercent(baseline?.avg_score)],
+    ["Tuned Avg", formatPercent(candidate?.avg_score)],
+    ["Avg Delta", formatPointDelta(comparison?.avg_score_delta)],
+    ["Base Pass", formatPercent(baseline?.pass_rate)],
+    ["Tuned Pass", formatPercent(candidate?.pass_rate)],
+    ["Pass Delta", formatPointDelta(comparison?.pass_rate_delta)],
+    ["Regressions", comparison?.regressions == null ? undefined : String(comparison.regressions)],
+    ["Improvements", comparison?.improvements == null ? undefined : String(comparison.improvements)],
+    ["Eval Rows", candidate?.eval_examples_used == null
+      ? candidate?.total == null ? undefined : String(candidate.total)
+      : String(candidate.eval_examples_used)],
+  ]);
+}
+
+function printComparedExample(input: {
+  index: number;
+  prompt: string;
+  baseline?: RunReportResult;
+  candidate?: RunReportResult;
+  oldScore?: number | null;
+  newScore?: number | null;
+}) {
+  const { index, prompt, baseline, candidate, oldScore, newScore } = input;
+  const expected = candidate?.expected ?? baseline?.expected;
+  const scoreLine = oldScore != null || newScore != null
+    ? oldScore == null
+      ? `tuned score ${formatScore(newScore)}`
+      : `score ${formatScore(oldScore)} -> ${formatScore(newScore)}`
+    : `tuned score ${formatScore(candidate?.score)}`;
+
+  console.log(`\n${index}. ${scoreLine}`);
+  console.log(`   Prompt: ${formatPromptSummary(prompt)}`);
+  console.log(`   Expected: ${formatJsonish(expected)}`);
+  if (baseline?.actual != null) {
+    console.log(`   Base: ${formatJsonish(baseline.actual)}`);
+  }
+  if (candidate?.actual != null) {
+    console.log(`   Tuned: ${formatJsonish(candidate.actual)}`);
+  }
+  const reasoning = candidate?.reasoning ?? baseline?.reasoning;
+  if (reasoning) {
+    console.log(`   Judge: ${truncate(compactWhitespace(reasoning), 420)}`);
+  }
+}
+
+function printReportExamples(
+  label: string,
+  split: RunReportSplit | undefined,
+  mode: "regressions" | "failures",
+  limit: number,
+) {
+  if (!split || limit <= 0) return;
+  const baselineByPrompt = indexResults(split.baseline?.results);
+  const candidateByPrompt = indexResults(split.candidate?.results);
+
+  if (mode === "regressions") {
+    const regressions = split.comparison?.regressed_examples ?? [];
+    console.log(`\n${label} Regressions:`);
+    if (!regressions.length) {
+      console.log("  No regressed examples in the report.");
+      return;
+    }
+    regressions.slice(0, limit).forEach((example, i) => {
+      printComparedExample({
+        index: i + 1,
+        prompt: example.prompt,
+        baseline: baselineByPrompt.get(example.prompt),
+        candidate: candidateByPrompt.get(example.prompt),
+        oldScore: example.old_score,
+        newScore: example.new_score,
+      });
+    });
+    return;
+  }
+
+  const failures = (split.candidate?.results ?? [])
+    .filter((result) => result.passed === false || (result.score ?? 1) < 1)
+    .sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
+
+  console.log(`\n${label} Tuned Failures:`);
+  if (!failures.length) {
+    console.log("  No tuned failures in the report.");
+    return;
+  }
+  failures.slice(0, limit).forEach((candidate, i) => {
+    printComparedExample({
+      index: i + 1,
+      prompt: candidate.prompt,
+      baseline: baselineByPrompt.get(candidate.prompt),
+      candidate,
+      newScore: candidate.score,
+    });
+  });
+}
+
+function printRunReport(
+  report: RunReport,
+  options: { split: "primary" | "test" | "all"; limit: number; mode: "regressions" | "failures" },
+) {
+  printDetail([
+    ["Run", report.run_id ? shortId(report.run_id) : undefined],
+    ["Status", report.status ? formatStatus(report.status) : undefined],
+    ["Model", report.fine_tuned_model_id ? shortId(report.fine_tuned_model_id) : undefined],
+  ]);
+
+  const splits: Array<[string, RunReportSplit | undefined]> = [];
+  if (options.split === "primary" || options.split === "all") {
+    splits.push(["Primary", report]);
+  }
+  if (options.split === "test" || options.split === "all") {
+    splits.push(["Test", report.test]);
+  }
+
+  for (const [label, split] of splits) {
+    printReportMetrics(label, split);
+    printReportExamples(label, split, options.mode, options.limit);
   }
 }
 
@@ -613,5 +864,43 @@ export function registerRunsCommands(parent: Command) {
 
       if (isJsonMode()) return printJson(data);
       printDiagnostics(data);
+    });
+
+  runs
+    .command("report")
+    .description("Show run metrics and side-by-side eval output insights")
+    .argument("<id>", "Run ID (full UUID or 8+ char prefix)")
+    .option("--split <split>", "Split to show: primary, test, or all", "primary")
+    .option("--limit <n>", "Number of examples to show", "5")
+    .option("--mode <mode>", "Example mode: regressions or failures", "regressions")
+    .action(async (id: string, cmdOpts) => {
+      const opts = parent.opts() as ClientOpts;
+      const fullId = await resolveRunId(id, opts);
+      const { data } = await get<RunReport>(
+        `/runs/${fullId}/report`,
+        undefined,
+        opts,
+      );
+
+      if (isJsonMode()) return printJson(data);
+
+      const split = String(cmdOpts.split);
+      if (!["primary", "test", "all"].includes(split)) {
+        throw new Error("--split must be one of: primary, test, all");
+      }
+      const mode = String(cmdOpts.mode);
+      if (!["regressions", "failures"].includes(mode)) {
+        throw new Error("--mode must be one of: regressions, failures");
+      }
+      const limit = Number(cmdOpts.limit);
+      if (!Number.isFinite(limit) || limit < 0) {
+        throw new Error("--limit must be a non-negative number");
+      }
+
+      printRunReport(data, {
+        split: split as "primary" | "test" | "all",
+        mode: mode as "regressions" | "failures",
+        limit: Math.floor(limit),
+      });
     });
 }
