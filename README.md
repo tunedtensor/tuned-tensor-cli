@@ -55,10 +55,15 @@ Useful discovery commands:
 tt specs list
 tt datasets list
 tt runs list
+tt runs list --summary --json
 tt models list
 tt models base
 tt balance
 ```
+
+Use `tt runs list --summary` for agents and scripts that only need run status,
+scores, and pagination. It asks the API to omit detailed evaluation and event
+payloads; combine it with `--json` for compact structured output.
 
 Label real, unlabeled data with a teacher model (JSONL with `{"input": ...}`
 rows, or CSV with `--input-column`; up to 50,000 rows / 50 MB). Labeling runs
