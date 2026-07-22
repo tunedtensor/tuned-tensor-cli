@@ -657,6 +657,7 @@ export function registerRunsCommands(parent: Command) {
     .option("-s, --spec <id>", "Filter by spec ID (full UUID or 8+ char prefix)")
     .option("-p, --page <n>", "Page number", "1")
     .option("--per-page <n>", "Results per page", "20")
+    .option("--summary", "Request compact run summaries without detailed eval payloads or events")
     .action(async (cmdOpts) => {
       const opts = parent.opts() as ClientOpts;
 
@@ -665,15 +666,19 @@ export function registerRunsCommands(parent: Command) {
         page: cmdOpts.page,
         per_page: cmdOpts.perPage,
       };
+      if (cmdOpts.summary) query.view = "summary";
 
       if (cmdOpts.spec) {
         const fullSpecId = await resolveSpecId(cmdOpts.spec, opts);
         path = `/behavior-specs/${fullSpecId}/runs`;
       }
 
-      const { data, meta } = await get<Run[]>(path, query, opts);
+      const response = await get<Run[]>(path, query, opts);
+      const { data, meta } = response;
 
-      if (isJsonMode()) return printJson({ data, meta });
+      if (isJsonMode()) {
+        return printJson(cmdOpts.summary ? response : { data, meta });
+      }
 
       printTable(
         ["ID", "Spec", "#", "Status", "Score", "Started", "Completed"],

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.4.24
+
+### Added
+
+- **`tt runs list --summary`** — Request compact run-list responses for agents and scripts without detailed evaluation or event payloads. Works for both account-wide and `--spec` run lists, including raw JSON output.
+
 ## 0.4.23
 
 ### Changed

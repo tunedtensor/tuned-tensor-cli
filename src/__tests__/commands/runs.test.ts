@@ -183,6 +183,69 @@ describe("runs commands", () => {
         expect.anything(),
       );
     });
+
+    it("requests compact summaries for all runs", async () => {
+      vi.mocked(client.get).mockResolvedValue({
+        data: [mockRun],
+        meta: { page: 2, per_page: 10, total: 21 },
+      });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "runs", "list", "--summary", "--page", "2", "--per-page", "10",
+      ]);
+
+      expect(client.get).toHaveBeenCalledWith(
+        "/runs",
+        { page: "2", per_page: "10", view: "summary" },
+        expect.anything(),
+      );
+    });
+
+    it("requests compact summaries for a spec's runs", async () => {
+      vi.mocked(client.get).mockResolvedValue({
+        data: [mockRun],
+        meta: { page: 1, per_page: 20, total: 1 },
+      });
+      vi.spyOn(console, "log").mockImplementation(() => {});
+
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "runs", "list", "--spec", SPEC_UUID, "--summary",
+      ]);
+
+      expect(client.get).toHaveBeenCalledWith(
+        `/behavior-specs/${SPEC_UUID}/runs`,
+        { page: "1", per_page: "20", view: "summary" },
+        expect.anything(),
+      );
+    });
+
+    it("prints the compact API response unchanged in JSON mode", async () => {
+      setJsonMode(true);
+      const summaryResponse = {
+        data: [{
+          id: RUN_UUID,
+          behavior_spec_id: SPEC_UUID,
+          run_number: 1,
+          status: "completed",
+          eval_summary: { avg_score: 0.85, pass_rate: 0.9 },
+          started_at: "2024-01-01T00:00:00Z",
+          completed_at: "2024-01-01T01:00:00Z",
+          _spec_name: "My Spec",
+        }],
+        meta: { page: 1, per_page: 20, total: 1 },
+      };
+      vi.mocked(client.get).mockResolvedValue(summaryResponse);
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "runs", "list", "--summary"]);
+
+      const output = JSON.parse(String(logSpy.mock.calls[0][0]));
+      expect(output).toEqual(summaryResponse);
+    });
   });
 
   describe("runs get", () => {
