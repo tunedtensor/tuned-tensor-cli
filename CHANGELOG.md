@@ -21,6 +21,7 @@
 
 - **Runtime requirement** — Require Node.js 22 or newer so the unified package
   can run the locked local training workflow.
+- **License** — Align the unified CLI with TT Local under Apache License 2.0.
 - **Default scaffold** — Generate two distinct examples and omit an empty
   `eval_cases` field so a new spec can be validated by either target.
 
