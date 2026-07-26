@@ -304,6 +304,7 @@ export interface CreateShellSessionOptions {
   cwd?: string;
   env?: Readonly<NodeJS.ProcessEnv>;
   contextProvider?: ShellContextProvider;
+  version?: string;
 }
 
 export interface ShellSessionSnapshot {
@@ -311,6 +312,7 @@ export interface ShellSessionSnapshot {
   modeSource: TargetSource | "session";
   cwd: string;
   context: ShellContext;
+  version?: string;
 }
 
 export type ShellLineAction = "continue" | "exit";
@@ -319,10 +321,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/* Shell messages reuse the main app's output style: ✓/✗/! marks, bold cyan
- * headings and labels (see output.ts). */
+/* Shell messages reuse the main app's output style: ✓/✗/! marks, bold
+ * headings and labels (see output.ts). Shell chrome (banner, prompt, help)
+ * uses the brand violet accent. */
 const successMark = (): string => chalk.green("✓");
 const errorMark = (): string => chalk.red("✗");
+const accent = chalk.hex("#8B5CF6");
 
 /** Label width used by formatShellStatus/formatShellContext. */
 const DETAIL_LABEL_WIDTH = 15;
@@ -332,7 +336,7 @@ function styleDetailLines(lines: string[]): string[] {
     if (line.length <= DETAIL_LABEL_WIDTH) return line;
     const label = line.slice(0, DETAIL_LABEL_WIDTH);
     if (!label.trim()) return line;
-    const color = label.startsWith("Warning") ? chalk.yellow : chalk.bold.cyan;
+    const color = label.startsWith("Warning") ? chalk.yellow : accent.bold;
     return `${color(label)}${line.slice(DETAIL_LABEL_WIDTH)}`;
   });
 }
@@ -361,7 +365,7 @@ function expandDirectory(
 function helpText(mode: WorkflowMode, query?: string, palette = false): string {
   const groups = groupedCatalog(mode, query);
   const lines: string[] = [];
-  lines.push(chalk.bold.cyan(palette
+  lines.push(accent.bold(palette
     ? `Commands for ${mode} — type a command or use cloud/local as a one-shot prefix`
     : `TT ${mode} commands${query ? ` matching ${JSON.stringify(query)}` : ""}`));
 
@@ -372,7 +376,7 @@ function helpText(mode: WorkflowMode, query?: string, palette = false): string {
       lines.push("");
       lines.push(chalk.bold(group));
       for (const command of commands) {
-        lines.push(`  ${chalk.cyan(command.path.padEnd(22))} ${command.description}`);
+        lines.push(`  ${accent(command.path.padEnd(22))} ${command.description}`);
       }
     }
   }
@@ -381,9 +385,9 @@ function helpText(mode: WorkflowMode, query?: string, palette = false): string {
     lines.push("");
     lines.push(chalk.bold("Session"));
     for (const command of SLASH_COMMANDS) {
-      lines.push(`  ${chalk.cyan(command.path.padEnd(22))} ${command.description}`);
+      lines.push(`  ${accent(command.path.padEnd(22))} ${command.description}`);
     }
-    lines.push(`  ${chalk.cyan("?".padEnd(22))} Alias for /help.`);
+    lines.push(`  ${accent("?".padEnd(22))} Alias for /help.`);
     lines.push(chalk.dim(
       "\nTab completes commands. Shell operators and shell escapes are disabled.",
     ));
@@ -397,20 +401,38 @@ function activeModelLabel(snapshot: ShellSessionSnapshot): string {
     : snapshot.context.spec?.baseModel ?? "—";
 }
 
+/**
+ * The brand mark as terminal blocks: a 3×3 tensor grid whose diagonal runs
+ * through the violet gradient (see tuned-tensor-brand-assets/icon).
+ */
+function logoRows(): string[] {
+  const muted = chalk.dim("██");
+  return [
+    `${chalk.hex("#A78BFA")("██")} ${muted} ${muted}`,
+    `${muted} ${accent("██")} ${muted}`,
+    `${muted} ${muted} ${chalk.hex("#7C3AED")("██")}`,
+  ];
+}
+
 export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
   const spec = snapshot.context.spec?.name
     ?? snapshot.context.spec?.path
     ?? "no spec";
-  return [
-    chalk.bold.cyan("Tuned Tensor"),
-    `  ${chalk.bold(snapshot.mode)} · ${snapshot.context.projectName} · ${spec} · model ${activeModelLabel(snapshot)}`,
-    chalk.dim("  /help for commands · Tab completes · /mode cloud|local switches"),
-    "",
-  ].join("\n");
+  const heading = snapshot.version
+    ? `${accent.bold("Tuned Tensor")} ${chalk.dim(`v${snapshot.version}`)}`
+    : accent.bold("Tuned Tensor");
+  const textRows = [
+    heading,
+    `${chalk.bold(snapshot.mode)} · ${snapshot.context.projectName} · ${spec} · model ${activeModelLabel(snapshot)}`,
+    chalk.dim("/help for commands · Tab completes · /mode cloud|local switches"),
+  ];
+  const logo = logoRows();
+  const lines = textRows.map((row, index) => `${logo[index]!}  ${row}`);
+  return `${lines.join("\n")}\n\n`;
 }
 
 export function renderShellPrompt(snapshot: ShellSessionSnapshot): string {
-  return `${chalk.cyan("tt")} ${chalk.bold(snapshot.mode)} ${chalk.dim(snapshot.context.projectName)} › `;
+  return `${accent("tt")} ${chalk.bold(snapshot.mode)} ${chalk.dim(snapshot.context.projectName)} › `;
 }
 
 export class TunedTensorShellSession {
@@ -424,6 +446,7 @@ export class TunedTensorShellSession {
     private readonly io: ShellSessionIO,
     private readonly env: Readonly<NodeJS.ProcessEnv>,
     private readonly contextProvider: ShellContextProvider,
+    private readonly version: string | undefined,
     initialContext: ShellContext,
   ) {
     this.mode = initialContext.inferredTarget;
@@ -445,6 +468,7 @@ export class TunedTensorShellSession {
       options.io,
       env,
       contextProvider,
+      options.version,
       initialContext,
     );
   }
@@ -455,6 +479,7 @@ export class TunedTensorShellSession {
       modeSource: this.modeSource,
       cwd: this.cwd,
       context: this.context,
+      version: this.version,
     };
   }
 
@@ -577,6 +602,9 @@ export class TunedTensorShellSession {
 
   async handleLine(input: string): Promise<ShellLineAction> {
     try {
+      // Bare exit/quit leaves the shell instead of erroring in a workflow.
+      if (/^(exit|quit)$/i.test(input.trim())) return "exit";
+
       const slash = parseSlashCommand(input);
       if (slash) return await this.handleSlash(slash);
 
@@ -611,6 +639,7 @@ export interface InteractiveShellOptions {
   cwd?: string;
   env?: Readonly<NodeJS.ProcessEnv>;
   requireTTY?: boolean;
+  version?: string;
 }
 
 function streamIsTTY(stream: NodeJS.ReadableStream | NodeJS.WritableStream): boolean {
@@ -718,6 +747,7 @@ export async function startInteractiveShell(
     io: streamIO(output, error),
     cwd: options.cwd,
     env: options.env,
+    version: options.version,
   });
   const completer = createCommandCompleter(() => session.snapshot().mode);
   readline = createInterface({

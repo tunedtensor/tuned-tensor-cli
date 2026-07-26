@@ -212,6 +212,7 @@ export function createProgram(
       error: runtime.stderr ?? process.stderr,
       cwd,
       env: shellEnvironment,
+      version,
     });
   };
 
@@ -400,6 +401,7 @@ export async function runCli(
       error: runtime.stderr ?? process.stderr,
       cwd: runtime.cwd ?? process.cwd(),
       env,
+      version,
     });
     return;
   }

@@ -9,13 +9,16 @@
 - **Shell `/model` command** — Show the model in play (active local model or
   cloud spec base model) and activate verified local models with
   `/model <id>`.
+- **Shell logo banner** — Show the Tuned Tensor tensor-grid mark and the CLI
+  version in the shell header.
 
 ### Changed
 
 - **Shell styling and hints** — Align the interactive shell with the main
-  CLI's output style (✓/✗ marks, bold-cyan headings and labels), show the
-  active model in the banner, and suggest corrections for mistyped session
-  commands.
+  CLI's output style (✓/✗ marks, bold headings and labels), use the brand
+  violet accent for shell chrome, show the active model in the banner, and
+  suggest corrections for mistyped session commands. Typing `exit` or `quit`
+  leaves the shell.
 
 ## 0.5.0
 

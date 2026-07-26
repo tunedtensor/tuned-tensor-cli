@@ -4,6 +4,7 @@ import {
   ShellParseError,
   createShellSession,
   parseSlashCommand,
+  renderShellBanner,
   routeShellCommand,
   shouldStartInteractiveShell,
   tokenizeShellInput,
@@ -232,8 +233,36 @@ function fakeContext(cwd: string, target: "cloud" | "local"): ShellContext {
   };
 }
 
-describe("TunedTensorShellSession", () => {
-  it("routes commands, switches modes, and recovers from parse errors", async () => {
+describe("renderShellBanner", () => {
+  it("shows the tensor-grid logo next to the heading and version", () => {
+    const banner = renderShellBanner({
+      mode: "cloud",
+      modeSource: "default-cloud",
+      cwd: "/tmp/cloud-project",
+      context: fakeContext("/tmp/cloud-project", "cloud"),
+      version: "0.6.0",
+    });
+    const rows = banner.trimEnd().split("\n");
+    expect(rows).toHaveLength(3);
+    for (const row of rows) expect(row).toContain("██");
+    expect(banner).toContain("Tuned Tensor");
+    expect(banner).toContain("v0.6.0");
+    expect(banner).toContain("cloud");
+  });
+
+  it("omits the version when none is provided", () => {
+    const banner = renderShellBanner({
+      mode: "local",
+      modeSource: "adjacent-config",
+      cwd: "/tmp/local-project",
+      context: fakeContext("/tmp/local-project", "local"),
+    });
+    expect(banner).toContain("Tuned Tensor");
+    expect(banner).not.toContain("v0");
+  });
+});
+
+describe("TunedTensorShellSession", () => {  it("routes commands, switches modes, and recovers from parse errors", async () => {
     const requests: ShellCommandRequest[] = [];
     const stdout: string[] = [];
     const stderr: string[] = [];
@@ -289,6 +318,7 @@ describe("TunedTensorShellSession", () => {
     await session.handleLine("/context");
     await session.handleLine("/status");
     await session.handleLine("/clear");
+    expect(await session.handleLine("exit")).toBe("exit");
     expect(await session.handleLine("/exit")).toBe("exit");
 
     const output = stdout.join("");
