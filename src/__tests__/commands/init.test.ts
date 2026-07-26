@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import { registerInitCommand, loadSpec } from "../../commands/init.js";
+import { setJsonMode } from "../../output.js";
 
 const TEST_FILE = resolve("test-init-spec.json");
 
@@ -15,10 +16,13 @@ function buildProgram() {
 }
 
 beforeEach(() => {
+  setJsonMode(false);
   vi.spyOn(console, "log").mockImplementation(() => {});
 });
 
 afterEach(() => {
+  setJsonMode(false);
+  vi.restoreAllMocks();
   if (existsSync(TEST_FILE)) unlinkSync(TEST_FILE);
 });
 
@@ -34,7 +38,9 @@ describe("init command", () => {
     expect(content.name).toBe("My Agent");
     expect(content.base_model).toBeDefined();
     expect(content.system_prompt).toBeDefined();
-    expect(content.examples).toHaveLength(1);
+    expect(content.examples).toHaveLength(2);
+    expect(content.examples[0].input).not.toBe(content.examples[1].input);
+    expect(content).not.toHaveProperty("eval_cases");
   });
 
   it("uses custom name and model", async () => {
@@ -49,6 +55,30 @@ describe("init command", () => {
     const content = JSON.parse(readFileSync(TEST_FILE, "utf-8"));
     expect(content.name).toBe("My Bot");
     expect(content.base_model).toBe("Qwen/Qwen3.5-2B");
+  });
+
+  it("returns one JSON document when creating a project", async () => {
+    setJsonMode(true);
+    const program = buildProgram();
+
+    await program.parseAsync([
+      "node",
+      "tt",
+      "init",
+      "--file",
+      "test-init-spec.json",
+    ]);
+
+    expect(console.log).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0])))
+      .toMatchObject({
+        created: true,
+        path: TEST_FILE,
+        spec: {
+          name: "My Agent",
+          base_model: "Qwen/Qwen3.5-2B",
+        },
+      });
   });
 
   it("canonicalizes Qwen3-VL aliases", async () => {
@@ -92,6 +122,27 @@ describe("init command", () => {
     const output = warnSpy.mock.calls.flat().join(" ");
     expect(output).toContain("already exists");
   });
+
+  it("reports an existing project as JSON without human warnings", async () => {
+    const program = buildProgram();
+    await program.parseAsync([
+      "node", "tt", "init", "--file", "test-init-spec.json",
+    ]);
+    vi.mocked(console.log).mockClear();
+    setJsonMode(true);
+
+    const program2 = buildProgram();
+    await program2.parseAsync([
+      "node", "tt", "init", "--file", "test-init-spec.json",
+    ]);
+
+    expect(console.log).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0])))
+      .toEqual({
+        created: false,
+        path: TEST_FILE,
+      });
+  });
 });
 
 describe("loadSpec", () => {
@@ -103,7 +154,7 @@ describe("loadSpec", () => {
 
     const spec = loadSpec("test-init-spec.json");
     expect(spec.name).toBe("My Agent");
-    expect(spec.examples).toHaveLength(1);
+    expect(spec.examples).toHaveLength(2);
   });
 
   it("exits when file does not exist", () => {

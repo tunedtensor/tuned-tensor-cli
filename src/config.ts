@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -32,8 +38,13 @@ export function readConfig(): Config {
 
 export function writeConfig(config: Config): void {
   const dir = getConfigDir();
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(getConfigPath(), JSON.stringify(config, null, 2) + "\n");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  const path = getConfigPath();
+  writeFileSync(path, JSON.stringify(config, null, 2) + "\n", {
+    mode: 0o600,
+  });
+  chmodSync(path, 0o600);
 }
 
 export function updateConfig(partial: Partial<Config>): void {
@@ -43,7 +54,7 @@ export function updateConfig(partial: Partial<Config>): void {
 
 export function clearConfig(): void {
   const path = getConfigPath();
-  if (existsSync(path)) writeFileSync(path, "{}\n");
+  if (existsSync(path)) writeConfig({});
 }
 
 export const DEFAULT_BASE_URL = "https://tunedtensor.com";

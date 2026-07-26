@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## 0.5.0
+
+### Added
+
+- **Unified local workflow** — Install the complete `@tuned-tensor/local`
+  runtime with the main CLI and expose its init, doctor, validation, training,
+  run/model inspection, activation, rollback, prefetch, verification, and
+  serving commands under `tt local`.
+- **Terminal shell** — Running `tt` in a TTY now opens a scrollback-friendly
+  cloud/local command shell with mode switching, context and status views,
+  completion, and session navigation commands.
+- **Target-specific spec projection** — Keep a shared `tunedtensor.json`
+  source while sending only supported fields to the hosted API or strict local
+  runner.
+
+### Changed
+
+- **Runtime requirement** — Require Node.js 22 or newer so the unified package
+  can run the locked local training workflow.
+- **License** — Align the unified CLI with TT Local under Apache License 2.0.
+- **Default scaffold** — Generate two distinct examples and omit an empty
+  `eval_cases` field so a new spec can be validated by either target.
+
+### Security
+
+- **Credential handling** — Mask interactive API-key entry, fail instead of
+  prompting in non-TTY environments, and enforce user-only permissions on the
+  stored cloud configuration.
+
 ## 0.4.24
 
 ### Added

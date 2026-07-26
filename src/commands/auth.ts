@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { Writable } from "node:stream";
 import {
   readConfig,
   updateConfig,
@@ -12,12 +13,48 @@ import {
 import {
   printSuccess,
   printDetail,
-  printError,
   printWarning,
   isJsonMode,
   printJson,
 } from "../output.js";
 import chalk from "chalk";
+
+export async function promptForApiKey(
+  input: NodeJS.ReadableStream = stdin,
+  output: NodeJS.WritableStream = stdout,
+): Promise<string> {
+  if (
+    (input as { isTTY?: boolean }).isTTY !== true
+    || (output as { isTTY?: boolean }).isTTY !== true
+  ) {
+    throw new Error(
+      "An API key is required in non-interactive mode. Pass it to `tt auth login <key>` or set TUNED_TENSOR_API_KEY.",
+    );
+  }
+
+  let muted = false;
+  const maskedOutput = new Writable({
+    write(chunk, _encoding, callback) {
+      if (!muted) output.write(chunk);
+      callback();
+    },
+  });
+  const rl = createInterface({
+    input,
+    output: maskedOutput,
+    terminal: true,
+  });
+
+  try {
+    const pending = rl.question("Enter your API key (tt_...): ");
+    muted = true;
+    return await pending;
+  } finally {
+    muted = false;
+    output.write("\n");
+    rl.close();
+  }
+}
 
 export function registerAuthCommands(parent: Command) {
   const auth = parent.command("auth").description("Manage authentication");
@@ -30,6 +67,12 @@ export function registerAuthCommands(parent: Command) {
       let apiKey = key;
 
       if (!apiKey) {
+        if (isJsonMode()) {
+          throw new Error(
+            "An API key argument is required in JSON mode. Use `tt --json auth login <key>`.",
+          );
+        }
+
         const settingsUrl = `${DEFAULT_BASE_URL}/dashboard/settings`;
         console.log();
         console.log(
@@ -38,21 +81,26 @@ export function registerAuthCommands(parent: Command) {
         console.log(`  ${chalk.cyan.underline(settingsUrl)}`);
         console.log();
 
-        const rl = createInterface({ input: stdin, output: stdout });
-        apiKey = await rl.question("Enter your API key (tt_...): ");
-        rl.close();
+        apiKey = await promptForApiKey();
       }
 
       apiKey = apiKey.trim();
 
       if (!apiKey.startsWith("tt_") || apiKey.length !== 51) {
-        printError(
+        throw new Error(
           "Invalid API key format. Keys start with tt_ and are 51 characters long.",
         );
-        process.exit(1);
       }
 
       updateConfig({ api_key: apiKey });
+      if (isJsonMode()) {
+        printJson({
+          authenticated: true,
+          key_prefix: `${apiKey.slice(0, 8)}...`,
+          base_url: getBaseUrl(parent.opts()),
+        });
+        return;
+      }
       printSuccess(
         `API key stored (${apiKey.slice(0, 8)}...). You're ready to go.`,
       );
@@ -63,6 +111,10 @@ export function registerAuthCommands(parent: Command) {
     .description("Remove stored credentials")
     .action(() => {
       clearConfig();
+      if (isJsonMode()) {
+        printJson({ authenticated: false });
+        return;
+      }
       printSuccess("Credentials removed.");
     });
 

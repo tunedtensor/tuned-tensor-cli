@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -53,6 +59,12 @@ describe("config", () => {
       expect(JSON.parse(readFileSync(path, "utf-8"))).toEqual({
         api_key: "tt_abc",
       });
+      if (process.platform !== "win32") {
+        expect(
+          statSync(join(TEST_DIR, "tuned-tensor")).mode & 0o777,
+        ).toBe(0o700);
+        expect(statSync(path).mode & 0o777).toBe(0o600);
+      }
     });
   });
 

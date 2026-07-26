@@ -1,16 +1,25 @@
 import { Command } from "commander";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { post, put, type ClientOpts } from "../client.js";
+import { ApiError, post, put, type ClientOpts } from "../client.js";
 import { printSuccess, printJson, isJsonMode, shortId } from "../output.js";
 import { loadSpec, DEFAULT_SPEC_FILE } from "./init.js";
-import { canonicalizeSpecBaseModel } from "../base-models.js";
 import { validateEvalCases } from "../eval/rules.js";
+import {
+  hasLocalOnlySpecFields,
+  projectCloudSpec,
+} from "../project-spec.js";
 
 interface RemoteSpec {
   id: string;
   name: string;
   [key: string]: unknown;
+}
+
+function persistRemoteId(filePath: string, id: string): void {
+  const raw = JSON.parse(readFileSync(filePath, "utf-8"));
+  raw.id = id;
+  writeFileSync(filePath, JSON.stringify(raw, null, 2) + "\n");
 }
 
 export function registerPushCommand(parent: Command) {
@@ -27,26 +36,48 @@ export function registerPushCommand(parent: Command) {
         throw new Error(`Invalid eval_cases: ${evalCaseErrors.join("; ")}`);
       }
 
-      const { id, ...rawBody } = spec as unknown as Record<string, unknown>;
-      const body = canonicalizeSpecBaseModel(rawBody);
+      const rawSpec = spec as unknown as Record<string, unknown>;
+      const { body } = projectCloudSpec(rawSpec);
+      const id = spec.id;
+      const canRecoverLocalId = Boolean(
+        id && hasLocalOnlySpecFields(rawSpec),
+      );
 
       let data: RemoteSpec;
+      let created = false;
 
       if (id) {
-        const res = await put<RemoteSpec>(`/behavior-specs/${id}`, body, opts);
-        data = res.data;
+        try {
+          const res = await put<RemoteSpec>(
+            `/behavior-specs/${id}`,
+            body,
+            opts,
+          );
+          data = res.data;
+        } catch (error) {
+          if (
+            !canRecoverLocalId
+            || !(error instanceof ApiError)
+            || error.status !== 404
+          ) {
+            throw error;
+          }
+
+          const res = await post<RemoteSpec>("/behavior-specs", body, opts);
+          data = res.data;
+          created = true;
+          persistRemoteId(filePath, data.id);
+        }
       } else {
         const res = await post<RemoteSpec>("/behavior-specs", body, opts);
         data = res.data;
-
-        const raw = JSON.parse(readFileSync(filePath, "utf-8"));
-        raw.id = data.id;
-        writeFileSync(filePath, JSON.stringify(raw, null, 2) + "\n");
+        created = true;
+        persistRemoteId(filePath, data.id);
       }
 
       if (isJsonMode()) return printJson(data);
       printSuccess(
-        `Spec ${id ? "updated" : "created"}: ${data.name} (${shortId(data.id)})`,
+        `Spec ${created ? "created" : "updated"}: ${data.name} (${shortId(data.id)})`,
       );
     });
 }
