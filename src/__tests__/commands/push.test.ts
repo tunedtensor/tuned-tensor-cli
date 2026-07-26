@@ -102,6 +102,120 @@ describe("push command", () => {
     );
   });
 
+  it("recreates a local-generated spec when its id is not a remote cloud id", async () => {
+    const localId = "11111111-1111-4111-8111-111111111111";
+    const spec = {
+      id: localId,
+      name: "Local Bot",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Answer directly.",
+      guidelines: [],
+      constraints: [],
+      examples: [
+        { input: "One", output: "1" },
+        { input: "Two", output: "2" },
+      ],
+      hyperparameters: { n_epochs: 2 },
+      dataset_prebuilt: {
+        training: "train.jsonl",
+        validation: "validation.jsonl",
+      },
+    };
+    writeFileSync(TEST_FILE, JSON.stringify(spec));
+
+    vi.mocked(client.put).mockRejectedValue(
+      new client.ApiError(404, "NOT_FOUND", "Behaviour spec not found"),
+    );
+    vi.mocked(client.post).mockResolvedValue({
+      data: { id: "cloud-spec-id-12345678", name: "Local Bot" },
+    });
+
+    const program = buildProgram();
+    await program.parseAsync([
+      "node", "tt", "push", "--file", "test-push-spec.json",
+    ]);
+
+    const expectedCloudBody = {
+      name: "Local Bot",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Answer directly.",
+      guidelines: [],
+      constraints: [],
+      examples: spec.examples,
+    };
+    expect(client.put).toHaveBeenCalledWith(
+      `/behavior-specs/${localId}`,
+      expectedCloudBody,
+      expect.anything(),
+    );
+    expect(client.post).toHaveBeenCalledWith(
+      "/behavior-specs",
+      expectedCloudBody,
+      expect.anything(),
+    );
+
+    const updated = JSON.parse(readFileSync(TEST_FILE, "utf-8"));
+    expect(updated.id).toBe("cloud-spec-id-12345678");
+    expect(updated.hyperparameters).toEqual(spec.hyperparameters);
+    expect(updated.dataset_prebuilt).toEqual(spec.dataset_prebuilt);
+  });
+
+  it("does not recreate an existing cloud spec for non-404 failures", async () => {
+    const spec = {
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "Local Bot",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Answer directly.",
+      guidelines: [],
+      constraints: [],
+      examples: [
+        { input: "One", output: "1" },
+        { input: "Two", output: "2" },
+      ],
+      hyperparameters: { n_epochs: 2 },
+    };
+    writeFileSync(TEST_FILE, JSON.stringify(spec));
+    vi.mocked(client.put).mockRejectedValue(
+      new client.ApiError(500, "SERVER_ERROR", "Try again later"),
+    );
+
+    const program = buildProgram();
+    await expect(
+      program.parseAsync([
+        "node", "tt", "push", "--file", "test-push-spec.json",
+      ]),
+    ).rejects.toThrow("Try again later");
+
+    expect(client.post).not.toHaveBeenCalled();
+    expect(JSON.parse(readFileSync(TEST_FILE, "utf-8")).id).toBe(spec.id);
+  });
+
+  it("does not recreate a cloud-only spec when its remote id returns 404", async () => {
+    const spec = {
+      id: "cloud-spec-id",
+      name: "Cloud Bot",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Answer directly.",
+      guidelines: [],
+      constraints: [],
+      examples: [{ input: "One", output: "1" }],
+    };
+    writeFileSync(TEST_FILE, JSON.stringify(spec));
+    vi.mocked(client.put).mockRejectedValue(
+      new client.ApiError(404, "NOT_FOUND", "Behaviour spec not found"),
+    );
+
+    const program = buildProgram();
+    await expect(
+      program.parseAsync([
+        "node", "tt", "push", "--file", "test-push-spec.json",
+      ]),
+    ).rejects.toThrow("Behaviour spec not found");
+
+    expect(client.post).not.toHaveBeenCalled();
+    expect(JSON.parse(readFileSync(TEST_FILE, "utf-8")).id).toBe(spec.id);
+  });
+
   it("preserves Python executable eval_cases before pushing", async () => {
     const spec = {
       name: "Test Bot",

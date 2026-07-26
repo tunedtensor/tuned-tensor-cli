@@ -1,14 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Command } from "commander";
-import { registerAuthCommands } from "../../commands/auth.js";
+import {
+  promptForApiKey,
+  registerAuthCommands,
+} from "../../commands/auth.js";
 import * as config from "../../config.js";
 import { rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { setJsonMode } from "../../output.js";
 
 const TEST_DIR = join(tmpdir(), `tt-test-auth-${process.pid}`);
 
 beforeEach(() => {
+  setJsonMode(false);
   rmSync(TEST_DIR, { recursive: true, force: true });
   process.env.XDG_CONFIG_HOME = TEST_DIR;
   delete process.env.TUNED_TENSOR_API_KEY;
@@ -16,6 +21,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setJsonMode(false);
+  vi.restoreAllMocks();
   rmSync(TEST_DIR, { recursive: true, force: true });
   delete process.env.XDG_CONFIG_HOME;
 });
@@ -43,6 +50,26 @@ describe("auth commands", () => {
       expect(stored.api_key).toBe(VALID_KEY);
     });
 
+    it("returns one JSON document after storing a key", async () => {
+      setJsonMode(true);
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+
+      await program.parseAsync([
+        "node",
+        "tt",
+        "auth",
+        "login",
+        VALID_KEY,
+      ]);
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(spy.mock.calls[0]?.[0]))).toMatchObject({
+        authenticated: true,
+        key_prefix: `${VALID_KEY.slice(0, 8)}...`,
+      });
+    });
+
     it("rejects keys that don't start with tt_", async () => {
       vi.spyOn(console, "error").mockImplementation(() => {});
       const exitSpy = vi.spyOn(process, "exit").mockImplementation((code) => {
@@ -64,6 +91,27 @@ describe("auth commands", () => {
         program.parseAsync(["node", "tt", "auth", "login", "tt_tooshort"]),
       ).rejects.toThrow();
     });
+
+    it("does not prompt when stdin is not interactive", async () => {
+      await expect(
+        promptForApiKey(
+          { isTTY: false } as unknown as NodeJS.ReadableStream,
+          { isTTY: false } as unknown as NodeJS.WritableStream,
+        ),
+      ).rejects.toThrow(/non-interactive mode/);
+    });
+
+    it("does not print a human preamble before a JSON-mode prompt failure", async () => {
+      setJsonMode(true);
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+
+      await expect(
+        program.parseAsync(["node", "tt", "auth", "login"]),
+      ).rejects.toThrow(/required in JSON mode/);
+
+      expect(spy).not.toHaveBeenCalled();
+    });
   });
 
   describe("auth logout", () => {
@@ -73,6 +121,20 @@ describe("auth commands", () => {
       const program = buildProgram();
       await program.parseAsync(["node", "tt", "auth", "logout"]);
       expect(config.readConfig()).toEqual({});
+    });
+
+    it("returns one JSON document after clearing credentials", async () => {
+      setJsonMode(true);
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      config.writeConfig({ api_key: VALID_KEY });
+      const program = buildProgram();
+
+      await program.parseAsync(["node", "tt", "auth", "logout"]);
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(spy.mock.calls[0]?.[0]))).toEqual({
+        authenticated: false,
+      });
     });
   });
 

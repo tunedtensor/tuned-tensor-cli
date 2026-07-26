@@ -2,7 +2,9 @@
 
 ## Cursor Cloud specific instructions
 
-This is a single-package Node.js/TypeScript CLI (`tt`) — a thin API client for Tuned Tensor. No Docker, databases, or background services required.
+This is a single-package Node.js/TypeScript CLI (`tt`) that unifies Tuned
+Tensor's hosted API workflow with the separately packaged local CUDA runner.
+No Docker or database is required for CLI development.
 
 ### Key commands
 
@@ -19,7 +21,8 @@ After `npm run build`, run `npm link` to make the `tt` command available globall
 
 ### Notes
 
-- The CLI targets Node 20+ (`tsup.config.ts` sets `target: "node20"`). Node 22 works fine.
+- The unified CLI targets Node 22+ (`tsup.config.ts` sets `target: "node22"`)
+  because the bundled local workflow and its locked Python runner require it.
 - Authentication is stored at `~/.config/tuned-tensor/config.json`. The `TUNED_TENSOR_API_KEY` env var or `--api-key` flag can override it.
 - All tests are fully self-contained with mocked API calls — no API key or network access is needed to run the test suite.
 - `tt specs create --name "..." --model "..."` (inline flags without `--file`) may return a 500 from the API; use `--file` with a JSON spec instead.

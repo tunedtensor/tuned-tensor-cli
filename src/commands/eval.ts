@@ -11,7 +11,7 @@ import type { ValidationCheck } from "../eval/types.js";
 export function registerEvalCommand(parent: Command) {
   parent
     .command("eval")
-    .description("Validate a local behaviour spec")
+    .description("Validate a behaviour spec project file")
     .option("-m, --model <model>", "Deprecated; ignored because tt eval only validates the local spec")
     .option("-f, --file <path>", "Spec file path", DEFAULT_SPEC_FILE)
     .action(async (cmdOpts) => {

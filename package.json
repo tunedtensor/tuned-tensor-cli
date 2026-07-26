@@ -1,7 +1,7 @@
 {
   "name": "@tuned-tensor/cli",
-  "version": "0.4.24",
-  "description": "CLI for Tuned Tensor — fine-tune and evaluate LLMs from the command line",
+  "version": "0.5.0",
+  "description": "Unified cloud and local CLI for fine-tuning and evaluating LLMs",
   "type": "module",
   "bin": {
     "tt": "dist/index.js"
@@ -16,6 +16,9 @@
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "keywords": [
     "llm",
     "fine-tuning",
@@ -24,6 +27,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@tuned-tensor/local": "0.4.0",
     "chalk": "^5.6.2",
     "cli-table3": "^0.6.5",
     "commander": "^14.0.3",

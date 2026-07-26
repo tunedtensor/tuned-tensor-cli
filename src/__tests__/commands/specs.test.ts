@@ -225,7 +225,7 @@ describe("specs commands", () => {
         expect(client.post).not.toHaveBeenCalled();
       });
 
-      it("warns on unknown top-level keys but still posts", async () => {
+      it("warns on unknown top-level keys and omits them from the cloud body", async () => {
         const path = writeFixture("extra.json", {
           name: "Has Extras",
           base_model: "Qwen/Qwen3.5-2B",
@@ -245,7 +245,43 @@ describe("specs commands", () => {
         expect(warnedAt).toBeGreaterThanOrEqual(0);
         expect(client.post).toHaveBeenCalledWith(
           "/behavior-specs",
-          expect.objectContaining({ totally_unknown_field: 42 }),
+          {
+            name: "Has Extras",
+            base_model: "Qwen/Qwen3.5-2B",
+          },
+          expect.anything(),
+        );
+      });
+
+      it("recognizes and omits TT Local fields from the cloud body", async () => {
+        const path = writeFixture("shared.json", {
+          name: "Shared Spec",
+          base_model: "Qwen/Qwen3.5-2B",
+          examples: [],
+          hyperparameters: { n_epochs: 2 },
+          dataset_prebuilt: {
+            training: "train.jsonl",
+            validation: "validation.jsonl",
+          },
+        });
+        vi.mocked(client.post).mockResolvedValue({ data: mockSpec });
+        const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+        const program = buildProgram();
+        await program.parseAsync([
+          "node", "tt", "specs", "create", "--file", path,
+        ]);
+
+        const output = logSpy.mock.calls.flat().join(" ");
+        expect(output).not.toContain("hyperparameters");
+        expect(output).not.toContain("dataset_prebuilt");
+        expect(client.post).toHaveBeenCalledWith(
+          "/behavior-specs",
+          {
+            name: "Shared Spec",
+            base_model: "Qwen/Qwen3.5-2B",
+            examples: [],
+          },
           expect.anything(),
         );
       });

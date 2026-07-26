@@ -1,15 +1,15 @@
 # tt - Tuned Tensor CLI
 
-`tt` is the command-line client for the optional managed
-[Tuned Tensor](https://www.tunedtensor.com) service. Use it to define behaviour
-specs, launch managed fine-tuning runs, inspect paired baseline-vs-tuned
-reports, and download or serve trained models. For local CUDA or DGX Spark
-training without a Tuned Tensor account, use `tt-local` from
-`@tuned-tensor/local`.
+`tt` is one terminal for the complete Tuned Tensor workflow:
 
-The main CLI documentation lives at
-[tunedtensor.com/docs/cli](https://tunedtensor.com/docs/cli). This README is a
-short install and development reference.
+- hosted specs, datasets, labeling, training, reports, and model downloads;
+- local CUDA fine-tuning, held-out evaluation, artifact verification, model
+  activation, and OpenAI-compatible serving.
+
+Existing commands such as `tt runs`, `tt models`, and `tt push` remain hosted
+commands. The local workflow lives under `tt local`, so scripts keep their
+current meaning while people can switch between both targets in one
+interactive shell.
 
 ## Install
 
@@ -17,6 +17,11 @@ short install and development reference.
 npm install -g @tuned-tensor/cli
 tt --version
 ```
+
+Node.js 22 or newer is required. Hosted commands need no local ML runtime.
+Local training additionally needs
+[`uv`](https://docs.astral.sh/uv/) and a supported NVIDIA CUDA host; the locked
+Python runner ships with the npm dependency and is prepared on first use.
 
 Run from source:
 
@@ -28,7 +33,28 @@ npm run build
 npm link
 ```
 
-## Quick Start
+## Terminal shell
+
+Run `tt` in an interactive terminal to open the Tuned Tensor shell:
+
+```text
+tt cloud support-agent › auth status
+tt cloud support-agent › /mode local
+tt local support-agent › doctor
+tt local support-agent › run --dry-run
+```
+
+Commands are routed to the mode shown in the prompt. Prefix a single command
+with `cloud` or `local` to override the mode without switching it. Useful
+session commands include `/help`, `/status`, `/context`, `/mode`, `/cd`,
+`/clear`, and `/exit`. The shell keeps normal terminal scrollback and command
+history only for the current process.
+
+Explicit commands remain non-interactive, including in CI. `tt --help` shows
+the complete command surface, `tt status` inspects both targets without a
+network or GPU probe, and `tt shell` opens the shell explicitly.
+
+## Hosted quick start
 
 ```bash
 tt auth login
@@ -42,6 +68,70 @@ tt runs start <spec-id>
 tt runs watch <run-id>
 tt runs report <run-id>
 ```
+
+The hosted service remains optional. Before a paid run, inspect the estimate:
+
+```bash
+tt balance
+tt runs estimate <spec-id>
+tt runs start <spec-id>
+```
+
+## Local quick start
+
+Create a local project on an NVIDIA host:
+
+```bash
+mkdir support-adapter && cd support-adapter
+tt local init \
+  --name "Support Adapter" \
+  --model Qwen/Qwen3.5-2B \
+  --profile spark
+```
+
+Edit the generated `tunedtensor.json`, replacing both placeholder examples,
+then preflight and run:
+
+```bash
+tt local doctor tunedtensor.json
+tt local validate tunedtensor.json
+tt local models prefetch tunedtensor.json
+tt local run tunedtensor.json
+```
+
+Inspect, verify, and serve a completed adapter:
+
+```bash
+tt local runs report <run-id>
+tt local models verify local-<run-id>
+tt local models serve local-<run-id> --config local-runner.json
+```
+
+Local currently certifies text SFT with `Qwen/Qwen3.5-2B`, LoRA/PEFT, and CUDA.
+Evaluation and serving may use CPU. Training artifacts, datasets, and model
+weights remain on the execution host.
+
+Activation is optional and requires the run to pass a configured
+`generalRegression` gate. Once activated, use
+`tt local serve active --config local-runner.json`.
+
+### One project file, target-specific payloads
+
+Both workflows use `tunedtensor.json`, but their supported fields are not
+identical. `tt` keeps the source file intact and projects only fields accepted
+by the selected target:
+
+- hosted pushes omit local-only `hyperparameters` and `dataset_prebuilt`;
+- local run, validation, prefetch, and explicit `--spec` serving commands omit
+  cloud-only executable `eval_cases`;
+- the default hosted scaffold contains two distinct examples and is valid as
+  a starting point for local held-out evaluation.
+
+Target validation is still authoritative. In particular, choosing a hosted
+base model does not make that model supported by the local CUDA runner.
+`tt local serve base` does not automatically inject the adjacent project spec.
+Pass `--spec tunedtensor.json` when the server should enforce its instructions;
+that explicit spec is projected for the local runtime.
 
 To continue training from a completed fine-tuned model artifact:
 

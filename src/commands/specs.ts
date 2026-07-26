@@ -2,7 +2,11 @@ import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { get, post, put, del, type ClientOpts } from "../client.js";
 import { resolveSpecId } from "../resolve.js";
-import { canonicalizeBaseModel, canonicalizeSpecBaseModel } from "../base-models.js";
+import { canonicalizeBaseModel } from "../base-models.js";
+import {
+  projectCloudSpec,
+  unknownProjectSpecKeys,
+} from "../project-spec.js";
 import {
   printTable,
   printDetail,
@@ -15,17 +19,6 @@ import {
   truncate,
   shortId,
 } from "../output.js";
-
-const SPEC_BODY_KEYS = new Set([
-  "name",
-  "description",
-  "base_model",
-  "system_prompt",
-  "guidelines",
-  "constraints",
-  "examples",
-  "eval_cases",
-]);
 
 const RUN_INPUT_KEYS = ["run_id", "behavior_spec_id", "spec_snapshot", "run_number"];
 
@@ -63,16 +56,14 @@ function loadSpecBody(filePath: string, mode: "create" | "update"): Record<strin
     );
   }
 
-  const unknown = Object.keys(body).filter(
-    (k) => !SPEC_BODY_KEYS.has(k) && k !== "id" && k !== "eval_cases",
-  );
+  const unknown = unknownProjectSpecKeys(body);
   if (unknown.length && !isJsonMode()) {
     printWarning(
-      `Unknown spec field(s) in ${filePath}: ${unknown.join(", ")}. They will be sent but may be rejected by the API.`,
+      `Unknown spec field(s) in ${filePath}: ${unknown.join(", ")}. They will be ignored by the cloud API.`,
     );
   }
 
-  return canonicalizeSpecBaseModel(body);
+  return projectCloudSpec(body).body;
 }
 
 interface BehaviorSpec {
