@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import {
+  COMMAND_CATALOG,
   SLASH_COMMANDS,
   createCommandCompleter,
   groupedCatalog,
@@ -183,6 +184,7 @@ export type SlashCommandName =
   | "status"
   | "context"
   | "mode"
+  | "model"
   | "clear"
   | "cd"
   | "exit";
@@ -197,10 +199,56 @@ const SLASH_NAMES = new Set([
   "status",
   "context",
   "mode",
+  "model",
   "clear",
   "cd",
   "exit",
 ]);
+
+/** Workflow command roots (runs, models, …) people commonly mistype with a slash. */
+const WORKFLOW_ROOT_COMMANDS = new Set(
+  COMMAND_CATALOG.map((command) => command.path.split(" ", 1)[0]!),
+);
+
+function editDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i += 1) {
+    let diagonal = previous[0]!;
+    previous[0] = i;
+    for (let j = 1; j <= right.length; j += 1) {
+      const above = previous[j]!;
+      previous[j] = Math.min(
+        previous[j]! + 1,
+        previous[j - 1]! + 1,
+        diagonal + (left[i - 1] === right[j - 1] ? 0 : 1),
+      );
+      diagonal = above;
+    }
+  }
+  return previous[right.length]!;
+}
+
+function suggestSlashCommands(rawName: string): string[] {
+  const names = [...SLASH_NAMES].sort();
+  const prefixMatches = names.filter((name) => name.startsWith(rawName));
+  if (prefixMatches.length > 0) return prefixMatches;
+  return names.filter((name) => editDistance(name, rawName) <= 2);
+}
+
+function unknownSlashCommandError(rawName: string): ShellParseError {
+  if (WORKFLOW_ROOT_COMMANDS.has(rawName)) {
+    return new ShellParseError(
+      `Unknown session command: /${rawName}. Workflow commands need no slash — try "${rawName} --help".`,
+    );
+  }
+  const suggestions = suggestSlashCommands(rawName);
+  const hint = suggestions.length > 0
+    ? ` Did you mean ${suggestions.map((name) => `/${name}`).join(" or ")}?`
+    : "";
+  return new ShellParseError(
+    `Unknown session command: /${rawName}.${hint} Use /help to see available commands.`,
+  );
+}
 
 export function parseSlashCommand(input: string): ParsedSlashCommand | null {
   const trimmed = input.trim();
@@ -218,7 +266,7 @@ export function parseSlashCommand(input: string): ParsedSlashCommand | null {
   const tokens = tokenizeShellInput(trimmed);
   const rawName = tokens[0]!.slice(1).toLowerCase();
   if (!SLASH_NAMES.has(rawName)) {
-    throw new ShellParseError(`Unknown session command: /${rawName}. Use /help to see available commands.`);
+    throw unknownSlashCommandError(rawName);
   }
   return {
     name: rawName as Exclude<SlashCommandName, "palette">,
@@ -256,6 +304,7 @@ export interface CreateShellSessionOptions {
   cwd?: string;
   env?: Readonly<NodeJS.ProcessEnv>;
   contextProvider?: ShellContextProvider;
+  version?: string;
 }
 
 export interface ShellSessionSnapshot {
@@ -263,12 +312,37 @@ export interface ShellSessionSnapshot {
   modeSource: TargetSource | "session";
   cwd: string;
   context: ShellContext;
+  version?: string;
 }
 
 export type ShellLineAction = "continue" | "exit";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/* Shell messages reuse the main app's output style: ✓/✗/! marks, bold
+ * headings and labels (see output.ts). Shell chrome (banner, prompt, help)
+ * uses the brand violet accent. */
+const successMark = (): string => chalk.green("✓");
+const errorMark = (): string => chalk.red("✗");
+const accent = chalk.hex("#8B5CF6");
+
+/** Label width used by formatShellStatus/formatShellContext. */
+const DETAIL_LABEL_WIDTH = 15;
+
+function styleDetailLines(lines: string[]): string[] {
+  return lines.map((line) => {
+    if (line.length <= DETAIL_LABEL_WIDTH) return line;
+    const label = line.slice(0, DETAIL_LABEL_WIDTH);
+    if (!label.trim()) return line;
+    const color = label.startsWith("Warning") ? chalk.yellow : accent.bold;
+    return `${color(label)}${line.slice(DETAIL_LABEL_WIDTH)}`;
+  });
+}
+
+function detailLine(label: string, value: string): string {
+  return `${label.padEnd(DETAIL_LABEL_WIDTH)}${value}`;
 }
 
 function assertNoArgs(command: string, args: string[]): void {
@@ -291,46 +365,74 @@ function expandDirectory(
 function helpText(mode: WorkflowMode, query?: string, palette = false): string {
   const groups = groupedCatalog(mode, query);
   const lines: string[] = [];
-  lines.push(palette
+  lines.push(accent.bold(palette
     ? `Commands for ${mode} — type a command or use cloud/local as a one-shot prefix`
-    : `TT ${mode} commands${query ? ` matching ${JSON.stringify(query)}` : ""}`);
+    : `TT ${mode} commands${query ? ` matching ${JSON.stringify(query)}` : ""}`));
 
   if (groups.size === 0) {
-    lines.push("  No matching commands.");
+    lines.push(chalk.dim("  No matching commands."));
   } else {
     for (const [group, commands] of groups) {
-      lines.push(`\n${group}`);
+      lines.push("");
+      lines.push(chalk.bold(group));
       for (const command of commands) {
-        lines.push(`  ${command.path.padEnd(22)} ${command.description}`);
+        lines.push(`  ${accent(command.path.padEnd(22))} ${command.description}`);
       }
     }
   }
 
   if (!query) {
-    lines.push("\nSession");
+    lines.push("");
+    lines.push(chalk.bold("Session"));
     for (const command of SLASH_COMMANDS) {
-      lines.push(`  ${command.path.padEnd(22)} ${command.description}`);
+      lines.push(`  ${accent(command.path.padEnd(22))} ${command.description}`);
     }
-    lines.push("  ?                      Alias for /help.");
-    lines.push("\nUse Tab to complete commands. Shell operators and shell escapes are disabled.");
+    lines.push(`  ${accent("?".padEnd(22))} Alias for /help.`);
+    lines.push(chalk.dim(
+      "\nTab completes commands. Shell operators and shell escapes are disabled.",
+    ));
   }
   return `${lines.join("\n")}\n`;
+}
+
+function activeModelLabel(snapshot: ShellSessionSnapshot): string {
+  return snapshot.mode === "local"
+    ? snapshot.context.local.activeModelId ?? "base"
+    : snapshot.context.spec?.baseModel ?? "—";
+}
+
+/**
+ * The brand mark as terminal blocks: a 3×3 tensor grid whose diagonal runs
+ * through the violet gradient (see tuned-tensor-brand-assets/icon).
+ */
+function logoRows(): string[] {
+  const muted = chalk.dim("██");
+  return [
+    `${chalk.hex("#A78BFA")("██")} ${muted} ${muted}`,
+    `${muted} ${accent("██")} ${muted}`,
+    `${muted} ${muted} ${chalk.hex("#7C3AED")("██")}`,
+  ];
 }
 
 export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
   const spec = snapshot.context.spec?.name
     ?? snapshot.context.spec?.path
     ?? "no spec";
-  return [
-    chalk.bold.cyan("Tuned Tensor"),
-    `  ${chalk.bold(snapshot.mode)} · ${snapshot.context.projectName} · ${spec}`,
-    chalk.dim("  /help for commands · /mode cloud|local to switch workflows"),
-    "",
-  ].join("\n");
+  const heading = snapshot.version
+    ? `${accent.bold("Tuned Tensor")} ${chalk.dim(`v${snapshot.version}`)}`
+    : accent.bold("Tuned Tensor");
+  const textRows = [
+    heading,
+    `${chalk.bold(snapshot.mode)} · ${snapshot.context.projectName} · ${spec} · model ${activeModelLabel(snapshot)}`,
+    chalk.dim("/help for commands · Tab completes · /mode cloud|local switches"),
+  ];
+  const logo = logoRows();
+  const lines = textRows.map((row, index) => `${logo[index]!}  ${row}`);
+  return `${lines.join("\n")}\n\n`;
 }
 
 export function renderShellPrompt(snapshot: ShellSessionSnapshot): string {
-  return `${chalk.cyan("tt")} ${chalk.bold(snapshot.mode)} ${chalk.dim(snapshot.context.projectName)} › `;
+  return `${accent("tt")} ${chalk.bold(snapshot.mode)} ${chalk.dim(snapshot.context.projectName)} › `;
 }
 
 export class TunedTensorShellSession {
@@ -344,6 +446,7 @@ export class TunedTensorShellSession {
     private readonly io: ShellSessionIO,
     private readonly env: Readonly<NodeJS.ProcessEnv>,
     private readonly contextProvider: ShellContextProvider,
+    private readonly version: string | undefined,
     initialContext: ShellContext,
   ) {
     this.mode = initialContext.inferredTarget;
@@ -365,6 +468,7 @@ export class TunedTensorShellSession {
       options.io,
       env,
       contextProvider,
+      options.version,
       initialContext,
     );
   }
@@ -375,6 +479,7 @@ export class TunedTensorShellSession {
       modeSource: this.modeSource,
       cwd: this.cwd,
       context: this.context,
+      version: this.version,
     };
   }
 
@@ -399,6 +504,19 @@ export class TunedTensorShellSession {
     this.io.write(`${lines.join("\n")}\n`);
   }
 
+  private modelLines(): string[] {
+    if (this.mode === "local") {
+      return styleDetailLines([
+        detailLine("Active model", this.context.local.activeModelId ?? "base"),
+        detailLine("Change", "/model <id> to activate a verified local model"),
+      ]);
+    }
+    return styleDetailLines([
+      detailLine("Base model", this.context.spec?.baseModel ?? "—"),
+      detailLine("Change", "edit base_model in tunedtensor.json, then run push"),
+    ]);
+  }
+
   private async handleSlash(command: ParsedSlashCommand): Promise<ShellLineAction> {
     switch (command.name) {
       case "palette":
@@ -410,12 +528,14 @@ export class TunedTensorShellSession {
       case "status":
         assertNoArgs("status", command.args);
         await this.refreshContext();
-        this.writeLines(formatShellStatus(this.context, this.mode));
+        this.writeLines(styleDetailLines(formatShellStatus(this.context, this.mode)));
         return "continue";
       case "context":
         assertNoArgs("context", command.args);
         await this.refreshContext();
-        this.writeLines(formatShellContext(this.context, this.mode, this.modeSource));
+        this.writeLines(styleDetailLines(
+          formatShellContext(this.context, this.mode, this.modeSource),
+        ));
         return "continue";
       case "mode": {
         if (command.args.length === 0) {
@@ -427,7 +547,29 @@ export class TunedTensorShellSession {
         }
         this.mode = command.args[0] as WorkflowMode;
         this.modeSource = "session";
-        this.io.write(`Workflow switched to ${this.mode}.\n`);
+        this.io.write(`${successMark()} Workflow switched to ${this.mode}.\n`);
+        return "continue";
+      }
+      case "model": {
+        if (command.args.length === 0) {
+          await this.refreshContext();
+          this.writeLines(this.modelLines());
+          return "continue";
+        }
+        if (command.args.length !== 1) {
+          throw new ShellParseError("Usage: /model [model-id]");
+        }
+        if (this.mode !== "local") {
+          throw new ShellParseError(
+            "Activating models is a local workflow action. Use /mode local first; cloud specs change base_model in tunedtensor.json.",
+          );
+        }
+        await this.runner({
+          target: "local",
+          args: ["models", "activate", command.args[0]!],
+          cwd: this.cwd,
+        });
+        await this.refreshContext();
         return "continue";
       }
       case "clear":
@@ -449,7 +591,7 @@ export class TunedTensorShellSession {
         }
         this.cwd = nextDirectory;
         await this.refreshContext();
-        this.io.write(`Directory: ${this.cwd}\n`);
+        this.io.write(`${successMark()} Directory: ${this.cwd}\n`);
         return "continue";
       }
       case "exit":
@@ -460,6 +602,9 @@ export class TunedTensorShellSession {
 
   async handleLine(input: string): Promise<ShellLineAction> {
     try {
+      // Bare exit/quit leaves the shell instead of erroring in a workflow.
+      if (/^(exit|quit)$/i.test(input.trim())) return "exit";
+
       const slash = parseSlashCommand(input);
       if (slash) return await this.handleSlash(slash);
 
@@ -474,7 +619,7 @@ export class TunedTensorShellSession {
       await this.refreshContext();
       return "continue";
     } catch (error) {
-      this.io.writeError(`${chalk.red("Error:")} ${errorMessage(error)}\n`);
+      this.io.writeError(`${errorMark()} ${errorMessage(error)}\n`);
       return "continue";
     }
   }
@@ -494,6 +639,7 @@ export interface InteractiveShellOptions {
   cwd?: string;
   env?: Readonly<NodeJS.ProcessEnv>;
   requireTTY?: boolean;
+  version?: string;
 }
 
 function streamIsTTY(stream: NodeJS.ReadableStream | NodeJS.WritableStream): boolean {
@@ -601,6 +747,7 @@ export async function startInteractiveShell(
     io: streamIO(output, error),
     cwd: options.cwd,
     env: options.env,
+    version: options.version,
   });
   const completer = createCommandCompleter(() => session.snapshot().mode);
   readline = createInterface({

@@ -99,6 +99,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { path: "/context", description: "Show the current project and backend context." },
   { path: "/mode cloud", description: "Use the managed cloud workflow." },
   { path: "/mode local", description: "Use the local GPU workflow." },
+  { path: "/model", description: "Show the active model; /model <id> activates a local model." },
   { path: "/cd", description: "Change the shell's working directory." },
   { path: "/clear", description: "Clear the terminal." },
   { path: "/exit", description: "Exit the TT shell." },
