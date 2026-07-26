@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.6.0
+
+### Added
+
+- **Shell `/model` command** — Show the model in play (active local model or
+  cloud spec base model) and activate verified local models with
+  `/model <id>`.
+
+### Changed
+
+- **Shell styling and hints** — Align the interactive shell with the main
+  CLI's output style (✓/✗ marks, bold-cyan headings and labels), show the
+  active model in the banner, and suggest corrections for mistyped session
+  commands.
+
 ## 0.5.0
 
 ### Added

@@ -46,9 +46,12 @@ tt local support-agent › run --dry-run
 
 Commands are routed to the mode shown in the prompt. Prefix a single command
 with `cloud` or `local` to override the mode without switching it. Useful
-session commands include `/help`, `/status`, `/context`, `/mode`, `/cd`,
-`/clear`, and `/exit`. The shell keeps normal terminal scrollback and command
-history only for the current process.
+session commands include `/help`, `/status`, `/context`, `/mode`, `/model`,
+`/cd`, `/clear`, and `/exit`. `/model` shows the model in play — the active
+local model, or the cloud spec's base model — and `/model <id>` activates a
+verified local model. Mistyped session commands suggest the closest match.
+The shell keeps normal terminal scrollback and command history only for the
+current process.
 
 Explicit commands remain non-interactive, including in CI. `tt --help` shows
 the complete command surface, `tt status` inspects both targets without a
