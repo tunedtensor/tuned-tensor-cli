@@ -88,7 +88,19 @@ function actionFromPayload(payload: Record<string, unknown>): AgentAction | null
     operation: stringValue(value.operation) ?? undefined,
     thread_id: stringValue(value.thread_id) ?? undefined,
     turn_id: stringValue(value.turn_id) ?? undefined,
+    arguments: value.arguments,
+    preview: value.preview,
+    method: stringValue(value.method) ?? undefined,
+    path: stringValue(value.path) ?? undefined,
   };
+}
+
+function formatJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 export class TunedTensorAgentSession {
@@ -134,6 +146,15 @@ export class TunedTensorAgentSession {
     );
     this.options.io.write(`${chalk.bold(action.title)}  ${chalk.yellow(`[${action.risk} risk]`)}\n`);
     if (action.summary) this.options.io.write(`${action.summary}\n`);
+    const request = [action.method, action.path].filter(Boolean).join(" ");
+    const technical = {
+      operation: action.operation,
+      ...(request ? { request } : {}),
+      arguments: action.arguments ?? null,
+      preview: action.preview ?? null,
+    };
+    this.options.io.write(`${chalk.bold("Proposed action")}\n`);
+    this.options.io.write(`${formatJson(technical)}\n`);
     this.options.io.write(
       chalk.dim("Use /approve or /reject. The action will not run without approval.") + "\n",
     );

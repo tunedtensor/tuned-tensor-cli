@@ -201,12 +201,29 @@ export function isCatalogCommand(
   args: readonly string[],
 ): boolean {
   if (args.length === 0) return false;
-  if (args[0] === "status") return true;
+  if (args[0] === "status") {
+    return args.length === 1 || args[1]?.startsWith("-") === true;
+  }
   return COMMAND_CATALOG.some((command) => {
     if (!command.modes.includes(mode)) return false;
     const path = command.path.split(" ");
     return path.every((token, index) => args[index] === token);
   });
+}
+
+function hasCatalogIntent(
+  input: string,
+  activeMode: WorkflowMode,
+): boolean {
+  let args = input.trim().split(/\s+/);
+  if (args[0] === "tt") args = args.slice(1);
+  const override = args[0];
+  const mode =
+    override === "cloud" || override === "local"
+      ? override
+      : activeMode;
+  if (override === "cloud" || override === "local") args = args.slice(1);
+  return isCatalogCommand(mode, args);
 }
 
 export type SlashCommandName =
@@ -673,9 +690,6 @@ export class TunedTensorShellSession {
       if (explicitCommand !== null && !explicitCommand) {
         throw new ShellParseError("Add a TT command after :.");
       }
-      const commandInput = explicitCommand ?? input;
-      const routed = routeShellCommand(commandInput, this.mode);
-      if (!routed) return "continue";
       const explicitWorkflowPrefix =
         /^(?:tt\s+)?(?:cloud|local)(?:\s|$)/.test(trimmed)
         || /^tt(?:\s|$)/.test(trimmed);
@@ -684,13 +698,16 @@ export class TunedTensorShellSession {
         explicitCommand === null
         && !explicitWorkflowPrefix
         && this.agent
-        && !isCatalogCommand(routed.target, routed.args)
+        && !hasCatalogIntent(input, this.mode)
       ) {
         await this.agent.handleLine(input);
         await this.refreshContext();
         return "continue";
       }
 
+      const commandInput = explicitCommand ?? input;
+      const routed = routeShellCommand(commandInput, this.mode);
+      if (!routed) return "continue";
       await this.runner({
         target: routed.target,
         args: [...routed.args],

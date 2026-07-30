@@ -101,6 +101,8 @@ describe("isCatalogCommand", () => {
     expect(isCatalogCommand("local", ["doctor"])).toBe(true);
     expect(isCatalogCommand("cloud", ["show", "my", "latest", "run"])).toBe(false);
     expect(isCatalogCommand("cloud", ["runs", "please"])).toBe(false);
+    expect(isCatalogCommand("cloud", ["status", "of", "my", "run"])).toBe(false);
+    expect(isCatalogCommand("cloud", ["status", "--target", "local"])).toBe(true);
   });
 });
 
@@ -317,12 +319,13 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
       handleLine: vi.fn(async (_input: string) => "continue" as const),
       interrupt: vi.fn(() => false),
     };
+    const writeError = vi.fn();
     const session = await createShellSession({
       cwd: "/tmp/cloud-project",
       env: {},
       io: {
         write: vi.fn(),
-        writeError: vi.fn(),
+        writeError,
         clear: vi.fn(),
       },
       runner: run,
@@ -333,7 +336,10 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
     await session.handleLine("What happened in my latest training run?");
     await session.handleLine("/new");
     await session.handleLine("/approve action-123");
+    await session.handleLine("Compare accuracy > latency & cost; summarize it.");
+    await session.handleLine("status of my latest run");
     await session.handleLine("runs list");
+    await session.handleLine("runs list | cat");
     await session.handleLine(": balance");
     await session.handleLine("cloud not-a-command");
 
@@ -341,6 +347,8 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
       "What happened in my latest training run?",
       "/new",
       "/approve action-123",
+      "Compare accuracy > latency & cost; summarize it.",
+      "status of my latest run",
     ]);
     expect(run.mock.calls.map((call) => call[0])).toEqual([
       {
@@ -359,6 +367,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
         cwd: "/tmp/cloud-project",
       },
     ]);
+    expect(writeError).toHaveBeenCalledWith(expect.stringMatching(/Shell operator/));
   });
 
   it("implements help, context, status, clear, and exit without running work", async () => {

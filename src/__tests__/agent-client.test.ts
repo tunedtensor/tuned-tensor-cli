@@ -80,6 +80,10 @@ describe("agent client", () => {
       operation: undefined,
       thread_id: undefined,
       turn_id: undefined,
+      arguments: undefined,
+      preview: undefined,
+      method: undefined,
+      path: undefined,
     }]);
   });
 

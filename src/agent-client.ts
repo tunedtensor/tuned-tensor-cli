@@ -24,6 +24,10 @@ export interface AgentAction {
   summary: string;
   risk: string;
   status?: string;
+  arguments?: unknown;
+  preview?: unknown;
+  method?: string;
+  path?: string;
 }
 
 export interface AgentThreadDetail {
@@ -181,6 +185,10 @@ function normalizeAction(value: unknown): AgentAction | null {
     operation: stringValue(input.operation) ?? undefined,
     thread_id: stringValue(input.thread_id) ?? undefined,
     turn_id: stringValue(input.turn_id) ?? undefined,
+    arguments: input.arguments,
+    preview: input.preview,
+    method: stringValue(input.method) ?? undefined,
+    path: stringValue(input.path) ?? undefined,
   };
 }
 

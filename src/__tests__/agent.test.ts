@@ -49,6 +49,10 @@ function fakeClient(): AgentConversationClient {
               summary: "This run is estimated to cost £2.00.",
               risk: "high",
               operation: "start_run",
+              arguments: { spec_id: "spec-1" },
+              preview: { estimated_cost: "£2.00" },
+              method: "POST",
+              path: "/api/v1/behavior-specs/spec-1/runs",
             },
           },
         },
@@ -101,6 +105,10 @@ describe("TunedTensorAgentSession", () => {
     expect(stdout.join("")).toContain("Here is the answer.");
     expect(stdout.join("")).toContain("Approval required");
     expect(stdout.join("")).toContain("will not run without approval");
+    expect(stdout.join("")).toContain("\"spec_id\": \"spec-1\"");
+    expect(stdout.join("")).toContain(
+      "\"request\": \"POST /api/v1/behavior-specs/spec-1/runs\"",
+    );
     expect(session.snapshot().pendingActions).toHaveLength(1);
 
     await session.handleLine("/approve");
@@ -131,5 +139,32 @@ describe("TunedTensorAgentSession", () => {
     expect(client.listThreads).toHaveBeenCalled();
     expect(client.getThread).toHaveBeenCalledWith(thread.id);
     expect(session.snapshot().thread?.id).toBe(thread.id);
+  });
+
+  it("cancels an active response without ending the session", async () => {
+    const client = fakeClient();
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    client.runTurn = vi.fn(async (_threadId, _prompt, _onEvent, signal) => {
+      started();
+      return await new Promise<never>((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => reject(new Error("aborted")),
+          { once: true },
+        );
+      });
+    });
+    const { io, stdout } = testIO();
+    const session = new TunedTensorAgentSession({ client, io });
+
+    const pending = session.send("keep thinking");
+    await didStart;
+    expect(session.interrupt()).toBe(true);
+    await expect(pending).resolves.toBeNull();
+    expect(stdout.join("")).toContain("Response stopped");
+    expect(session.interrupt()).toBe(false);
   });
 });
