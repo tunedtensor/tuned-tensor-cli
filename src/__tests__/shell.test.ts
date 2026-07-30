@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import {
   ShellParseError,
   createShellSession,
+  isCatalogCommand,
   parseSlashCommand,
   renderShellBanner,
   routeShellCommand,
@@ -91,6 +92,17 @@ describe("routeShellCommand", () => {
 
   it("does not open a nested shell for a bare tt command", () => {
     expect(() => routeShellCommand("tt", "cloud")).toThrow(/already open/);
+  });
+});
+
+describe("isCatalogCommand", () => {
+  it("recognizes existing CLI grammar without treating conversation as commands", () => {
+    expect(isCatalogCommand("cloud", ["runs", "list"])).toBe(true);
+    expect(isCatalogCommand("local", ["doctor"])).toBe(true);
+    expect(isCatalogCommand("cloud", ["show", "my", "latest", "run"])).toBe(false);
+    expect(isCatalogCommand("cloud", ["runs", "please"])).toBe(false);
+    expect(isCatalogCommand("cloud", ["status", "of", "my", "run"])).toBe(false);
+    expect(isCatalogCommand("cloud", ["status", "--target", "local"])).toBe(true);
   });
 });
 
@@ -296,6 +308,66 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
     ]);
     expect(stdout.join("")).toContain("Workflow switched to cloud");
     expect(stderr.join("")).toMatch(/Shell operator/);
+  });
+
+  it("sends natural language and agent slash commands to the in-shell agent", async () => {
+    const run = vi.fn(async (_request: ShellCommandRequest) => ({
+      exitCode: 0,
+    }));
+    const agent = {
+      busy: false,
+      handleLine: vi.fn(async (_input: string) => "continue" as const),
+      interrupt: vi.fn(() => false),
+    };
+    const writeError = vi.fn();
+    const session = await createShellSession({
+      cwd: "/tmp/cloud-project",
+      env: {},
+      io: {
+        write: vi.fn(),
+        writeError,
+        clear: vi.fn(),
+      },
+      runner: run,
+      agent,
+      contextProvider: async ({ cwd }) => fakeContext(cwd, "cloud"),
+    });
+
+    await session.handleLine("What happened in my latest training run?");
+    await session.handleLine("/new");
+    await session.handleLine("/approve action-123");
+    await session.handleLine("Compare accuracy > latency & cost; summarize it.");
+    await session.handleLine("status of my latest run");
+    await session.handleLine("runs list");
+    await session.handleLine("runs list | cat");
+    await session.handleLine(": balance");
+    await session.handleLine("cloud not-a-command");
+
+    expect(agent.handleLine.mock.calls.map((call) => call[0])).toEqual([
+      "What happened in my latest training run?",
+      "/new",
+      "/approve action-123",
+      "Compare accuracy > latency & cost; summarize it.",
+      "status of my latest run",
+    ]);
+    expect(run.mock.calls.map((call) => call[0])).toEqual([
+      {
+        target: "cloud",
+        args: ["runs", "list"],
+        cwd: "/tmp/cloud-project",
+      },
+      {
+        target: "cloud",
+        args: ["balance"],
+        cwd: "/tmp/cloud-project",
+      },
+      {
+        target: "cloud",
+        args: ["not-a-command"],
+        cwd: "/tmp/cloud-project",
+      },
+    ]);
+    expect(writeError).toHaveBeenCalledWith(expect.stringMatching(/Shell operator/));
   });
 
   it("implements help, context, status, clear, and exit without running work", async () => {

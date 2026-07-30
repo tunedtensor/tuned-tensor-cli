@@ -2,6 +2,11 @@ import { spawn } from "node:child_process";
 import { constants as osConstants } from "node:os";
 import { Command } from "commander";
 import chalk from "chalk";
+import {
+  createAgentClient,
+  type AgentConversationClient,
+} from "./agent-client.js";
+import { TunedTensorAgentSession } from "./agent.js";
 import { executeLocalCommand } from "./local-runner.js";
 import {
   shouldStartInteractiveShell,
@@ -54,6 +59,7 @@ export interface CliRuntime {
   runSelfCommand?: SelfCommandRunner;
   runLocalCommand?: typeof executeLocalCommand;
   startShell?: typeof startInteractiveShell;
+  agentClient?: AgentConversationClient;
 }
 
 export async function runSelfCommand(
@@ -205,11 +211,22 @@ export function createProgram(
       color?: boolean;
     }>();
     const shellEnvironment = childEnvironment(root, env);
+    const output = runtime.stdout ?? process.stdout;
+    const error = runtime.stderr ?? process.stderr;
+    const agent = createShellAgent({
+      client: runtime.agentClient ?? createAgentClient({
+        apiKey: root.apiKey ?? shellEnvironment.TUNED_TENSOR_API_KEY,
+        baseUrl: root.baseUrl ?? shellEnvironment.TUNED_TENSOR_URL,
+      }),
+      output,
+      error,
+    });
     await launchShell({
       runner: shellRunner,
+      agent,
       input: runtime.stdin ?? process.stdin,
-      output: runtime.stdout ?? process.stdout,
-      error: runtime.stderr ?? process.stderr,
+      output,
+      error,
       cwd,
       env: shellEnvironment,
       version,
@@ -218,7 +235,7 @@ export function createProgram(
 
   program
     .name("tt")
-    .description("Tuned Tensor — one terminal for cloud and local fine-tuning")
+    .description("Tuned Tensor — converse, train, and inspect from one terminal")
     .version(version)
     .option("-k, --api-key <key>", "API key (overrides stored key)")
     .option(
@@ -353,7 +370,7 @@ export function createProgram(
     "after",
     `
 Workflows:
-  tt                     Open the interactive terminal (TTY only)
+  tt                     Open the conversational terminal (TTY only)
   tt status              Inspect cloud/local project context
   tt cloud <command>     Run a hosted command explicitly
   tt local <command>     Run a local GPU command
@@ -366,6 +383,27 @@ Examples:
   );
 
   return program;
+}
+
+function createShellAgent(options: {
+  client: AgentConversationClient;
+  output: NodeJS.WritableStream;
+  error: NodeJS.WritableStream;
+}): TunedTensorAgentSession {
+  return new TunedTensorAgentSession({
+    client: options.client,
+    io: {
+      write(text) {
+        options.output.write(text);
+      },
+      writeError(text) {
+        options.error.write(text);
+      },
+      clear() {
+        options.output.write("\u001b[2J\u001b[H");
+      },
+    },
+  });
 }
 
 export async function runCli(
@@ -385,6 +423,16 @@ export async function runCli(
     })
   ) {
     const invokeSelf = runtime.runSelfCommand ?? runSelfCommand;
+    const output = runtime.stdout ?? process.stdout;
+    const error = runtime.stderr ?? process.stderr;
+    const agent = createShellAgent({
+      client: runtime.agentClient ?? createAgentClient({
+        apiKey: env.TUNED_TENSOR_API_KEY,
+        baseUrl: env.TUNED_TENSOR_URL,
+      }),
+      output,
+      error,
+    });
     await (runtime.startShell ?? startInteractiveShell)({
       runner: async (request) => await invokeSelf(
         request.target === "local"
@@ -396,9 +444,10 @@ export async function runCli(
           entrypoint: argv[1],
         },
       ),
+      agent,
       input: runtime.stdin ?? process.stdin,
-      output: runtime.stdout ?? process.stdout,
-      error: runtime.stderr ?? process.stderr,
+      output,
+      error,
       cwd: runtime.cwd ?? process.cwd(),
       env,
       version,
