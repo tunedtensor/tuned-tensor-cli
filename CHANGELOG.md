@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.7.0
+
+### Added
+
+- **Conversational shell** — Send ordinary sentences entered in the
+  interactive `tt` shell to the same authenticated Tuned Tensor agent used by
+  the web application, with streamed text and managed tool activity rendered
+  directly in the terminal.
+- **Durable agent conversations** — Start, list, and resume conversations with
+  `/new`, `/threads`, and `/resume <id>`. Resumed conversations also restore
+  outstanding approval requests.
+- **Approval-gated actions** — Review agent-proposed mutations in the terminal
+  and explicitly accept or decline them with `/approve` and `/reject`.
+
+### Changed
+
+- **Hybrid input routing** — Preserve direct execution for known cloud and
+  local CLI commands while routing other input to the agent. Prefix a command
+  with `:` to make command intent explicit.
+- **Response cancellation** — Press Ctrl+C during an agent turn to stop the
+  streamed response without leaving the interactive shell.
+
 ## 0.6.0
 
 ### Added

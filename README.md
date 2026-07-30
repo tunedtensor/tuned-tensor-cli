@@ -33,29 +33,40 @@ npm run build
 npm link
 ```
 
-## Terminal shell
+## Conversational terminal
 
-Run `tt` in an interactive terminal to open the Tuned Tensor shell:
+After `tt auth login`, run `tt` to open one terminal for conversation and
+commands:
 
 ```text
-tt cloud support-agent › auth status
-tt cloud support-agent › /mode local
-tt local support-agent › doctor
-tt local support-agent › run --dry-run
+tt cloud support-agent › What happened in my latest training run?
+TT  Your latest run completed...
+tt cloud support-agent › runs list
+tt cloud support-agent › Ask whether my dataset is ready to train
 ```
 
-Commands are routed to the mode shown in the prompt. Prefix a single command
-with `cloud` or `local` to override the mode without switching it. Useful
-session commands include `/help`, `/status`, `/context`, `/mode`, `/model`,
-`/cd`, `/clear`, and `/exit`. `/model` shows the model in play — the active
-local model, or the cloud spec's base model — and `/model <id>` activates a
-verified local model. Mistyped session commands suggest the closest match.
-The shell keeps normal terminal scrollback and command history only for the
-current process.
+Ordinary sentences go to the same authenticated Tuned Tensor agent used by the
+web application. Known CLI commands such as `runs list`, `doctor`, and
+`models list` still execute directly. Prefix a command with `:` when you want
+to make that intent explicit. Commands are routed to the mode shown in the
+prompt; prefix one with `cloud` or `local` to override the mode without
+switching it.
+
+Agent conversations are durable. Use `/new` to start one, `/threads` to list
+recent conversations, and `/resume <id>` to continue one. Read operations can
+run during the conversation. Mutations remain approval-gated: the agent shows
+the exact proposed action, then waits for `/approve` or `/reject`.
+
+Useful shell controls include `/help`, `/status`, `/context`, `/mode`,
+`/model`, `/cd`, `/clear`, and `/exit`. `/model` shows the model in play — the
+active local model, or the cloud spec's base model — and `/model <id>`
+activates a verified local model. The shell keeps normal terminal scrollback
+and command history only for the current process.
 
 Explicit commands remain non-interactive, including in CI. `tt --help` shows
 the complete command surface, `tt status` inspects both targets without a
-network or GPU probe, and `tt shell` opens the shell explicitly.
+network or GPU probe, and `tt shell` opens the conversational terminal
+explicitly.
 
 ## Hosted quick start
 

@@ -27,6 +27,10 @@ export interface ClientOpts {
   baseUrl?: string;
 }
 
+export interface StreamClientOpts extends ClientOpts {
+  signal?: AbortSignal;
+}
+
 function resolveKey(opts?: ClientOpts): string {
   const key = getApiKey(opts);
   if (!key) {
@@ -94,6 +98,44 @@ async function request<T>(
 
   if (res.status === 204) return { data: null as T };
   return (await res.json()) as ApiResponse<T>;
+}
+
+export async function postStream(
+  path: string,
+  body: unknown,
+  opts?: StreamClientOpts,
+): Promise<Response> {
+  const key = resolveKey(opts);
+  const url = buildUrl(path, undefined, opts);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: opts?.signal,
+  });
+
+  if (!res.ok) {
+    let errBody: ApiErrorBody;
+    try {
+      errBody = (await res.json()) as ApiErrorBody;
+    } catch {
+      throw new ApiError(res.status, "UNKNOWN", res.statusText);
+    }
+    throw new ApiError(
+      res.status,
+      errBody.error?.code || "UNKNOWN",
+      errBody.error?.message || res.statusText,
+    );
+  }
+
+  if (!res.body) {
+    throw new ApiError(502, "EMPTY_STREAM", "The agent returned an empty response.");
+  }
+  return res;
 }
 
 export function get<T>(

@@ -20,6 +20,20 @@ import {
 
 export type { WorkflowMode } from "./command-catalog.js";
 
+export interface ShellAgent {
+  busy: boolean;
+  handleLine(input: string): Promise<"continue" | "exit">;
+  interrupt(): boolean;
+}
+
+const AGENT_SLASH_COMMANDS = new Set([
+  "new",
+  "threads",
+  "resume",
+  "approve",
+  "reject",
+]);
+
 export class ShellParseError extends Error {
   constructor(message: string) {
     super(message);
@@ -178,6 +192,23 @@ export function routeShellCommand(
   return { target: activeMode, args };
 }
 
+/**
+ * Decide whether a line is an intentional CLI command. Exact catalog prefixes
+ * preserve the existing shell grammar; everything else can be conversational.
+ */
+export function isCatalogCommand(
+  mode: WorkflowMode,
+  args: readonly string[],
+): boolean {
+  if (args.length === 0) return false;
+  if (args[0] === "status") return true;
+  return COMMAND_CATALOG.some((command) => {
+    if (!command.modes.includes(mode)) return false;
+    const path = command.path.split(" ");
+    return path.every((token, index) => args[index] === token);
+  });
+}
+
 export type SlashCommandName =
   | "palette"
   | "help"
@@ -301,6 +332,7 @@ export type ShellContextProvider = (
 export interface CreateShellSessionOptions {
   runner: ShellCommandRunner;
   io: ShellSessionIO;
+  agent?: ShellAgent;
   cwd?: string;
   env?: Readonly<NodeJS.ProcessEnv>;
   contextProvider?: ShellContextProvider;
@@ -383,13 +415,21 @@ function helpText(mode: WorkflowMode, query?: string, palette = false): string {
 
   if (!query) {
     lines.push("");
+    lines.push(chalk.bold("Conversation"));
+    lines.push(`  ${accent("plain text".padEnd(22))} Ask the Tuned Tensor agent anything.`);
+    lines.push(`  ${accent("/new".padEnd(22))} Start a new agent conversation.`);
+    lines.push(`  ${accent("/threads".padEnd(22))} List recent conversations.`);
+    lines.push(`  ${accent("/resume <id>".padEnd(22))} Resume a conversation.`);
+    lines.push(`  ${accent("/approve [id]".padEnd(22))} Approve a proposed action.`);
+    lines.push(`  ${accent("/reject [id]".padEnd(22))} Reject a proposed action.`);
+    lines.push("");
     lines.push(chalk.bold("Session"));
     for (const command of SLASH_COMMANDS) {
       lines.push(`  ${accent(command.path.padEnd(22))} ${command.description}`);
     }
     lines.push(`  ${accent("?".padEnd(22))} Alias for /help.`);
     lines.push(chalk.dim(
-      "\nTab completes commands. Shell operators and shell escapes are disabled.",
+      "\nKnown TT commands execute directly; other text goes to the agent. Prefix a command with : to make the intent explicit.",
     ));
   }
   return `${lines.join("\n")}\n`;
@@ -424,7 +464,7 @@ export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
   const textRows = [
     heading,
     `${chalk.bold(snapshot.mode)} · ${snapshot.context.projectName} · ${spec} · model ${activeModelLabel(snapshot)}`,
-    chalk.dim("/help for commands · Tab completes · /mode cloud|local switches"),
+    chalk.dim("Ask TT anything · known commands run directly · /help for more"),
   ];
   const logo = logoRows();
   const lines = textRows.map((row, index) => `${logo[index]!}  ${row}`);
@@ -444,6 +484,7 @@ export class TunedTensorShellSession {
   private constructor(
     private readonly runner: ShellCommandRunner,
     private readonly io: ShellSessionIO,
+    private readonly agent: ShellAgent | undefined,
     private readonly env: Readonly<NodeJS.ProcessEnv>,
     private readonly contextProvider: ShellContextProvider,
     private readonly version: string | undefined,
@@ -466,11 +507,16 @@ export class TunedTensorShellSession {
     return new TunedTensorShellSession(
       options.runner,
       options.io,
+      options.agent,
       env,
       contextProvider,
       options.version,
       initialContext,
     );
+  }
+
+  interruptAgent(): boolean {
+    return this.agent?.interrupt() ?? false;
   }
 
   snapshot(): ShellSessionSnapshot {
@@ -605,11 +651,45 @@ export class TunedTensorShellSession {
       // Bare exit/quit leaves the shell instead of erroring in a workflow.
       if (/^(exit|quit)$/i.test(input.trim())) return "exit";
 
+      const trimmed = input.trim();
+      if (trimmed.startsWith("/")) {
+        const rawName = trimmed.slice(1).split(/\s+/, 1)[0]!.toLowerCase();
+        if (AGENT_SLASH_COMMANDS.has(rawName)) {
+          if (!this.agent) {
+            throw new ShellParseError("The conversational agent is unavailable.");
+          }
+          await this.agent.handleLine(trimmed);
+          await this.refreshContext();
+          return "continue";
+        }
+      }
+
       const slash = parseSlashCommand(input);
       if (slash) return await this.handleSlash(slash);
 
-      const routed = routeShellCommand(input, this.mode);
+      const explicitCommand = trimmed.startsWith(":")
+        ? trimmed.slice(1).trimStart()
+        : null;
+      if (explicitCommand !== null && !explicitCommand) {
+        throw new ShellParseError("Add a TT command after :.");
+      }
+      const commandInput = explicitCommand ?? input;
+      const routed = routeShellCommand(commandInput, this.mode);
       if (!routed) return "continue";
+      const explicitWorkflowPrefix =
+        /^(?:tt\s+)?(?:cloud|local)(?:\s|$)/.test(trimmed)
+        || /^tt(?:\s|$)/.test(trimmed);
+
+      if (
+        explicitCommand === null
+        && !explicitWorkflowPrefix
+        && this.agent
+        && !isCatalogCommand(routed.target, routed.args)
+      ) {
+        await this.agent.handleLine(input);
+        await this.refreshContext();
+        return "continue";
+      }
 
       await this.runner({
         target: routed.target,
@@ -633,6 +713,7 @@ export async function createShellSession(
 
 export interface InteractiveShellOptions {
   runner: ShellCommandRunner;
+  agent?: ShellAgent;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
   error?: NodeJS.WritableStream;
@@ -745,6 +826,7 @@ export async function startInteractiveShell(
   const session = await createShellSession({
     runner: foregroundRunner,
     io: streamIO(output, error),
+    agent: options.agent,
     cwd: options.cwd,
     env: options.env,
     version: options.version,
@@ -759,6 +841,10 @@ export async function startInteractiveShell(
     completer,
   });
   readline.on("SIGINT", () => {
+    if (session.interruptAgent()) {
+      output.write("\n");
+      return;
+    }
     // In readline raw mode, Ctrl+C is a line-editing action. Clear the current
     // buffer and redraw instead of pausing or terminating the shell.
     output.write("\n");

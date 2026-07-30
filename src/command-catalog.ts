@@ -163,7 +163,14 @@ export function createCommandCompleter(
   return (line) => {
     const trimmed = line.trimStart();
     if (trimmed.startsWith("/")) {
-      const candidates = SLASH_COMMANDS.map((command) => command.path);
+      const candidates = [
+        ...SLASH_COMMANDS.map((command) => command.path),
+        "/new",
+        "/threads",
+        "/resume ",
+        "/approve ",
+        "/reject ",
+      ];
       const matches = candidates.filter((candidate) => candidate.startsWith(trimmed));
       return [matches.length > 0 ? matches : candidates, line];
     }
