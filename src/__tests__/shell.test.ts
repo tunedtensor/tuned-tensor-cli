@@ -8,6 +8,7 @@ import {
   parseSlashCommand,
   renderShellBanner,
   renderShellPrompt,
+  renderSubmittedShellInput,
   resetShellPromptStyle,
   routeShellCommand,
   shouldStartInteractiveShell,
@@ -280,20 +281,36 @@ describe("renderShellBanner", () => {
 });
 
 describe("renderShellPrompt", () => {
+  it("keeps the active readline prompt self-contained", () => {
+    const originalLevel = chalk.level;
+    chalk.level = 3;
+    try {
+      const prompt = renderShellPrompt();
+      expect(prompt).toContain("›");
+      expect(prompt).not.toContain("\u001b[48;");
+      expect(prompt).not.toContain("\u001b[K");
+      expect(resetShellPromptStyle()).toBe("");
+    } finally {
+      chalk.level = originalLevel;
+    }
+  });
+
   it.each([
     [1, "\u001b[100m"],
     [2, "\u001b[48;5;238m"],
     [3, "\u001b[48;2;50;52;67m"],
-  ] as const)("renders a full-row input surface at color level %i", (level, background) => {
+  ] as const)("repaints submitted input at color level %i", (level, background) => {
     const originalLevel = chalk.level;
     chalk.level = level;
     try {
-      const prompt = renderShellPrompt();
-      expect(prompt).toContain("›");
-      expect(prompt).toContain(background);
-      expect(prompt).toContain("\u001b[K");
-      expect(prompt).not.toContain("cloud-project");
-      expect(resetShellPromptStyle()).toBe("\u001b[0m");
+      const submitted = renderSubmittedShellInput("hello");
+      expect(submitted).toContain("›");
+      expect(submitted).toContain("hello");
+      expect(submitted).toContain(background);
+      expect(submitted).toContain("\u001b[K\u001b[0m\r\n");
+      expect(submitted).toMatch(/^\u001b\[1A\r\u001b\[2K/);
+      expect(renderSubmittedShellInput("too long", 5)).toBe("");
+      expect(renderSubmittedShellInput("safe\u001b[31m", 80)).not.toContain("[31m");
     } finally {
       chalk.level = originalLevel;
     }
@@ -304,6 +321,7 @@ describe("renderShellPrompt", () => {
     chalk.level = 0;
     try {
       expect(renderShellPrompt()).toBe("› ");
+      expect(renderSubmittedShellInput("hello")).toBe("");
       expect(resetShellPromptStyle()).toBe("");
     } finally {
       chalk.level = originalLevel;

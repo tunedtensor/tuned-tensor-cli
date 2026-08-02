@@ -194,6 +194,35 @@ describe("TunedTensorAgentSession", () => {
     expect(output.split("tt  ")).toHaveLength(2);
   });
 
+  it("renders streamed assistant Markdown without exposing syntax markers", async () => {
+    const client = fakeClient();
+    client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
+      onEvent({ type: "text_delta", payload: { delta: "**Behaviour" } });
+      onEvent({
+        type: "text_delta",
+        payload: { delta: " Specs**\n- List and inspect `specs`." },
+      });
+      return {
+        threadId: thread.id,
+        turnId: "turn-1",
+        status: "completed",
+        response: "**Behaviour Specs**\n- List and inspect `specs`.",
+        actions: [],
+      };
+    });
+    const { io, stdout } = testIO();
+    const session = new TunedTensorAgentSession({ client, io });
+
+    await session.send("What can you do?");
+
+    const output = stdout.join("");
+    expect(output).toContain("Behaviour Specs");
+    expect(output).toContain("• List and inspect specs.");
+    expect(output).not.toContain("**");
+    expect(output).not.toContain("`specs`");
+    expect(output.split("tt  ")).toHaveLength(2);
+  });
+
   it("cancels an active response without ending the session", async () => {
     const client = fakeClient();
     let started!: () => void;
