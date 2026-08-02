@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
+import { stripVTControlCharacters } from "node:util";
 import {
   COMMAND_CATALOG,
   SLASH_COMMANDS,
@@ -378,7 +379,9 @@ const errorMark = (): string => chalk.red("✗");
 const accent = chalk.hex("#8B5CF6");
 const ANSI_BOLD = "\u001b[1m";
 const ANSI_BOLD_OFF = "\u001b[22m";
+const ANSI_CLEAR_LINE = "\u001b[2K";
 const ANSI_CLEAR_TO_END = "\u001b[K";
+const ANSI_CURSOR_UP = "\u001b[1A";
 const ANSI_RESET = "\u001b[0m";
 
 function inputColorCodes(): {
@@ -509,12 +512,21 @@ export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
 }
 
 export function renderShellPrompt(): string {
-  // Keep the style open while readline owns the input so typed text inherits
-  // the background. CSI K paints the rest of the row in terminals that honor
-  // the active erase color; resetShellPromptStyle() closes it after submission.
+  // Readline must own a self-contained prompt. Leaving a background style open
+  // lets prompt redraws leak into streamed agent output.
+  return `${accent.bold("›")} `;
+}
+
+export function renderSubmittedShellInput(input: string, columns?: number): string {
   const colors = inputColorCodes();
-  if (!colors) return "› ";
+  if (!colors) return "";
+  const safeInput = stripVTControlCharacters(input)
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "");
+  if (columns && Array.from(`› ${safeInput}`).length >= columns) return "";
   return [
+    ANSI_CURSOR_UP,
+    "\r",
+    ANSI_CLEAR_LINE,
     colors.background,
     colors.accent,
     ANSI_BOLD,
@@ -522,12 +534,15 @@ export function renderShellPrompt(): string {
     ANSI_BOLD_OFF,
     colors.text,
     " ",
+    safeInput,
     ANSI_CLEAR_TO_END,
+    ANSI_RESET,
+    "\r\n",
   ].join("");
 }
 
 export function resetShellPromptStyle(): string {
-  return chalk.level === 0 ? "" : ANSI_RESET;
+  return "";
 }
 
 export class TunedTensorShellSession {
@@ -913,9 +928,13 @@ export async function startInteractiveShell(
 
   try {
     for await (const line of readline) {
-      // The prompt intentionally leaves its background style open so input is
-      // rendered as a single tinted surface. Close it before any output begins.
-      output.write(resetShellPromptStyle());
+      // Readline has already advanced to the next row. Repaint the submitted
+      // prompt above as a closed, full-row surface; the active prompt itself
+      // stays unstyled so it cannot bleed into streamed output.
+      output.write(renderSubmittedShellInput(
+        line,
+        (output as NodeJS.WritableStream & { columns?: number }).columns,
+      ));
       const action = await session.handleLine(line);
       if (action === "exit") {
         readline.close();

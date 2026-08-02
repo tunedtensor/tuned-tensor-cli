@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.8.1
+
+### Fixed
+
+- **Contained prompt styling** — Keep the active prompt self-contained and
+  repaint only submitted questions as tinted rows, preventing blank surfaces
+  and prompt colors from leaking into streamed responses.
+- **Readable agent responses** — Render streamed Markdown headings, emphasis,
+  lists, links, quotes, and code as terminal-native formatting instead of
+  exposing raw syntax markers.
+
 ## 0.8.0
 
 ### Added

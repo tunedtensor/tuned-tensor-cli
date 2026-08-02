@@ -8,6 +8,7 @@ import {
   type AgentTurnResult,
 } from "./agent-client.js";
 import { tokenizeShellInput } from "./shell.js";
+import { StreamingTerminalMarkdown } from "./terminal-markdown.js";
 
 const accent = chalk.hex("#8B5CF6");
 const successMark = (): string => chalk.green("✓");
@@ -110,6 +111,7 @@ export class TunedTensorAgentSession {
   private responseStarted = false;
   private reasoningActive = false;
   private lineOpen = false;
+  private readonly responseMarkdown = new StreamingTerminalMarkdown();
 
   constructor(private readonly options: AgentSessionOptions) {
     this.thread = options.thread ?? null;
@@ -141,6 +143,20 @@ export class TunedTensorAgentSession {
     this.reasoningActive = false;
   }
 
+  private writeRenderedResponse(rendered: string): void {
+    if (!rendered) return;
+    if (!this.responseStarted) {
+      this.options.io.write(`\n${accent.bold("tt")}  `);
+      this.responseStarted = true;
+    }
+    this.options.io.write(rendered);
+    this.lineOpen = !rendered.endsWith("\n");
+  }
+
+  private flushResponse(): void {
+    this.writeRenderedResponse(this.responseMarkdown.flush());
+  }
+
   private renderAction(action: AgentAction): void {
     this.endOpenLine();
     this.options.io.write(
@@ -170,17 +186,11 @@ export class TunedTensorAgentSession {
         stringValue(payload.text) ??
         stringValue(payload.content);
       if (!delta) return;
-      const followsReasoning = this.reasoningActive;
-      if (followsReasoning) this.endOpenLine();
-      if (!this.responseStarted) {
-        this.options.io.write(`\n${accent.bold("tt")}  `);
-        this.responseStarted = true;
-        this.lineOpen = true;
-      } else if (followsReasoning) {
+      if (this.reasoningActive) {
+        this.endOpenLine();
         this.options.io.write("\n");
       }
-      this.options.io.write(delta);
-      this.lineOpen = !delta.endsWith("\n");
+      this.writeRenderedResponse(this.responseMarkdown.push(delta));
       return;
     }
 
@@ -191,6 +201,7 @@ export class TunedTensorAgentSession {
         stringValue(payload.content);
       if (!delta) return;
       if (!this.reasoningActive) {
+        this.flushResponse();
         this.endOpenLine();
         this.options.io.write("\n");
         this.reasoningActive = true;
@@ -201,6 +212,7 @@ export class TunedTensorAgentSession {
     }
 
     if (event.type === "tool_call") {
+      this.flushResponse();
       this.endOpenLine();
       const name =
         stringValue(payload.name) ??
@@ -211,6 +223,7 @@ export class TunedTensorAgentSession {
     }
 
     if (event.type === "tool_result") {
+      this.flushResponse();
       this.endOpenLine();
       const failed = payload.status === "error" || Boolean(payload.error);
       this.options.io.write(
@@ -220,6 +233,7 @@ export class TunedTensorAgentSession {
     }
 
     if (event.type === "approval_required") {
+      this.flushResponse();
       const action = actionFromPayload(payload);
       if (!action) return;
       this.pendingActions.set(action.id, action);
@@ -228,12 +242,14 @@ export class TunedTensorAgentSession {
     }
 
     if (event.type === "action_started") {
+      this.flushResponse();
       this.endOpenLine();
       this.options.io.write(chalk.dim("  ○ Running approved action…\n"));
       return;
     }
 
     if (event.type === "action_result") {
+      this.flushResponse();
       this.endOpenLine();
       const failed = payload.status === "failed" || Boolean(payload.error);
       this.options.io.write(
@@ -243,6 +259,7 @@ export class TunedTensorAgentSession {
     }
 
     if (event.type === "error") {
+      this.flushResponse();
       this.endOpenLine();
       const message =
         stringValue(payload.message) ??
@@ -269,14 +286,17 @@ export class TunedTensorAgentSession {
     this.responseStarted = false;
     this.reasoningActive = false;
     this.lineOpen = false;
+    this.responseMarkdown.reset();
     try {
       const result = await operation(controller.signal);
+      this.flushResponse();
       this.endOpenLine();
       for (const action of result.actions) {
         this.pendingActions.set(action.id, action);
       }
       return result;
     } catch (error) {
+      this.flushResponse();
       this.endOpenLine();
       if (controller.signal.aborted) {
         this.options.io.write(chalk.dim("Response stopped.\n"));
@@ -288,6 +308,7 @@ export class TunedTensorAgentSession {
       this.responseStarted = false;
       this.reasoningActive = false;
       this.lineOpen = false;
+      this.responseMarkdown.reset();
     }
   }
 
