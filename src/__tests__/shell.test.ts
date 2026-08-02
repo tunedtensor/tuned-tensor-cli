@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
+import chalk from "chalk";
 import {
   ShellParseError,
   createShellSession,
   isCatalogCommand,
   parseSlashCommand,
   renderShellBanner,
+  renderShellPrompt,
+  resetShellPromptStyle,
   routeShellCommand,
   shouldStartInteractiveShell,
   tokenizeShellInput,
@@ -246,7 +249,7 @@ function fakeContext(cwd: string, target: "cloud" | "local"): ShellContext {
 }
 
 describe("renderShellBanner", () => {
-  it("shows the tensor-grid logo next to the heading and version", () => {
+  it("shows a compact heading, context, controls, and version", () => {
     const banner = renderShellBanner({
       mode: "cloud",
       modeSource: "default-cloud",
@@ -255,11 +258,13 @@ describe("renderShellBanner", () => {
       version: "0.6.0",
     });
     const rows = banner.trimEnd().split("\n");
-    expect(rows).toHaveLength(3);
-    for (const row of rows) expect(row).toContain("██");
-    expect(banner).toContain("Tuned Tensor");
+    expect(rows).toHaveLength(5);
+    expect(rows[0]).toContain("tt");
     expect(banner).toContain("v0.6.0");
     expect(banner).toContain("cloud");
+    expect(banner).toContain("ctrl+c stop/clear");
+    expect(banner).toContain("Ask TT anything");
+    expect(banner).not.toContain("██");
   });
 
   it("omits the version when none is provided", () => {
@@ -269,8 +274,40 @@ describe("renderShellBanner", () => {
       cwd: "/tmp/local-project",
       context: fakeContext("/tmp/local-project", "local"),
     });
-    expect(banner).toContain("Tuned Tensor");
+    expect(banner).toContain("tt");
     expect(banner).not.toContain("v0");
+  });
+});
+
+describe("renderShellPrompt", () => {
+  it.each([
+    [1, "\u001b[100m"],
+    [2, "\u001b[48;5;238m"],
+    [3, "\u001b[48;2;50;52;67m"],
+  ] as const)("renders a full-row input surface at color level %i", (level, background) => {
+    const originalLevel = chalk.level;
+    chalk.level = level;
+    try {
+      const prompt = renderShellPrompt();
+      expect(prompt).toContain("›");
+      expect(prompt).toContain(background);
+      expect(prompt).toContain("\u001b[K");
+      expect(prompt).not.toContain("cloud-project");
+      expect(resetShellPromptStyle()).toBe("\u001b[0m");
+    } finally {
+      chalk.level = originalLevel;
+    }
+  });
+
+  it("falls back to a plain prompt when color is disabled", () => {
+    const originalLevel = chalk.level;
+    chalk.level = 0;
+    try {
+      expect(renderShellPrompt()).toBe("› ");
+      expect(resetShellPromptStyle()).toBe("");
+    } finally {
+      chalk.level = originalLevel;
+    }
   });
 });
 

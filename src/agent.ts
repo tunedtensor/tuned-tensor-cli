@@ -108,6 +108,7 @@ export class TunedTensorAgentSession {
   private readonly pendingActions = new Map<string, AgentAction>();
   private activeRequest: AbortController | null = null;
   private responseStarted = false;
+  private reasoningActive = false;
   private lineOpen = false;
 
   constructor(private readonly options: AgentSessionOptions) {
@@ -137,6 +138,7 @@ export class TunedTensorAgentSession {
   private endOpenLine(): void {
     if (this.lineOpen) this.options.io.write("\n");
     this.lineOpen = false;
+    this.reasoningActive = false;
   }
 
   private renderAction(action: AgentAction): void {
@@ -168,12 +170,32 @@ export class TunedTensorAgentSession {
         stringValue(payload.text) ??
         stringValue(payload.content);
       if (!delta) return;
+      const followsReasoning = this.reasoningActive;
+      if (followsReasoning) this.endOpenLine();
       if (!this.responseStarted) {
-        this.options.io.write(`${accent.bold("TT")}  `);
+        this.options.io.write(`\n${accent.bold("tt")}  `);
         this.responseStarted = true;
         this.lineOpen = true;
+      } else if (followsReasoning) {
+        this.options.io.write("\n");
       }
       this.options.io.write(delta);
+      this.lineOpen = !delta.endsWith("\n");
+      return;
+    }
+
+    if (event.type === "reasoning_delta") {
+      const delta =
+        stringValue(payload.delta) ??
+        stringValue(payload.text) ??
+        stringValue(payload.content);
+      if (!delta) return;
+      if (!this.reasoningActive) {
+        this.endOpenLine();
+        this.options.io.write("\n");
+        this.reasoningActive = true;
+      }
+      this.options.io.write(chalk.dim.italic(delta));
       this.lineOpen = !delta.endsWith("\n");
       return;
     }
@@ -245,6 +267,7 @@ export class TunedTensorAgentSession {
     const controller = new AbortController();
     this.activeRequest = controller;
     this.responseStarted = false;
+    this.reasoningActive = false;
     this.lineOpen = false;
     try {
       const result = await operation(controller.signal);
@@ -263,6 +286,7 @@ export class TunedTensorAgentSession {
     } finally {
       this.activeRequest = null;
       this.responseStarted = false;
+      this.reasoningActive = false;
       this.lineOpen = false;
     }
   }

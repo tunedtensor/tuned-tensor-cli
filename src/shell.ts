@@ -371,11 +371,42 @@ function errorMessage(error: unknown): string {
 }
 
 /* Shell messages reuse the main app's output style: ✓/✗/! marks, bold
- * headings and labels (see output.ts). Shell chrome (banner, prompt, help)
- * uses the brand violet accent. */
+ * headings and labels (see output.ts). Shell chrome stays deliberately quiet
+ * so the conversation remains the strongest element on screen. */
 const successMark = (): string => chalk.green("✓");
 const errorMark = (): string => chalk.red("✗");
 const accent = chalk.hex("#8B5CF6");
+const ANSI_BOLD = "\u001b[1m";
+const ANSI_BOLD_OFF = "\u001b[22m";
+const ANSI_CLEAR_TO_END = "\u001b[K";
+const ANSI_RESET = "\u001b[0m";
+
+function inputColorCodes(): {
+  background: string;
+  accent: string;
+  text: string;
+} | null {
+  if (chalk.level === 0) return null;
+  if (chalk.level === 1) {
+    return {
+      background: "\u001b[100m",
+      accent: "\u001b[95m",
+      text: "\u001b[97m",
+    };
+  }
+  if (chalk.level === 2) {
+    return {
+      background: "\u001b[48;5;238m",
+      accent: "\u001b[38;5;183m",
+      text: "\u001b[38;5;255m",
+    };
+  }
+  return {
+    background: "\u001b[48;2;50;52;67m",
+    accent: "\u001b[38;2;196;181;253m",
+    text: "\u001b[38;2;245;243;255m",
+  };
+}
 
 /** Label width used by formatShellStatus/formatShellContext. */
 const DETAIL_LABEL_WIDTH = 15;
@@ -458,38 +489,45 @@ function activeModelLabel(snapshot: ShellSessionSnapshot): string {
     : snapshot.context.spec?.baseModel ?? "—";
 }
 
-/**
- * The brand mark as terminal blocks: a 3×3 tensor grid whose diagonal runs
- * through the violet gradient (see tuned-tensor-brand-assets/icon).
- */
-function logoRows(): string[] {
-  const muted = chalk.dim("██");
-  return [
-    `${chalk.hex("#A78BFA")("██")} ${muted} ${muted}`,
-    `${muted} ${accent("██")} ${muted}`,
-    `${muted} ${muted} ${chalk.hex("#7C3AED")("██")}`,
-  ];
-}
-
 export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
   const spec = snapshot.context.spec?.name
     ?? snapshot.context.spec?.path
     ?? "no spec";
   const heading = snapshot.version
-    ? `${accent.bold("Tuned Tensor")} ${chalk.dim(`v${snapshot.version}`)}`
-    : accent.bold("Tuned Tensor");
-  const textRows = [
+    ? `${accent.bold("tt")} ${chalk.dim(`v${snapshot.version}`)}`
+    : accent.bold("tt");
+  const lines = [
     heading,
-    `${chalk.bold(snapshot.mode)} · ${snapshot.context.projectName} · ${spec} · model ${activeModelLabel(snapshot)}`,
-    chalk.dim("Ask TT anything · known commands run directly · /help for more"),
+    chalk.dim(
+      `${snapshot.mode} · ${snapshot.context.projectName} · ${spec} · model ${activeModelLabel(snapshot)}`,
+    ),
+    chalk.dim("ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete"),
+    "",
+    chalk.dim("Ask TT anything. Known commands run directly."),
   ];
-  const logo = logoRows();
-  const lines = textRows.map((row, index) => `${logo[index]!}  ${row}`);
   return `${lines.join("\n")}\n\n`;
 }
 
-export function renderShellPrompt(snapshot: ShellSessionSnapshot): string {
-  return `${accent("tt")} ${chalk.bold(snapshot.mode)} ${chalk.dim(snapshot.context.projectName)} › `;
+export function renderShellPrompt(): string {
+  // Keep the style open while readline owns the input so typed text inherits
+  // the background. CSI K paints the rest of the row in terminals that honor
+  // the active erase color; resetShellPromptStyle() closes it after submission.
+  const colors = inputColorCodes();
+  if (!colors) return "› ";
+  return [
+    colors.background,
+    colors.accent,
+    ANSI_BOLD,
+    "›",
+    ANSI_BOLD_OFF,
+    colors.text,
+    " ",
+    ANSI_CLEAR_TO_END,
+  ].join("");
+}
+
+export function resetShellPromptStyle(): string {
+  return chalk.level === 0 ? "" : ANSI_RESET;
 }
 
 export class TunedTensorShellSession {
@@ -547,7 +585,7 @@ export class TunedTensorShellSession {
   }
 
   prompt(): string {
-    return renderShellPrompt(this.snapshot());
+    return renderShellPrompt();
   }
 
   banner(): string {
@@ -859,12 +897,12 @@ export async function startInteractiveShell(
   });
   readline.on("SIGINT", () => {
     if (session.interruptAgent()) {
-      output.write("\n");
+      output.write(`${resetShellPromptStyle()}\n`);
       return;
     }
     // In readline raw mode, Ctrl+C is a line-editing action. Clear the current
     // buffer and redraw instead of pausing or terminating the shell.
-    output.write("\n");
+    output.write(`${resetShellPromptStyle()}\n`);
     readline?.setPrompt(session.prompt());
     readline?.write(null, { ctrl: true, name: "u" });
   });
@@ -875,15 +913,20 @@ export async function startInteractiveShell(
 
   try {
     for await (const line of readline) {
+      // The prompt intentionally leaves its background style open so input is
+      // rendered as a single tinted surface. Close it before any output begins.
+      output.write(resetShellPromptStyle());
       const action = await session.handleLine(line);
       if (action === "exit") {
         readline.close();
         break;
       }
+      output.write("\n");
       readline.setPrompt(session.prompt());
       readline.prompt();
     }
   } finally {
+    output.write(resetShellPromptStyle());
     readline.close();
   }
 }
