@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { stripVTControlCharacters } from "node:util";
 import {
   type AgentAction,
   type AgentConversationClient,
@@ -34,6 +35,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function sanitizeTerminalText(text: string): string {
+  return stripVTControlCharacters(text)
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "");
 }
 
 function helpText(): string {
@@ -200,14 +206,16 @@ export class TunedTensorAgentSession {
         stringValue(payload.text) ??
         stringValue(payload.content);
       if (!delta) return;
+      const safeDelta = sanitizeTerminalText(delta);
+      if (!safeDelta) return;
       if (!this.reasoningActive) {
         this.flushResponse();
         this.endOpenLine();
         this.options.io.write("\n");
         this.reasoningActive = true;
       }
-      this.options.io.write(chalk.dim.italic(delta));
-      this.lineOpen = !delta.endsWith("\n");
+      this.options.io.write(chalk.dim.italic(safeDelta));
+      this.lineOpen = !safeDelta.endsWith("\n");
       return;
     }
 
