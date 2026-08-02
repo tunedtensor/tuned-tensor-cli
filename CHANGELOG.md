@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.8.0
+
+### Added
+
+- **Live reasoning** — Show model-provided reasoning as subdued italic narration
+  while an agent turn is in progress, including reasoning around managed tool
+  calls, before rendering the final answer.
+
+### Changed
+
+- **Conversation-first terminal** — Replace the large tensor-grid banner with a
+  compact status header and use quieter chrome so prompts and responses carry
+  the visual hierarchy.
+- **Separated user input** — Render each prompt on a full-row tinted surface with
+  safe reset behavior and fallbacks for basic-color, 256-color, truecolor, and
+  no-color terminals.
+
 ## 0.7.0
 
 ### Added
