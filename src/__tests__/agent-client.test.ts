@@ -105,6 +105,7 @@ describe("agent client", () => {
         new Response(
           [
             'data: {"type":"turn_started","thread_id":"thread-1","turn_id":"turn-1"}',
+            'data: {"type":"reasoning_delta","delta":"Checking the account context."}',
             'data: {"type":"text_delta","delta":"Hello"}',
             'data: {"type":"final","thread_id":"thread-1","turn_id":"turn-1","status":"completed"}',
             "",
@@ -129,7 +130,12 @@ describe("agent client", () => {
       response: "Hello",
       actions: [],
     });
-    expect(seen).toEqual(["turn_started", "text_delta", "final"]);
+    expect(seen).toEqual([
+      "turn_started",
+      "reasoning_delta",
+      "text_delta",
+      "final",
+    ]);
     const [, turnInit] = fetchSpy.mock.calls[1]!;
     expect(turnInit?.headers).toMatchObject({
       Authorization: `Bearer ${API_KEY}`,

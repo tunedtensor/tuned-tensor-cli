@@ -39,6 +39,10 @@ function fakeClient(): AgentConversationClient {
           type: "turn_started",
           payload: { thread_id: thread.id, turn_id: "turn-1" },
         },
+        {
+          type: "reasoning_delta",
+          payload: { delta: "I should inspect the available context first." },
+        },
         { type: "text_delta", payload: { delta: "Here is the answer." } },
         {
           type: "approval_required",
@@ -103,6 +107,9 @@ describe("TunedTensorAgentSession", () => {
       expect.any(AbortSignal),
     );
     expect(stdout.join("")).toContain("Here is the answer.");
+    expect(stdout.join("")).toContain(
+      "I should inspect the available context first.",
+    );
     expect(stdout.join("")).toContain("Approval required");
     expect(stdout.join("")).toContain("will not run without approval");
     expect(stdout.join("")).toContain("\"spec_id\": \"spec-1\"");
@@ -139,6 +146,52 @@ describe("TunedTensorAgentSession", () => {
     expect(client.listThreads).toHaveBeenCalled();
     expect(client.getThread).toHaveBeenCalledWith(thread.id);
     expect(session.snapshot().thread?.id).toBe(thread.id);
+  });
+
+  it("keeps reasoning, tool activity, and the final answer visually ordered", async () => {
+    const client = fakeClient();
+    client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
+      const events: AgentStreamEvent[] = [
+        { type: "reasoning_delta", payload: { delta: "Checking runs." } },
+        {
+          type: "tool_call",
+          payload: { name: "list_runs", toolUseId: "tool-1", input: {} },
+        },
+        {
+          type: "tool_result",
+          payload: { toolUseId: "tool-1", status: "success" },
+        },
+        { type: "reasoning_delta", payload: { delta: "Comparing results." } },
+        { type: "text_delta", payload: { delta: "The latest run improved." } },
+      ];
+      for (const event of events) onEvent(event);
+      return {
+        threadId: thread.id,
+        turnId: "turn-1",
+        status: "completed",
+        response: "The latest run improved.",
+        actions: [],
+      };
+    });
+    const { io, stdout } = testIO();
+    const session = new TunedTensorAgentSession({ client, io });
+
+    await session.send("Compare my runs");
+
+    const output = stdout.join("");
+    const parts = [
+      "Checking runs.",
+      "list_runs",
+      "Tool complete",
+      "Comparing results.",
+      "The latest run improved.",
+    ];
+    for (let index = 1; index < parts.length; index += 1) {
+      expect(output.indexOf(parts[index - 1]!)).toBeLessThan(
+        output.indexOf(parts[index]!),
+      );
+    }
+    expect(output.split("tt  ")).toHaveLength(2);
   });
 
   it("cancels an active response without ending the session", async () => {
