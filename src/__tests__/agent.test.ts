@@ -194,6 +194,32 @@ describe("TunedTensorAgentSession", () => {
     expect(output.split("tt  ")).toHaveLength(2);
   });
 
+  it("strips terminal controls from streamed reasoning", async () => {
+    const client = fakeClient();
+    client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
+      onEvent({
+        type: "reasoning_delta",
+        payload: { delta: "safe\u001b[2J reasoning\u0007" },
+      });
+      return {
+        threadId: thread.id,
+        turnId: "turn-1",
+        status: "completed",
+        response: "",
+        actions: [],
+      };
+    });
+    const { io, stdout } = testIO();
+    const session = new TunedTensorAgentSession({ client, io });
+
+    await session.send("think safely");
+
+    const output = stdout.join("");
+    expect(output).toContain("safe reasoning");
+    expect(output).not.toContain("[2J");
+    expect(output).not.toContain("\u0007");
+  });
+
   it("renders streamed assistant Markdown without exposing syntax markers", async () => {
     const client = fakeClient();
     client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
