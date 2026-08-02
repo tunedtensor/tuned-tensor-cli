@@ -143,6 +143,34 @@ const mockReport = {
   },
 };
 
+const mockTransferReport = {
+  ...mockReport,
+  primary_eval_split: "validation" as const,
+  test: {
+    baseline: {
+      total: 2,
+      eval_examples_used: 2,
+      avg_score: 0.55,
+      pass_rate: 0.5,
+      results: [],
+    },
+    candidate: {
+      total: 2,
+      eval_examples_used: 2,
+      avg_score: 0.3,
+      pass_rate: 0,
+      results: [],
+    },
+    comparison: {
+      avg_score_delta: -0.25,
+      pass_rate_delta: -0.5,
+      regressions: 1,
+      improvements: 0,
+      regressed_examples: [],
+    },
+  },
+};
+
 beforeEach(() => {
   setJsonMode(false);
   process.env.TUNED_TENSOR_API_KEY = FAKE_KEY;
@@ -799,9 +827,28 @@ describe("runs commands", () => {
       expect(output).not.toContain("FYI office snacks");
     });
 
-    it("outputs the raw report in JSON mode", async () => {
+    it("shows validation-to-test generalization for older reports", async () => {
+      vi.mocked(client.get).mockResolvedValue({ data: mockTransferReport });
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const program = buildProgram();
+      await program.parseAsync([
+        "node", "tt", "runs", "report", RUN_UUID,
+        "--split", "all",
+        "--limit", "0",
+      ]);
+
+      const output = spy.mock.calls.flat().join("\n");
+      expect(output).toContain("Generalization");
+      expect(output).toContain("Practice Avg");
+      expect(output).toContain("40.0%");
+      expect(output).toContain("Transfer Avg");
+      expect(output).toContain("30.0%");
+      expect(output).toContain("+10.0 pp");
+    });
+
+    it("includes derived generalization in JSON mode", async () => {
       setJsonMode(true);
-      vi.mocked(client.get).mockResolvedValue({ data: mockReport });
+      vi.mocked(client.get).mockResolvedValue({ data: mockTransferReport });
       const spy = vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
       await program.parseAsync(["node", "tt", "runs", "report", RUN_UUID]);
@@ -809,6 +856,13 @@ describe("runs commands", () => {
       const output = JSON.parse(spy.mock.calls[0][0]);
       expect(output.run_id).toBe(RUN_UUID);
       expect(output.comparison.regressions).toBe(1);
+      expect(output.generalization).toEqual({
+        practice_split: "validation",
+        transfer_split: "test",
+        practice_avg_score: 0.4,
+        transfer_avg_score: 0.3,
+        avg_score_gap: 0.1,
+      });
     });
   });
 });

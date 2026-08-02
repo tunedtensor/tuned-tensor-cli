@@ -166,11 +166,21 @@ interface RunReportSplit {
   comparison?: RunReportComparison;
 }
 
+interface RunReportGeneralization {
+  practice_split: "validation";
+  transfer_split: "test";
+  practice_avg_score: number;
+  transfer_avg_score: number;
+  avg_score_gap: number;
+}
+
 interface RunReport extends RunReportSplit {
   run_id?: string;
   status?: string;
   fine_tuned_model_id?: string | null;
+  primary_eval_split?: "examples" | "validation" | "test" | "eval_cases";
   test?: RunReportSplit;
+  generalization?: RunReportGeneralization;
 }
 
 interface RunEstimate {
@@ -232,6 +242,51 @@ function formatPointDelta(delta: number | undefined): string | undefined {
   if (delta == null) return undefined;
   const points = delta * 100;
   return `${points >= 0 ? "+" : ""}${points.toFixed(1)} pp`;
+}
+
+function isBoundedNumber(value: unknown, min: number, max: number): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+}
+
+function roundMetric(value: number): number {
+  const rounded = Math.round(value * 1000) / 1000;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+function resolveGeneralization(report: RunReport): RunReportGeneralization | undefined {
+  const persisted = report.generalization;
+  if (
+    persisted?.practice_split === "validation"
+    && persisted.transfer_split === "test"
+    && isBoundedNumber(persisted.practice_avg_score, 0, 1)
+    && isBoundedNumber(persisted.transfer_avg_score, 0, 1)
+    && isBoundedNumber(persisted.avg_score_gap, -1, 1)
+  ) {
+    return persisted;
+  }
+  if (report.primary_eval_split !== "validation") return undefined;
+
+  const practiceScore = report.candidate?.avg_score;
+  const transferScore = report.test?.candidate?.avg_score;
+  if (
+    !isBoundedNumber(practiceScore, 0, 1)
+    || !isBoundedNumber(transferScore, 0, 1)
+  ) {
+    return undefined;
+  }
+
+  return {
+    practice_split: "validation",
+    transfer_split: "test",
+    practice_avg_score: roundMetric(practiceScore),
+    transfer_avg_score: roundMetric(transferScore),
+    avg_score_gap: roundMetric(practiceScore - transferScore),
+  };
+}
+
+function withGeneralization(report: RunReport): RunReport {
+  const generalization = resolveGeneralization(report);
+  return generalization ? { ...report, generalization } : report;
 }
 
 function formatScore(score: number | null | undefined): string {
@@ -475,6 +530,19 @@ function printReportMetrics(label: string, split: RunReportSplit | undefined) {
   ]);
 }
 
+function printGeneralization(report: RunReport) {
+  const generalization = report.generalization;
+  if (!generalization) return;
+
+  console.log("\nGeneralization:");
+  printDetail([
+    ["Practice Avg", formatPercent(generalization.practice_avg_score)],
+    ["Transfer Avg", formatPercent(generalization.transfer_avg_score)],
+    ["Score Gap", formatPointDelta(generalization.avg_score_gap)],
+  ]);
+  console.log("  Gap = validation minus held-out test; positive means transfer scored lower.");
+}
+
 function printComparedExample(input: {
   index: number;
   prompt: string;
@@ -565,6 +633,8 @@ function printRunReport(
     ["Status", report.status ? formatStatus(report.status) : undefined],
     ["Model", report.fine_tuned_model_id ? shortId(report.fine_tuned_model_id) : undefined],
   ]);
+
+  printGeneralization(report);
 
   const splits: Array<[string, RunReportSplit | undefined]> = [];
   if (options.split === "primary" || options.split === "all") {
@@ -887,7 +957,9 @@ export function registerRunsCommands(parent: Command) {
         opts,
       );
 
-      if (isJsonMode()) return printJson(data);
+      const report = withGeneralization(data);
+
+      if (isJsonMode()) return printJson(report);
 
       const split = String(cmdOpts.split);
       if (!["primary", "test", "all"].includes(split)) {
@@ -902,7 +974,7 @@ export function registerRunsCommands(parent: Command) {
         throw new Error("--limit must be a non-negative number");
       }
 
-      printRunReport(data, {
+      printRunReport(report, {
         split: split as "primary" | "test" | "all",
         mode: mode as "regressions" | "failures",
         limit: Math.floor(limit),
