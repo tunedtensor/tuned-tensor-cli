@@ -1,6 +1,38 @@
 # Changelog
 
-## Unreleased
+## [0.9.0] - 2026-08-09
+
+### Added
+
+- **Laptop-local Pi agent** — Run the interactive agent harness and conversation
+  state locally with Pi 0.84.1 while routing inference through the user-selected
+  local or remote provider. Reuse Pi provider catalogs, `auth.json`,
+  `models.json`, and custom OpenAI-compatible providers. `tt agent status`,
+  `models`, and `configure` manage non-secret provider/model/thinking selection
+  metadata.
+- **Typed Tuned Tensor tools** — Expose bounded, strict read tools for specs,
+  runs, diagnostics, reports, estimates, datasets, models, balance, and ledger
+  transactions, plus prepare-only spec create/update tools. Run start and
+  cancellation stay outside the model tool loop as explicit commands.
+- **Local durable conversations** — Persist transcripts and approval state
+  under the TT config directory with user-only permissions and atomic writes.
+
+### Changed
+
+- **Local approval execution** — Execute prepared mutations only from local
+  `/approve` code with API capability discovery, server-enforced spec versions,
+  deterministic action IDs, and at-most-once local
+  claims. Post-dispatch uncertainty remains durable as `outcome_unknown`;
+  `/reject` remains non-mutating.
+- **Hosted thread boundary** — Ordinary `tt` no longer calls AgentCore
+  `/agent/*` endpoints. Existing hosted agent threads are not migrated into or
+  shown by the local conversation store.
+
+### Security
+
+- **Credential separation** — Keep the Tuned Tensor API token confined to TT
+  REST calls, redact it from prompts/tool results/transcripts, never copy it to
+  Pi configuration, and never send it to model providers.
 
 ## 0.8.1
 

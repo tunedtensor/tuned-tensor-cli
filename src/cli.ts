@@ -3,9 +3,16 @@ import { constants as osConstants } from "node:os";
 import { Command } from "commander";
 import chalk from "chalk";
 import {
-  createAgentClient,
   type AgentConversationClient,
 } from "./agent-client.js";
+import { createLocalAgentClient, type LocalPiAgent, type LocalPiAgentOptions } from "./local-agent-client.js";
+import { LocalAgentStore } from "./agent-store.js";
+import { createPiModelRuntime, type AgentModelRuntime } from "./agent-model.js";
+import type { AgentToolApi } from "./agent-tools.js";
+import type { AgentMutationApi } from "./agent-approval.js";
+import { get, post, put } from "./client.js";
+import { getAgentSelection, getApiKey, getConfigDir } from "./config.js";
+import { join } from "node:path";
 import { TunedTensorAgentSession } from "./agent.js";
 import { executeLocalCommand } from "./local-runner.js";
 import {
@@ -31,6 +38,7 @@ import { registerTopupCommands } from "./commands/topup.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerEvalCommand } from "./commands/eval.js";
 import { registerPushCommand } from "./commands/push.js";
+import { registerAgentCommands } from "./commands/agent.js";
 
 export interface SelfCommandOptions {
   cwd?: string;
@@ -60,6 +68,77 @@ export interface CliRuntime {
   runLocalCommand?: typeof executeLocalCommand;
   startShell?: typeof startInteractiveShell;
   agentClient?: AgentConversationClient;
+  modelRuntime?: AgentModelRuntime & { streamSimple?: (...args: any[]) => any };
+  createPiAgent?: (options: LocalPiAgentOptions) => LocalPiAgent;
+  agentStore?: LocalAgentStore;
+  agentToolApi?: AgentToolApi;
+  agentMutationApi?: AgentMutationApi;
+}
+
+async function createDefaultAgentClient(
+  runtime: CliRuntime,
+  env: NodeJS.ProcessEnv,
+  cloud: { apiKey?: string; baseUrl?: string },
+): Promise<AgentConversationClient> {
+  const selection = getAgentSelection(env);
+  if (!selection) {
+    throw new Error(
+      "The laptop-local agent is not configured. Run `tt agent models --all`, then `tt agent configure --provider <provider> --model <model>`.",
+    );
+  }
+  const modelRuntime = runtime.modelRuntime ?? await createPiModelRuntime();
+  const clientOpts = { apiKey: cloud.apiKey, baseUrl: cloud.baseUrl };
+  const toolApi = runtime.agentToolApi ?? {
+    get: async (path: string, query?: Record<string, string | number | undefined>) => await get(path, query, clientOpts),
+    postRead: async (path: string, body: unknown) => await post(path, body, clientOpts),
+    propose: async (action) => action,
+  } satisfies AgentToolApi;
+  const mutationApi = runtime.agentMutationApi ?? {
+    get: async (path: string) => await get(path, undefined, clientOpts),
+    post: async (path: string, body?: unknown, guard?) => await post(path, body, clientOpts, guard ? {
+      "X-Tuned-Tensor-Action-Id": guard.actionId,
+      "X-Tuned-Tensor-Operation": guard.operation,
+    } : undefined),
+    put: async (path: string, body?: unknown, guard?) => await put(path, body, clientOpts, guard ? {
+      "X-Tuned-Tensor-Action-Id": guard.actionId,
+      "X-Tuned-Tensor-Operation": guard.operation,
+      ...(guard.expectedUpdatedAt ? { "X-Tuned-Tensor-Expected-Updated-At": guard.expectedUpdatedAt } : {}),
+    } : undefined),
+  } satisfies AgentMutationApi;
+  const secret = getApiKey(clientOpts);
+  const providerSecrets = Object.entries(env)
+    .filter(([name, value]) => value && /(?:API_KEY|TOKEN|SECRET)$/i.test(name))
+    .map(([, value]) => value!)
+    .filter((value) => value.length >= 8 && value !== secret);
+  return createLocalAgentClient({
+    store: runtime.agentStore ?? new LocalAgentStore(join(getConfigDir(), "agent"), {
+      secretValues: [...(secret ? [secret] : []), ...providerSecrets],
+    }),
+    selection,
+    modelRuntime,
+    toolApi,
+    mutationApi,
+    createAgent: runtime.createPiAgent,
+  });
+}
+
+function createLazyDefaultAgentClient(
+  runtime: CliRuntime,
+  env: NodeJS.ProcessEnv,
+  cloud: { apiKey?: string; baseUrl?: string },
+): AgentConversationClient {
+  let pending: Promise<AgentConversationClient> | undefined;
+  const client = () => pending ??= createDefaultAgentClient(runtime, env, cloud);
+  return {
+    createThread: async () => await (await client()).createThread(),
+    listThreads: async () => await (await client()).listThreads(),
+    getThread: async (id) => await (await client()).getThread(id),
+    runTurn: async (id, prompt, onEvent, signal) =>
+      await (await client()).runTurn(id, prompt, onEvent, signal),
+    approveAction: async (id, onEvent, signal) =>
+      await (await client()).approveAction(id, onEvent, signal),
+    rejectAction: async (id) => await (await client()).rejectAction(id),
+  };
 }
 
 export async function runSelfCommand(
@@ -185,6 +264,13 @@ export function createProgram(
   const invokeLocal = runtime.runLocalCommand ?? executeLocalCommand;
   const launchShell = runtime.startShell ?? startInteractiveShell;
   const cwd = runtime.cwd ?? process.cwd();
+  const injectedModelRuntime = runtime.modelRuntime;
+  let modelRuntimePromise: Promise<AgentModelRuntime> | undefined;
+  const getModelRuntime = async () => {
+    if (injectedModelRuntime) return injectedModelRuntime;
+    modelRuntimePromise ??= createPiModelRuntime();
+    return await modelRuntimePromise;
+  };
 
   const shellRunner = async (
     request: ShellCommandRequest,
@@ -214,7 +300,7 @@ export function createProgram(
     const output = runtime.stdout ?? process.stdout;
     const error = runtime.stderr ?? process.stderr;
     const agent = createShellAgent({
-      client: runtime.agentClient ?? createAgentClient({
+      client: runtime.agentClient ?? createLazyDefaultAgentClient(runtime, shellEnvironment, {
         apiKey: root.apiKey ?? shellEnvironment.TUNED_TENSOR_API_KEY,
         baseUrl: root.baseUrl ?? shellEnvironment.TUNED_TENSOR_URL,
       }),
@@ -265,6 +351,11 @@ export function createProgram(
   registerInitCommand(program);
   registerEvalCommand(program);
   registerPushCommand(program);
+  registerAgentCommands(program, {
+    env,
+    output: runtime.stdout ?? process.stdout,
+    getRuntime: getModelRuntime,
+  });
 
   program
     .command("status")
@@ -426,7 +517,7 @@ export async function runCli(
     const output = runtime.stdout ?? process.stdout;
     const error = runtime.stderr ?? process.stderr;
     const agent = createShellAgent({
-      client: runtime.agentClient ?? createAgentClient({
+      client: runtime.agentClient ?? createLazyDefaultAgentClient(runtime, env, {
         apiKey: env.TUNED_TENSOR_API_KEY,
         baseUrl: env.TUNED_TENSOR_URL,
       }),

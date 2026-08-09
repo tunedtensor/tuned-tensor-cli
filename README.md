@@ -18,7 +18,7 @@ npm install -g @tuned-tensor/cli
 tt --version
 ```
 
-Node.js 22 or newer is required. Hosted commands need no local ML runtime.
+Node.js 22.19.0 or newer is required. Hosted commands need no local ML runtime.
 Local training additionally needs
 [`uv`](https://docs.astral.sh/uv/) and a supported NVIDIA CUDA host; the locked
 Python runner ships with the npm dependency and is prepared on first use.
@@ -35,7 +35,32 @@ npm link
 
 ## Conversational terminal
 
-After `tt auth login`, run `tt` to open one terminal for conversation and
+The interactive agent harness and conversation state now run on your laptop
+with Pi. Inference runs through the provider/model you select, which may be a
+local endpoint or a remote provider. Tuned Tensor remains an authenticated
+typed tool provider: `tt auth login` is used only for Tuned Tensor REST calls
+and is never sent to the selected model.
+Tool results needed to answer a request are sent to the model you selected, so
+choose a local or remote provider whose data policy fits your workload.
+
+Pi reuses provider authentication and custom model definitions from
+`~/.pi/agent/auth.json` and `~/.pi/agent/models.json`. Authenticate a provider
+with Pi's normal login flow; `tt` deliberately has no provider-secret flags.
+Then inspect and select a provider/model:
+
+```bash
+tt agent models --all
+tt agent configure --provider anthropic --model claude-sonnet-4-5 --thinking high
+tt agent status
+```
+
+`--thinking` accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or
+`max`.
+Selection metadata can be overridden per process with
+`TUNED_TENSOR_AGENT_PROVIDER`, `TUNED_TENSOR_AGENT_MODEL`, and
+`TUNED_TENSOR_AGENT_THINKING`. These values are not credentials.
+
+After configuration, run `tt` to open one terminal for conversation and
 commands:
 
 ```text
@@ -45,23 +70,42 @@ tt cloud support-agent › runs list
 tt cloud support-agent › Ask whether my dataset is ready to train
 ```
 
-Ordinary sentences go to the same authenticated Tuned Tensor agent used by the
-web application. Known CLI commands such as `runs list`, `doctor`, and
-`models list` still execute directly. Prefix a command with `:` when you want
-to make that intent explicit. Commands are routed to the mode shown in the
-prompt; prefix one with `cloud` or `local` to override the mode without
-switching it.
+Ordinary sentences go through the locally orchestrated Pi model session. The
+model can call a
+strict, bounded set of authenticated Tuned Tensor read tools and prepare-only
+mutation tools; it has no shell or filesystem tool. Known CLI commands such as
+`runs list`, `doctor`, and `models list` still execute directly. Prefix a
+command with `:` when you want to make that intent explicit. Commands are
+routed to the mode shown in the prompt; prefix one with `cloud` or `local` to
+override the mode without switching it.
 
-Agent conversations are durable. Use `/new` to start one, `/threads` to list
-recent conversations, and `/resume <id>` to continue one. Read operations can
-run during the conversation. Mutations remain approval-gated: the agent shows
-the exact proposed action, then waits for `/approve` or `/reject`.
+Agent conversations are durable and local under
+`~/.config/tuned-tensor/agent/threads` (or the XDG config equivalent), with
+user-only directory/file permissions. Persistence normally retains up to 100
+recent threads; unsettled safety records are never pruned even when that exceeds
+the cap. Each thread is limited to 1 MB, 200 messages, and 200 actions; one-way
+action claims are capped at 1,000. Use `/new` to start one, `/threads` to
+list recent conversations, and `/resume <id>` to continue one. Older hosted
+AgentCore threads are not migrated or listed.
+
+Read operations execute immediately. Creating or updating a behaviour spec is
+a prepare-only model operation: the agent shows the exact proposed action, then
+waits for `/approve` or `/reject`. Starting or cancelling training remains an
+explicit `tt runs ...` command outside the model tool loop.
+`/approve` executes deterministic local code with an at-most-once mutation
+attempt. Before dispatch, the CLI requires the API to advertise mutation-guard
+support; older or incompatible servers are refused. The server conditionally
+checks approved spec versions and assigns the action ID as an idempotent create
+ID. If a response or final state write is lost after dispatch, the action is
+retained as `outcome_unknown`, cannot be retried automatically, and directs the
+user to inspect the remote resource. `/reject` never calls a mutation endpoint.
 
 Useful shell controls include `/help`, `/status`, `/context`, `/mode`,
-`/model`, `/cd`, `/clear`, and `/exit`. `/model` shows the model in play — the
-active local model, or the cloud spec's base model — and `/model <id>`
-activates a verified local model. The shell keeps normal terminal scrollback
-and command history only for the current process.
+`/model`, `/cd`, `/clear`, and `/exit`. `/model` retains its workflow meaning:
+it shows the active local serving model or cloud spec base model, and
+`/model <id>` activates a verified local serving model. Configure the assistant
+model explicitly with `tt agent configure`. The shell keeps normal terminal
+scrollback and command history only for the current process.
 
 Explicit commands remain non-interactive, including in CI. `tt --help` shows
 the complete command surface, `tt status` inspects both targets without a

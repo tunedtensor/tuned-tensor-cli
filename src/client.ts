@@ -65,12 +65,14 @@ async function request<T>(
     query?: Record<string, string | number | undefined>;
     body?: unknown;
     opts?: ClientOpts;
+    headers?: Record<string, string>;
   } = {},
 ): Promise<ApiResponse<T>> {
   const key = resolveKey(options.opts);
   const url = buildUrl(path, options.query, options.opts);
 
   const headers: Record<string, string> = {
+    ...options.headers,
     Authorization: `Bearer ${key}`,
   };
 
@@ -150,16 +152,18 @@ export function post<T>(
   path: string,
   body?: unknown,
   opts?: ClientOpts,
+  headers?: Record<string, string>,
 ) {
-  return request<T>("POST", path, { body, opts });
+  return request<T>("POST", path, { body, opts, headers });
 }
 
 export function put<T>(
   path: string,
   body?: unknown,
   opts?: ClientOpts,
+  headers?: Record<string, string>,
 ) {
-  return request<T>("PUT", path, { body, opts });
+  return request<T>("PUT", path, { body, opts, headers });
 }
 
 export function patch<T>(

@@ -79,6 +79,22 @@ describe("client", () => {
       expect(init?.headers).toHaveProperty("Content-Type", "application/json");
       expect(init?.body).toBe(JSON.stringify({ name: "test" }));
     });
+
+    it("sends mutation guard headers without allowing auth replacement", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        jsonResponse({ data: { id: "abc" } }),
+      );
+      await post("/items", { name: "test" }, undefined, {
+        Authorization: "Bearer attacker-controlled",
+        "X-Tuned-Tensor-Action-Id": "ed8e4bca-ab1c-4c9f-8b65-9f7997f76670",
+      });
+      const headers = fetchSpy.mock.calls[0][1]?.headers;
+      expect(headers).toHaveProperty("Authorization", `Bearer ${FAKE_KEY}`);
+      expect(headers).toHaveProperty(
+        "X-Tuned-Tensor-Action-Id",
+        "ed8e4bca-ab1c-4c9f-8b65-9f7997f76670",
+      );
+    });
   });
 
   describe("put", () => {
