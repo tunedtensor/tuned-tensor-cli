@@ -2,7 +2,8 @@ import {
   getAgentDir,
   ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { AgentSelection, AgentThinkingLevel } from "./config.js";
 
 export interface AgentProviderInfo {
@@ -70,9 +71,53 @@ export function resolveAgentModelDefinition(
 
 export async function createPiModelRuntime(): Promise<ModelRuntime> {
   const agentDir = getAgentDir();
+  const modelsPath = join(agentDir, "models.json");
+  ensureOpenRouterAppHeaders(modelsPath);
   return await ModelRuntime.create({
     authPath: join(agentDir, "auth.json"),
-    modelsPath: join(agentDir, "models.json"),
+    modelsPath,
     allowModelNetwork: false,
   });
+}
+
+/**
+ * OpenRouter attributes requests to an app via the HTTP-Referer/X-Title
+ * headers. Without them the OpenRouter dashboard shows tt's agent traffic as
+ * "Unknown" app. Pi composes provider-level `headers` from models.json over
+ * its built-in openrouter provider, so we merge ours in (preserving any
+ * existing user config) before the runtime loads.
+ */
+const OPENROUTER_APP_HEADERS: Record<string, string> = {
+  "HTTP-Referer": "https://tunedtensor.com",
+  "X-Title": "Tuned Tensor",
+};
+
+function ensureOpenRouterAppHeaders(modelsPath: string): void {
+  let config: Record<string, unknown> = {};
+  if (existsSync(modelsPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(modelsPath, "utf-8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        config = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Never clobber an unparseable user file.
+      return;
+    }
+  }
+  const before = JSON.stringify(config);
+
+  const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+  const empty = (): Record<string, unknown> => ({});
+  const providers = asRecord(config.providers) ?? (config.providers = empty());
+  const openrouter = asRecord(providers.openrouter) ?? (providers.openrouter = empty());
+  const headers = asRecord(openrouter.headers) ?? (openrouter.headers = empty());
+  Object.assign(headers, OPENROUTER_APP_HEADERS);
+
+  if (JSON.stringify(config) === before) return;
+  mkdirSync(dirname(modelsPath), { recursive: true });
+  writeFileSync(modelsPath, JSON.stringify(config, null, 2) + "\n");
 }
