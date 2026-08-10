@@ -49,14 +49,13 @@ function fakeClient(): AgentConversationClient {
           payload: {
             action: {
               id: "action-123",
-              title: "Start training run",
-              summary: "This run is estimated to cost £2.00.",
-              risk: "high",
-              operation: "start_run",
-              arguments: { spec_id: "spec-1" },
-              preview: { estimated_cost: "£2.00" },
+              title: "Create behaviour spec",
+              summary: "Create the reviewed Support spec.",
+              risk: "medium",
+              operation: "create_spec",
+              arguments: { spec: { name: "Support" } },
               method: "POST",
-              path: "/api/v1/behavior-specs/spec-1/runs",
+              path: "/api/v1/behavior-specs",
             },
           },
         },
@@ -70,9 +69,9 @@ function fakeClient(): AgentConversationClient {
         response: "Here is the answer.",
         actions: [{
           id: "action-123",
-          title: "Start training run",
-          summary: "This run is estimated to cost £2.00.",
-          risk: "high",
+          title: "Create behaviour spec",
+          summary: "Create the reviewed Support spec.",
+          risk: "medium",
         }],
       };
     }),
@@ -112,9 +111,9 @@ describe("TunedTensorAgentSession", () => {
     );
     expect(stdout.join("")).toContain("Approval required");
     expect(stdout.join("")).toContain("will not run without approval");
-    expect(stdout.join("")).toContain("\"spec_id\": \"spec-1\"");
+    expect(stdout.join("")).toContain("\"name\": \"Support\"");
     expect(stdout.join("")).toContain(
-      "\"request\": \"POST /api/v1/behavior-specs/spec-1/runs\"",
+      "\"request\": \"POST /api/v1/behavior-specs\"",
     );
     expect(session.snapshot().pendingActions).toHaveLength(1);
 
@@ -126,6 +125,53 @@ describe("TunedTensorAgentSession", () => {
     );
     expect(session.snapshot().pendingActions).toHaveLength(0);
     expect(stderr).toEqual([]);
+  });
+
+  it("removes outcome-unknown actions and shows non-retryable recovery guidance", async () => {
+    const client = fakeClient();
+    client.approveAction = vi.fn(async (_actionId, onEvent) => {
+      onEvent({ type: "action_result", payload: { status: "outcome_unknown", error: "lost response" } });
+      throw new Error("The mutation outcome is unknown and this action cannot be retried automatically.");
+    });
+    const { io, stderr } = testIO();
+    const session = new TunedTensorAgentSession({ client, io });
+
+    await session.handleLine("prepare a spec");
+    await session.handleLine("/approve");
+
+    expect(session.snapshot().pendingActions).toHaveLength(0);
+    expect(stderr.join(" ")).toMatch(/outcome is unknown.*cannot be retried.*inspect the remote spec/i);
+    expect(await session.handleLine("/approve")).toBe("continue");
+    expect(client.approveAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not abort an approved action while it is settling", async () => {
+    const client = fakeClient();
+    let finish!: () => void;
+    let approvalSignal: AbortSignal | undefined;
+    client.approveAction = vi.fn(async (_actionId, _onEvent, signal) => {
+      approvalSignal = signal;
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return {
+        threadId: thread.id,
+        turnId: "turn-1",
+        status: "completed",
+        response: "",
+        actions: [],
+      };
+    });
+    const { io, stderr } = testIO();
+    const session = new TunedTensorAgentSession({ client, io });
+    await session.handleLine("prepare a spec");
+
+    const settling = session.handleLine("/approve");
+    await Promise.resolve();
+    expect(session.interrupt()).toBe(true);
+    expect(approvalSignal?.aborted).toBe(false);
+    expect(stderr.join(" ")).toMatch(/settling.*cannot be interrupted.*do not retry/i);
+    finish();
+    await settling;
+    expect(session.snapshot().pendingActions).toHaveLength(0);
   });
 
   it("reuses the active thread and supports new and resumed conversations", async () => {
@@ -274,5 +320,33 @@ describe("TunedTensorAgentSession", () => {
     await expect(pending).resolves.toBeNull();
     expect(stdout.join("")).toContain("Response stopped");
     expect(session.interrupt()).toBe(false);
+  });
+
+  it("shows cancellation when Pi resolves normally after abort", async () => {
+    const client = fakeClient();
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => { started = resolve; });
+    client.runTurn = vi.fn(async (_threadId, _prompt, onEvent, signal) => {
+      started();
+      await new Promise<void>((resolve) => {
+        signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      onEvent({ type: "final", payload: { status: "cancelled" } });
+      return {
+        threadId: thread.id,
+        turnId: "turn-aborted",
+        status: "cancelled",
+        response: "",
+        actions: [],
+      };
+    });
+    const { io, stdout } = testIO();
+    const session = new TunedTensorAgentSession({ client, io });
+
+    const pending = session.send("keep thinking");
+    await didStart;
+    expect(session.interrupt()).toBe(true);
+    await expect(pending).resolves.toBeNull();
+    expect(stdout.join("")).toContain("Response stopped");
   });
 });

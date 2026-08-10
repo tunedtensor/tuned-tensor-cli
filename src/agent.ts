@@ -56,7 +56,7 @@ function helpText(): string {
     `  ${accent("/exit".padEnd(22))} Exit the agent.`,
     "",
     chalk.dim(
-      "Everything else is sent to the Tuned Tensor agent; known TT commands still run directly in the shell.",
+      "Everything else is sent to the laptop-local Tuned Tensor assistant; known TT commands still run directly in the shell.",
     ),
     "",
   ].join("\n");
@@ -74,7 +74,7 @@ function formatThread(thread: AgentThread, activeId?: string): string {
         hour: "2-digit",
         minute: "2-digit",
       });
-  return `${active} ${chalk.dim(thread.id.slice(0, 8))}  ${thread.title}  ${chalk.dim(dateLabel)}`;
+  return `${active} ${chalk.dim(thread.id.slice(0, 8))}  ${sanitizeTerminalText(thread.title)}  ${chalk.dim(dateLabel)}`;
 }
 
 function actionFromPayload(payload: Record<string, unknown>): AgentAction | null {
@@ -113,7 +113,7 @@ function formatJson(value: unknown): string {
 export class TunedTensorAgentSession {
   private thread: AgentThread | null;
   private readonly pendingActions = new Map<string, AgentAction>();
-  private activeRequest: AbortController | null = null;
+  private activeRequest: { controller: AbortController; interruptible: boolean } | null = null;
   private responseStarted = false;
   private reasoningActive = false;
   private lineOpen = false;
@@ -139,7 +139,13 @@ export class TunedTensorAgentSession {
 
   interrupt(): boolean {
     if (!this.activeRequest) return false;
-    this.activeRequest.abort("user-stop");
+    if (!this.activeRequest.interruptible) {
+      this.options.io.writeError(
+        `${errorMark()} Approved action is settling and cannot be interrupted safely. Do not retry it.\n`,
+      );
+      return true;
+    }
+    this.activeRequest.controller.abort("user-stop");
     return true;
   }
 
@@ -168,8 +174,8 @@ export class TunedTensorAgentSession {
     this.options.io.write(
       `\n${chalk.yellow.bold("Approval required")}  ${chalk.dim(action.id.slice(0, 8))}\n`,
     );
-    this.options.io.write(`${chalk.bold(action.title)}  ${chalk.yellow(`[${action.risk} risk]`)}\n`);
-    if (action.summary) this.options.io.write(`${action.summary}\n`);
+    this.options.io.write(`${chalk.bold(sanitizeTerminalText(action.title))}  ${chalk.yellow(`[${sanitizeTerminalText(action.risk)} risk]`)}\n`);
+    if (action.summary) this.options.io.write(`${sanitizeTerminalText(action.summary)}\n`);
     const request = [action.method, action.path].filter(Boolean).join(" ");
     const technical = {
       operation: action.operation,
@@ -259,6 +265,12 @@ export class TunedTensorAgentSession {
     if (event.type === "action_result") {
       this.flushResponse();
       this.endOpenLine();
+      if (payload.status === "outcome_unknown") {
+        this.options.io.writeError(
+          `${errorMark()} Approved action outcome is unknown. It cannot be retried; inspect the remote spec before preparing another action.\n`,
+        );
+        return;
+      }
       const failed = payload.status === "failed" || Boolean(payload.error);
       this.options.io.write(
         `${failed ? errorMark() : successMark()} Approved action ${failed ? "failed" : "completed"}.\n`,
@@ -273,7 +285,7 @@ export class TunedTensorAgentSession {
         stringValue(payload.message) ??
         stringValue(payload.error) ??
         "The agent could not complete this request.";
-      this.options.io.writeError(`${errorMark()} ${message}\n`);
+      this.options.io.writeError(`${errorMark()} ${sanitizeTerminalText(message)}\n`);
     }
   }
 
@@ -284,13 +296,14 @@ export class TunedTensorAgentSession {
 
   private async runStream(
     operation: (signal: AbortSignal) => Promise<AgentTurnResult>,
+    interruptible = true,
   ): Promise<AgentTurnResult | null> {
     if (this.activeRequest) {
       this.options.io.writeError(`${errorMark()} A response is already running.\n`);
       return null;
     }
     const controller = new AbortController();
-    this.activeRequest = controller;
+    this.activeRequest = { controller, interruptible };
     this.responseStarted = false;
     this.reasoningActive = false;
     this.lineOpen = false;
@@ -301,6 +314,10 @@ export class TunedTensorAgentSession {
       this.endOpenLine();
       for (const action of result.actions) {
         this.pendingActions.set(action.id, action);
+      }
+      if (controller.signal.aborted || result.status === "cancelled") {
+        this.options.io.write(chalk.dim("Response stopped.\n"));
+        return null;
       }
       return result;
     } catch (error) {
@@ -353,14 +370,20 @@ export class TunedTensorAgentSession {
 
   private async approve(idOrPrefix?: string): Promise<void> {
     const action = this.resolvePendingAction(idOrPrefix);
-    const result = await this.runStream(async (signal) =>
-      await this.options.client.approveAction(
-        action.id,
-        (event) => this.renderEvent(event),
-        signal,
-      )
-    );
-    if (result) this.pendingActions.delete(action.id);
+    action.status = "executing";
+    try {
+      await this.runStream(async (signal) =>
+        await this.options.client.approveAction(
+          action.id,
+          (event) => this.renderEvent(event),
+          signal,
+        ),
+      false);
+    } finally {
+      // Approval is one-way once requested. Preflight failures, completed
+      // actions, and unknown outcomes are all non-retryable under this ID.
+      this.pendingActions.delete(action.id);
+    }
   }
 
   private async reject(idOrPrefix?: string): Promise<void> {
@@ -467,7 +490,7 @@ export class TunedTensorAgentSession {
       return "continue";
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.options.io.writeError(`${errorMark()} ${message}\n`);
+      this.options.io.writeError(`${errorMark()} ${sanitizeTerminalText(message)}\n`);
       return "continue";
     }
   }

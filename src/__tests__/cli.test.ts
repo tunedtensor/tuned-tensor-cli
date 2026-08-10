@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PassThrough } from "node:stream";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   createProgram,
   extractPassthroughOptions,
@@ -41,6 +44,73 @@ describe("extractPassthroughOptions", () => {
 });
 
 describe("unified command routing", () => {
+  it("configures the local agent and exposes Pi model status without secret flags", async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), "tt-agent-cli-"));
+    process.env.XDG_CONFIG_HOME = configRoot;
+    const stdout = new PassThrough();
+    let output = "";
+    stdout.setEncoding("utf8");
+    stdout.on("data", (chunk: string) => { output += chunk; });
+    const modelRuntime = {
+      getProviders: () => [{ id: "openai", name: "OpenAI" }],
+      getModels: () => [{ id: "gpt-5.2", provider: "openai", name: "GPT 5.2", reasoning: true }],
+      getModel: () => ({ id: "gpt-5.2", provider: "openai", name: "GPT 5.2", reasoning: true }),
+      hasConfiguredAuth: () => true,
+    };
+    try {
+      const program = createProgram("test", { stdout, modelRuntime });
+      program.exitOverride();
+      await program.parseAsync([
+        "node", "tt", "agent", "configure", "--provider", "openai",
+        "--model", "gpt-5.2", "--thinking", "high",
+      ]);
+      expect(output).toContain("openai/gpt-5.2");
+      expect(program.commands.map((command) => command.name())).toContain("agent");
+      const agent = program.commands.find((command) => command.name() === "agent")!;
+      expect(agent.commands.find((command) => command.name() === "configure")?.options.map((option) => option.long))
+        .not.toEqual(expect.arrayContaining(["--api-key", "--token", "--secret"]));
+    } finally {
+      delete process.env.XDG_CONFIG_HOME;
+      rmSync(configRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a selected model whose provider is not authenticated", async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), "tt-agent-status-"));
+    process.env.XDG_CONFIG_HOME = configRoot;
+    const stdout = new PassThrough();
+    let output = "";
+    stdout.setEncoding("utf8");
+    stdout.on("data", (chunk: string) => { output += chunk; });
+    try {
+      const program = createProgram("test", {
+        stdout,
+        env: {
+          TUNED_TENSOR_AGENT_PROVIDER: "openai",
+          TUNED_TENSOR_AGENT_MODEL: "gpt-5.2",
+          TUNED_TENSOR_AGENT_THINKING: "off",
+        },
+        modelRuntime: {
+          getProviders: () => [{ id: "openai" }],
+          getModels: () => [{ id: "gpt-5.2", provider: "openai", reasoning: true }],
+          getModel: () => ({ id: "gpt-5.2", provider: "openai", reasoning: true }),
+          hasConfiguredAuth: () => false,
+        },
+      });
+      program.exitOverride();
+      await program.parseAsync(["node", "tt", "--json", "agent", "status"]);
+      expect(JSON.parse(output)).toMatchObject({
+        execution: "local",
+        provider: "openai",
+        model: "gpt-5.2",
+        authenticated: false,
+      });
+    } finally {
+      delete process.env.XDG_CONFIG_HOME;
+      rmSync(configRoot, { recursive: true, force: true });
+    }
+  });
+
   it("forwards the complete local grammar without Commander consuming it", async () => {
     const runLocalCommand = vi.fn(async (
       _args: string[],
@@ -248,5 +318,52 @@ describe("unified command routing", () => {
     });
 
     expect(startShell).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the local Pi client and never calls remote /agent endpoints", async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), "tt-agent-local-"));
+    process.env.XDG_CONFIG_HOME = configRoot;
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const modelRuntime = {
+      getProviders: () => [{ id: "openai" }],
+      getModels: () => [{ id: "gpt-5.2", provider: "openai", reasoning: true }],
+      getModel: () => ({ id: "gpt-5.2", provider: "openai", reasoning: true }),
+      hasConfiguredAuth: () => true,
+    };
+    const startShell = vi.fn(async (options: { agent?: { handleLine(input: string): Promise<unknown> } }) => {
+      await options.agent?.handleLine("hello locally");
+    });
+    try {
+      await runCli("test", {
+        argv: ["node", "tt"],
+        env: {
+          TERM: "xterm-256color",
+          TUNED_TENSOR_API_KEY: "tt_must_not_reach_pi",
+          TUNED_TENSOR_AGENT_PROVIDER: "openai",
+          TUNED_TENSOR_AGENT_MODEL: "gpt-5.2",
+          TUNED_TENSOR_AGENT_THINKING: "medium",
+        },
+        stdinIsTTY: true,
+        stdoutIsTTY: true,
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        modelRuntime,
+        createPiAgent: (options) => ({
+          ...(() => {
+            expect(JSON.stringify(options)).not.toContain("tt_must_not_reach_pi");
+            return {};
+          })(),
+          state: { messages: options.messages },
+          subscribe: () => () => {},
+          prompt: async () => {},
+          abort: () => {},
+        }),
+        startShell: startShell as never,
+      });
+      expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/agent/"))).toBe(false);
+    } finally {
+      delete process.env.XDG_CONFIG_HOME;
+      rmSync(configRoot, { recursive: true, force: true });
+    }
   });
 });

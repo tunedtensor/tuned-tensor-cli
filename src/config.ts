@@ -11,12 +11,31 @@ import { join } from "node:path";
 export interface Config {
   api_key?: string;
   base_url?: string;
+  agent?: AgentSelection;
+}
+
+export const AGENT_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+export type AgentThinkingLevel = typeof AGENT_THINKING_LEVELS[number];
+
+export interface AgentSelection {
+  provider: string;
+  model: string;
+  thinking: AgentThinkingLevel;
 }
 
 const CONFIG_DIR_NAME = "tuned-tensor";
 const CONFIG_FILE_NAME = "config.json";
 
-function getConfigDir(): string {
+export function getConfigDir(): string {
   const xdg = process.env.XDG_CONFIG_HOME;
   const base = xdg || join(homedir(), ".config");
   return join(base, CONFIG_DIR_NAME);
@@ -65,4 +84,25 @@ export function getBaseUrl(opts?: { baseUrl?: string }): string {
 
 export function getApiKey(opts?: { apiKey?: string }): string | undefined {
   return opts?.apiKey || process.env.TUNED_TENSOR_API_KEY || readConfig().api_key;
+}
+
+export function getAgentSelection(
+  env: NodeJS.ProcessEnv = process.env,
+): AgentSelection | undefined {
+  const stored = readConfig().agent;
+  const provider = env.TUNED_TENSOR_AGENT_PROVIDER || stored?.provider;
+  const model = env.TUNED_TENSOR_AGENT_MODEL || stored?.model;
+  const rawThinking = env.TUNED_TENSOR_AGENT_THINKING || stored?.thinking || "medium";
+  if (!AGENT_THINKING_LEVELS.includes(rawThinking as AgentThinkingLevel)) {
+    throw new Error(
+      "Agent thinking must be off, minimal, low, medium, high, xhigh, or max.",
+    );
+  }
+  if (!provider && !model) return undefined;
+  if (!provider || !model) {
+    throw new Error(
+      "Both an agent provider and model are required. Run `tt agent configure --provider <provider> --model <model>`.",
+    );
+  }
+  return { provider, model, thinking: rawThinking as AgentThinkingLevel };
 }

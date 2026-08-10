@@ -25,6 +25,9 @@ beforeEach(async () => {
 afterEach(() => {
   rmSync(TEST_DIR, { recursive: true, force: true });
   delete process.env.XDG_CONFIG_HOME;
+  delete process.env.TUNED_TENSOR_AGENT_PROVIDER;
+  delete process.env.TUNED_TENSOR_AGENT_MODEL;
+  delete process.env.TUNED_TENSOR_AGENT_THINKING;
 });
 
 describe("config", () => {
@@ -129,6 +132,54 @@ describe("config", () => {
     it("uses stored config", () => {
       configModule.writeConfig({ api_key: "tt_stored" });
       expect(configModule.getApiKey()).toBe("tt_stored");
+    });
+  });
+
+  describe("local agent model selection", () => {
+    it("stores only non-secret metadata and applies environment overrides", () => {
+      configModule.updateConfig({
+        agent: {
+          provider: "anthropic",
+          model: "claude-sonnet-4-5",
+          thinking: "medium",
+        },
+      });
+
+      process.env.TUNED_TENSOR_AGENT_PROVIDER = "openai";
+      process.env.TUNED_TENSOR_AGENT_MODEL = "gpt-5.2";
+      process.env.TUNED_TENSOR_AGENT_THINKING = "high";
+
+      expect(configModule.getAgentSelection()).toEqual({
+        provider: "openai",
+        model: "gpt-5.2",
+        thinking: "high",
+      });
+      expect(readFileSync(
+        join(TEST_DIR, "tuned-tensor", "config.json"),
+        "utf8",
+      )).not.toContain("api_key");
+    });
+
+    it("rejects unsupported thinking levels", () => {
+      process.env.TUNED_TENSOR_AGENT_PROVIDER = "openai";
+      process.env.TUNED_TENSOR_AGENT_MODEL = "gpt-5.2";
+      process.env.TUNED_TENSOR_AGENT_THINKING = "unlimited";
+
+      expect(() => configModule.getAgentSelection()).toThrow(
+        /thinking.*off, minimal, low, medium, high, xhigh, or max/i,
+      );
+    });
+
+    it("accepts Pi's max thinking level", () => {
+      process.env.TUNED_TENSOR_AGENT_PROVIDER = "openai";
+      process.env.TUNED_TENSOR_AGENT_MODEL = "gpt-5.2";
+      process.env.TUNED_TENSOR_AGENT_THINKING = "max";
+
+      expect(configModule.getAgentSelection()).toEqual({
+        provider: "openai",
+        model: "gpt-5.2",
+        thinking: "max",
+      });
     });
   });
 });
