@@ -448,11 +448,9 @@ function expandDirectory(
 function helpText(mode: WorkflowMode, query?: string, palette = false): string {
   const groups = groupedCatalog(mode, query);
   const lines: string[] = [];
-  lines.push(
-    chalk.dim("// ") + accent.bold(palette
-      ? `Commands for ${mode} — type a command or use cloud/local as a one-shot prefix`
-      : `TT ${mode} commands${query ? ` matching ${JSON.stringify(query)}` : ""}`),
-  );
+  lines.push(accent.bold(palette
+    ? `Commands for ${mode} — type a command or use cloud/local as a one-shot prefix`
+    : `TT ${mode} commands${query ? ` matching ${JSON.stringify(query)}` : ""}`));
 
   if (groups.size === 0) {
     lines.push(chalk.dim("  No matching commands."));

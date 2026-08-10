@@ -44,7 +44,7 @@ function sanitizeTerminalText(text: string): string {
 
 function helpText(): string {
   return [
-    chalk.dim("// ") + accent.bold("Agent commands"),
+    accent.bold("Agent commands"),
     "",
     `  ${accent("/new".padEnd(22))} Start a new conversation.`,
     `  ${accent("/threads".padEnd(22))} List recent conversations.`,
