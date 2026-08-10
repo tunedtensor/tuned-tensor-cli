@@ -366,4 +366,56 @@ describe("unified command routing", () => {
       rmSync(configRoot, { recursive: true, force: true });
     }
   });
+
+  it("retries agent client creation after configuring mid-session", async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), "tt-agent-reconfigure-"));
+    process.env.XDG_CONFIG_HOME = configRoot;
+    const { updateConfig } = await import("../config.js");
+    const stderr = new PassThrough();
+    let errors = "";
+    stderr.setEncoding("utf8");
+    stderr.on("data", (chunk: string) => {
+      errors += chunk;
+    });
+    const modelRuntime = {
+      getProviders: () => [{ id: "openai" }],
+      getModels: () => [{ id: "gpt-5.2", provider: "openai", reasoning: true }],
+      getModel: () => ({ id: "gpt-5.2", provider: "openai", reasoning: true }),
+      hasConfiguredAuth: () => true,
+    };
+    const createPiAgent = vi.fn((options: { messages: unknown }) => ({
+      state: { messages: options.messages },
+      subscribe: () => () => {},
+      prompt: async () => {},
+      abort: () => {},
+    }));
+    const startShell = vi.fn(async (options: { agent?: { handleLine(input: string): Promise<unknown> } }) => {
+      // Fails before the agent is configured.
+      await options.agent?.handleLine("hello");
+      expect(errors).toContain("agent is not configured");
+      // Configure mid-session, as `tt agent configure` does.
+      updateConfig({
+        agent: { provider: "openai", model: "gpt-5.2", thinking: "medium" },
+      });
+      // Must retry client creation instead of replaying the stale rejection.
+      await options.agent?.handleLine("hello again");
+    });
+    try {
+      await runCli("test", {
+        argv: ["node", "tt"],
+        env: { TERM: "xterm-256color" },
+        stdinIsTTY: true,
+        stdoutIsTTY: true,
+        stdout: new PassThrough(),
+        stderr,
+        modelRuntime,
+        createPiAgent: createPiAgent as never,
+        startShell: startShell as never,
+      });
+      expect(createPiAgent).toHaveBeenCalledTimes(1);
+    } finally {
+      delete process.env.XDG_CONFIG_HOME;
+      rmSync(configRoot, { recursive: true, force: true });
+    }
+  });
 });

@@ -129,7 +129,18 @@ function createLazyDefaultAgentClient(
   cloud: { apiKey?: string; baseUrl?: string },
 ): AgentConversationClient {
   let pending: Promise<AgentConversationClient> | undefined;
-  const client = () => pending ??= createDefaultAgentClient(runtime, env, cloud);
+  const client = () => {
+    if (!pending) {
+      // Retry on the next call if creation fails (for example when the user
+      // configures the agent later in the same shell session).
+      const attempt = createDefaultAgentClient(runtime, env, cloud);
+      pending = attempt;
+      attempt.catch(() => {
+        if (pending === attempt) pending = undefined;
+      });
+    }
+    return pending;
+  };
   return {
     createThread: async () => await (await client()).createThread(),
     listThreads: async () => await (await client()).listThreads(),
