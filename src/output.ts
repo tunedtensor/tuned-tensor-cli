@@ -2,6 +2,9 @@ import chalk from "chalk";
 import Table from "cli-table3";
 import { ApiError } from "./client.js";
 
+/* Brand accent — matches the app's violet-400 for labels on dark terminals. */
+const labelStyle = chalk.bold.hex("#A78BFA");
+
 let jsonMode = false;
 
 export function setJsonMode(enabled: boolean) {
@@ -22,7 +25,7 @@ export function printTable(
   meta?: { page: number; per_page: number; total: number },
 ) {
   const table = new Table({
-    head: headers.map((h) => chalk.bold.cyan(h)),
+    head: headers.map((h) => labelStyle(h)),
     style: { head: [], border: [] },
   });
   for (const row of rows) {
@@ -44,7 +47,7 @@ export function printDetail(fields: [string, string | undefined][]) {
   const maxLabel = Math.max(...fields.map(([l]) => l.length));
   for (const [label, value] of fields) {
     const paddedLabel = label.padEnd(maxLabel);
-    console.log(`${chalk.bold.cyan(paddedLabel)}  ${value ?? chalk.dim("—")}`);
+    console.log(`${labelStyle(paddedLabel)}  ${value ?? chalk.dim("—")}`);
   }
 }
 
@@ -87,9 +90,9 @@ export function formatDate(iso?: string | null): string {
 export function formatStatus(status: string): string {
   const map: Record<string, (s: string) => string> = {
     completed: chalk.green,
-    running: chalk.blue,
-    training: chalk.blue,
-    evaluating: chalk.blue,
+    running: chalk.hex("#A78BFA"),
+    training: chalk.hex("#A78BFA"),
+    evaluating: chalk.hex("#A78BFA"),
     preparing: chalk.yellow,
     pending: chalk.yellow,
     uploading: chalk.yellow,
