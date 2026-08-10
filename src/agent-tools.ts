@@ -53,14 +53,14 @@ const BaseModel = Type.Union(
 );
 const PipelineDocument = Type.Object({
   version: Type.Literal(1),
-  name: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
+  name: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
   target: Type.Optional(Type.Union([Type.Literal("local"), Type.Literal("cloud")])),
   steps: Type.Array(Type.Object({
-    id: Type.String({ minLength: 1, maxLength: 128 }),
+    id: Type.String({ minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_-]*$" }),
     uses: Type.Union([Type.Literal("train"), Type.Literal("evaluate"), Type.Literal("compare")]),
     target: Type.Optional(Type.Union([Type.Literal("local"), Type.Literal("cloud")])),
     with: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-  }, { additionalProperties: false }), { minItems: 1, maxItems: 100 }),
+  }, { additionalProperties: false }), { minItems: 1, maxItems: 16 }),
 }, { additionalProperties: false });
 
 const Example = Type.Object({
