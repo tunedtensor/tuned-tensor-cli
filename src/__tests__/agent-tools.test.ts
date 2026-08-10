@@ -64,12 +64,30 @@ describe("Tuned Tensor agent tools", () => {
     expect(result.details).toMatchObject({ operation: "update_spec" });
   });
 
+  it("validates and prepares pipeline plans without direct execution", async () => {
+    const api = fakeApi();
+    const pipeline = {
+      version: 1,
+      target: "local",
+      steps: [{ id: "baseline", uses: "evaluate", with: { model: "base" } }],
+    };
+    const validated = await tool("validate_pipeline", api).execute("pipeline-validate", { pipeline });
+    expect(validated.details).toMatchObject({ valid: true });
+
+    await tool("prepare_pipeline_run", api).execute("pipeline-prepare", { pipeline, dry_run: true });
+    expect(api.propose).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "run_pipeline",
+      arguments: expect.objectContaining({ dry_run: true }),
+    }));
+  });
+
   it("exposes exactly the allowed hosted tool set", () => {
     expect(createTunedTensorTools(fakeApi()).map((candidate) => candidate.name)).toEqual([
       "list_specs", "get_spec", "list_runs", "get_run", "diagnose_run",
       "report_run", "estimate_run", "list_datasets", "get_dataset",
       "list_models", "get_model", "get_balance", "list_transactions",
-      "prepare_create_spec", "prepare_update_spec",
+      "describe_pipeline", "validate_pipeline",
+      "prepare_create_spec", "prepare_update_spec", "prepare_pipeline_run",
     ]);
   });
 

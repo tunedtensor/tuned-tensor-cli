@@ -3,6 +3,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { AgentAction } from "./agent-client.js";
 import { SUPPORTED_BASE_MODELS } from "./base-models.js";
+import { canonicalPipeline, createExecutionPlan, validatePipeline } from "./pipeline.js";
 
 
 const MAX_TOOL_OUTPUT = 32_000;
@@ -50,6 +51,18 @@ const RunBody = Type.Object({
 const BaseModel = Type.Union(
   SUPPORTED_BASE_MODELS.map((model) => Type.Literal(model)),
 );
+const PipelineDocument = Type.Object({
+  version: Type.Literal(1),
+  name: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
+  target: Type.Optional(Type.Union([Type.Literal("local"), Type.Literal("cloud")])),
+  steps: Type.Array(Type.Object({
+    id: Type.String({ minLength: 1, maxLength: 128 }),
+    uses: Type.Union([Type.Literal("train"), Type.Literal("evaluate"), Type.Literal("compare")]),
+    target: Type.Optional(Type.Union([Type.Literal("local"), Type.Literal("cloud")])),
+    with: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  }, { additionalProperties: false }), { minItems: 1, maxItems: 100 }),
+}, { additionalProperties: false });
+
 const Example = Type.Object({
   input: Type.String({ minLength: 1, maxLength: 100_000 }),
   output: Type.String({ minLength: 1, maxLength: 100_000 }),
@@ -203,6 +216,17 @@ export function createTunedTensorTools(api: AgentToolApi): AgentTool[] {
     }, { additionalProperties: false }), async (p) => await api.get("/billing/transactions", {
       page: p.page ?? 1, per_page: p.per_page ?? 10,
     })),
+    define("describe_pipeline", "Describe pipeline", "Describe the built-in v1 pipeline contract and canonical recipe. This never executes anything.", Type.Object({
+      target: Type.Optional(Type.Union([Type.Literal("local"), Type.Literal("cloud")])),
+    }, { additionalProperties: false }), async (p) => ({
+      version: 1,
+      components: ["train", "evaluate", "compare"],
+      canonical: canonicalPipeline(p.target ?? "local"),
+    })),
+    define("validate_pipeline", "Validate pipeline", "Validate an ordered pipeline and resolve targets/transfers without filesystem, network, or execution side effects.", Type.Object({ pipeline: PipelineDocument }, { additionalProperties: false }), async (p) => {
+      const errors = validatePipeline(p.pipeline);
+      return { valid: errors.length === 0, errors, ...(errors.length ? {} : { plan: createExecutionPlan(p.pipeline) }) };
+    }),
   ];
 
   const mutations: AgentTool[] = [
@@ -222,6 +246,18 @@ export function createTunedTensorTools(api: AgentToolApi): AgentTool[] {
       }));
     }),
 
+    define("prepare_pipeline_run", "Prepare pipeline run", "Prepare a pipeline action for review only. It never executes a step, transfers an artifact, or reserves credits.", Type.Object({
+      pipeline: PipelineDocument,
+      dry_run: Type.Optional(Type.Boolean()),
+    }, { additionalProperties: false }), async (p) => {
+      const errors = validatePipeline(p.pipeline);
+      if (errors.length) throw new Error(`Invalid pipeline:\n- ${errors.join("\n- ")}`);
+      const plan = createExecutionPlan(p.pipeline);
+      return await api.propose(proposal("run_pipeline", "Run pipeline", "Review the resolved pipeline before any separate execution approval flow.", {
+        pipeline: p.pipeline,
+        dry_run: p.dry_run ?? true,
+      }, { plan, execution: "not started" }));
+    }),
   ];
   return [...reads, ...mutations];
 }

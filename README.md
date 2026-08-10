@@ -112,6 +112,40 @@ the complete command surface, `tt status` inspects both targets without a
 network or GPU probe, and `tt shell` opens the conversational terminal
 explicitly.
 
+## Composable pipelines (v1)
+
+A pipeline is an ordered JSON recipe. Version 1 supports `train`, `evaluate`,
+and `compare` steps; each resolves to `local` or `cloud`. The v1 evaluator is
+`evaluate.with.evaluator: "behavior"`. `evaluate.with.model` is `"base"` or
+`{ "from": "step.model" }`; `compare.with.before` and
+`after` are `{ "from": "step.report" }`. References must point to an earlier
+step and to an output the producer actually exposes.
+
+```bash
+# Generate the canonical four-step recipe for either target.
+tt pipeline init --target local --file pipeline.json
+tt pipeline init --target cloud --file cloud-pipeline.json
+
+# Validate and show resolved targets plus explicit cross-target transfers.
+tt pipeline validate --file pipeline.json
+tt --json pipeline plan --file pipeline.json
+
+# Preview any plan without execution, transfer, network calls, or billing.
+tt --json pipeline run --dry-run --file pipeline.json --only baseline
+
+# Execute an ordered local plan using the unified CLI's bundled runtime.
+tt --json pipeline run --file pipeline.json \
+  --spec tunedtensor.json --config local-runner.json
+```
+
+`--only` and `--skip` preserve dependency safety: a selected step cannot refer
+to an omitted predecessor. Local plans execute directly and may omit, reorder,
+or repeat supported components. Cloud and mixed-target plans remain preview-only
+until the bounded hosted dispatcher and artifact handoff are deployed; execution
+fails closed rather than silently running the fixed cloud workflow. The Pi agent
+may describe, validate, and prepare a plan, but has no direct pipeline-execute
+tool.
+
 ## Hosted quick start
 
 ```bash

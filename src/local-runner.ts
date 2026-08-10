@@ -1,7 +1,8 @@
 import { constants as osConstants } from "node:os";
 import { randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   readFile,
   rm,
@@ -22,7 +23,6 @@ import {
   type LocalOutputPayload,
 } from "./local-output.js";
 
-const localRequire = createRequire(import.meta.url);
 const DEFAULT_SPEC_NAME = "tunedtensor.json";
 
 export interface LocalCommandOptions {
@@ -261,14 +261,13 @@ async function projectSpecArguments(
 }
 
 export function resolveLocalCliEntrypoint(): string {
-  try {
-    return localRequire.resolve("@tuned-tensor/local");
-  } catch (error) {
+  const entrypoint = fileURLToPath(new URL("./local-runtime.js", import.meta.url));
+  if (!existsSync(entrypoint)) {
     throw new Error(
-      "TT Local is not installed. Reinstall @tuned-tensor/cli with its local runtime dependency.",
-      { cause: error },
+      "The bundled local runtime is missing. Rebuild or reinstall @tuned-tensor/cli.",
     );
   }
+  return entrypoint;
 }
 
 export function localCommandStreamsStdout(args: readonly string[]): boolean {

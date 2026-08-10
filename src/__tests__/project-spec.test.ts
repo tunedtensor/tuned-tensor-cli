@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localBehaviorSpecFileSchema } from "@tuned-tensor/local";
+import { localBehaviorSpecFileSchema } from "../local-runtime/contracts.js";
 import {
   hasLocalOnlySpecFields,
   projectCloudSpec,
