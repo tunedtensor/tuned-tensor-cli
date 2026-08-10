@@ -19,7 +19,7 @@ describe("pipeline commands", () => {
       const program = createProgram("test");
       program.exitOverride();
       await program.parseAsync(["node", "tt", "pipeline", "init", "--target", "cloud", "--file", file]);
-      expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ version: 1, target: "cloud" });
+      expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ version: 1, name: "default-cloud" });
 
       await program.parseAsync(["node", "tt", "--json", "pipeline", "run", "--dry-run", "--file", file]);
       const output = JSON.parse(log.mock.calls.at(-1)?.[0] as string);

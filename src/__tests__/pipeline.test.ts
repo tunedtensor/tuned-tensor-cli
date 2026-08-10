@@ -34,24 +34,25 @@ describe("composable pipeline contract", () => {
     });
   });
 
-  it("rejects duplicate IDs, forward or missing references, and wrong output kinds", () => {
+  it("rejects duplicate IDs, non-backward references, and wrong output kinds", () => {
     expect(validatePipeline({ ...valid, steps: [...valid.steps, { id: "train", uses: "train" }] }))
-      .toContainEqual(expect.stringMatching(/duplicate.*train/i));
+      .toContainEqual(expect.stringMatching(/unique.*train/i));
     expect(validatePipeline({ ...valid, steps: [
       { id: "candidate", uses: "evaluate", with: { model: { from: "train.model" } } },
       { id: "train", uses: "train" },
-    ] })).toContainEqual(expect.stringMatching(/forward.*train/i));
+    ] })).toContainEqual(expect.stringMatching(/candidate.*prior step/i));
     expect(validatePipeline({ ...valid, steps: [{ id: "x", uses: "evaluate", with: { model: { from: "missing.model" } } }] }))
-      .toContainEqual(expect.stringMatching(/missing.*missing/i));
+      .toContainEqual(expect.stringMatching(/missing\.model.*prior step/i));
     expect(validatePipeline({ ...valid, steps: [{ id: "train", uses: "train" }, { id: "x", uses: "evaluate", with: { model: { from: "train.report" } } }] }))
       .toContainEqual(expect.stringMatching(/does not produce.*report/i));
   });
 
-  it("requires evaluate model base or a prior model ref and compare report refs", () => {
-    expect(validatePipeline({ version: 1, steps: [{ id: "eval", uses: "evaluate", with: { model: "candidate" } }] }))
-      .toContainEqual(expect.stringMatching(/model.*base/i));
-    expect(validatePipeline({ version: 1, steps: [{ id: "compare", uses: "compare", with: { before: { from: "x.report" }, after: { from: "x.report" } } }] }))
-      .toContainEqual(expect.stringMatching(/missing.*x/i));
+  it("requires evaluate model base or a prior model ref and distinct compare report refs", () => {
+    const invalidModel = validatePipeline({ version: 1, target: "local", steps: [{ id: "eval", uses: "evaluate", with: { model: "candidate" } }] });
+    expect(invalidModel.length).toBeGreaterThan(0);
+    expect(invalidModel[0]).toMatch(/model/i);
+    expect(validatePipeline({ version: 1, target: "local", steps: [{ id: "compare", uses: "compare", with: { before: { from: "x.report" }, after: { from: "x.report" } } }] }))
+      .toContainEqual(expect.stringMatching(/distinct/i));
   });
 
   it("keeps --only and --skip safe by refusing omitted dependencies", () => {
@@ -62,7 +63,7 @@ describe("composable pipeline contract", () => {
 
   it("provides canonical local and cloud recipes", () => {
     expect(canonicalPipeline("local").steps.map((step) => step.id)).toEqual(["baseline", "train", "candidate", "compare"]);
-    expect(createExecutionPlan(canonicalPipeline("local")).steps[0]?.with).toMatchObject({ evaluator: "behavior" });
+    expect(createExecutionPlan(canonicalPipeline("local")).steps[0]).toMatchObject({ with: { evaluator: "behavior" } });
     expect(canonicalPipeline("cloud").steps.every((step) => step.target === "cloud")).toBe(true);
   });
 

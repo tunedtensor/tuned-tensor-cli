@@ -119,7 +119,10 @@ and `compare` steps; each resolves to `local` or `cloud`. The v1 evaluator is
 `evaluate.with.evaluator: "behavior"`. `evaluate.with.model` is `"base"` or
 `{ "from": "step.model" }`; `compare.with.before` and
 `after` are `{ "from": "step.report" }`. References must point to an earlier
-step and to an output the producer actually exposes.
+step and to an output the producer actually exposes. The document contract
+itself is defined by the published `@tuned-tensor/pipeline-contract` package;
+the CLI adds only execution planning (step selection and cross-target
+transfers) on top of it.
 
 ```bash
 # Generate the canonical four-step recipe for either target.

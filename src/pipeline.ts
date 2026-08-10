@@ -1,24 +1,47 @@
-export const PIPELINE_VERSION = 1 as const;
-export const PIPELINE_TARGETS = ["local", "cloud"] as const;
-export const PIPELINE_USES = ["train", "evaluate", "compare"] as const;
+import {
+  canonicalPipeline as canonicalPortablePipeline,
+  parsePipeline,
+  pipelineDocumentSchema,
+  type PipelineArtifactReference,
+  type PipelineDocumentInput,
+  type PipelineStep,
+  type PipelineTarget,
+  type Pipeline as NormalizedPortablePipeline,
+} from "@tuned-tensor/pipeline-contract";
 
-export type PipelineTarget = (typeof PIPELINE_TARGETS)[number];
-export type PipelineUse = (typeof PIPELINE_USES)[number];
-export type PipelineRef = { from: string };
+// The portable Pipeline v1 contract lives in `@tuned-tensor/pipeline-contract`.
+// This module re-exports it and adds CLI-only execution planning (step
+// selection and cross-target artifact transfers).
+export {
+  PIPELINE_DOCUMENT_VERSION,
+  PIPELINE_EVALUATORS,
+  PIPELINE_MAX_STEPS,
+  PIPELINE_MAX_TRAIN_STEPS,
+  PIPELINE_STEP_CAPABILITIES,
+  PIPELINE_STEP_USES,
+  PIPELINE_TARGETS,
+  canonicalJson,
+  parsePipeline,
+  pipelineDocumentSchema,
+  pipelineHash,
+} from "@tuned-tensor/pipeline-contract";
+export type {
+  ComparePipelineStepInput,
+  EvaluatePipelineStepInput,
+  PipelineArtifactKind,
+  PipelineArtifactReference,
+  PipelineDocumentInput,
+  PipelineStep,
+  PipelineStepInput,
+  PipelineStepUse,
+  PipelineTarget,
+  TrainPipelineStepInput,
+} from "@tuned-tensor/pipeline-contract";
 
-export interface PipelineStep {
-  id: string;
-  uses: PipelineUse;
-  target?: PipelineTarget;
-  with?: Record<string, unknown>;
-}
-
-export interface Pipeline {
-  version: number;
-  name?: string;
-  target?: PipelineTarget;
-  steps: PipelineStep[];
-}
+/** A user-authored Pipeline v1 document, before normalization. */
+export type Pipeline = PipelineDocumentInput;
+/** A normalized Pipeline v1 document: targets resolved, evaluator defaulted. */
+export type NormalizedPipeline = NormalizedPortablePipeline;
 
 export interface ResolvedTransfer {
   from: string;
@@ -26,10 +49,7 @@ export interface ResolvedTransfer {
   to_target: PipelineTarget;
 }
 
-export interface ResolvedPipelineStep extends PipelineStep {
-  target: PipelineTarget;
-  transfers: ResolvedTransfer[];
-}
+export type ResolvedPipelineStep = PipelineStep & { transfers: ResolvedTransfer[] };
 
 export interface ExecutionPlan {
   version: 1;
@@ -37,133 +57,60 @@ export interface ExecutionPlan {
   steps: ResolvedPipelineStep[];
 }
 
-const OUTPUTS: Record<PipelineUse, readonly string[]> = {
-  train: ["model"],
-  evaluate: ["report"],
-  compare: ["comparison"],
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function ref(value: unknown): PipelineRef | undefined {
-  return isRecord(value) && typeof value.from === "string" ? { from: value.from } : undefined;
-}
-
-function parseRef(value: PipelineRef): { stepId: string; output: string } | undefined {
-  const match = /^([A-Za-z][A-Za-z0-9_-]*)\.([A-Za-z][A-Za-z0-9_-]*)$/.exec(value.from);
-  return match ? { stepId: match[1], output: match[2] } : undefined;
-}
-
-function references(step: PipelineStep): Array<{ field: string; value: unknown; expected: string }> {
-  if (step.uses === "evaluate") return [{ field: "model", value: step.with?.model, expected: "model" }];
-  if (step.uses === "compare") return [
-    { field: "before", value: step.with?.before, expected: "report" },
-    { field: "after", value: step.with?.after, expected: "report" },
-  ];
+function stepReferences(step: PipelineStep): PipelineArtifactReference[] {
+  if (step.uses === "evaluate") return step.with.model === "base" ? [] : [step.with.model];
+  if (step.uses === "compare") return [step.with.before, step.with.after];
   return [];
 }
 
-function resolvedTarget(step: PipelineStep, pipeline: Pipeline): PipelineTarget | undefined {
-  return step.target ?? pipeline.target;
+function producerId(reference: PipelineArtifactReference): string {
+  return reference.from.slice(0, reference.from.lastIndexOf("."));
 }
 
 /** Validate an ordered, v1 pipeline without reading, writing, or executing anything. */
 export function validatePipeline(pipeline: unknown): string[] {
-  const errors: string[] = [];
-  if (!isRecord(pipeline)) return ["Pipeline must be an object."];
-  if (pipeline.version !== PIPELINE_VERSION) errors.push("Pipeline version must be 1.");
-  if (pipeline.target !== undefined && !PIPELINE_TARGETS.includes(pipeline.target as PipelineTarget)) {
-    errors.push("Pipeline target must be local or cloud.");
+  const structural = pipelineDocumentSchema.safeParse(pipeline);
+  if (!structural.success) {
+    return structural.error.issues.map((issue) => {
+      const path = issue.path.map(String).join(".");
+      return path ? `${path}: ${issue.message}` : issue.message;
+    });
   }
-  const typedPipeline = pipeline as unknown as Pipeline;
-  if (!Array.isArray(pipeline.steps) || pipeline.steps.length === 0) return [...errors, "Pipeline must contain at least one step."];
-
-  const seen = new Map<string, PipelineStep>();
-  let trainCount = 0;
-  for (const rawStep of pipeline.steps) {
-    if (!isRecord(rawStep)) { errors.push("Each pipeline step must be an object."); continue; }
-    const step = rawStep as unknown as PipelineStep;
-    if (typeof step.id !== "string" || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(step.id)) {
-      errors.push("Step id must start with a letter and contain only letters, numbers, _ or -.");
-      continue;
-    }
-    if (seen.has(step.id)) errors.push(`Duplicate step id: ${step.id}.`);
-    if (!(PIPELINE_USES as readonly string[]).includes(step.uses)) errors.push(`Step ${step.id} uses an unsupported component: ${String(step.uses)}.`);
-    if (step.uses === "train" && ++trainCount > 1) errors.push("Pipeline v1 supports at most one train step because local model artifacts are run-scoped.");
-    if (step.uses === "evaluate" && step.with?.evaluator !== undefined && step.with.evaluator !== "behavior") {
-      errors.push(`Step ${step.id} evaluator must be behavior.`);
-    }
-    if (step.target !== undefined && !PIPELINE_TARGETS.includes(step.target)) errors.push(`Step ${step.id} target must be local or cloud.`);
-    if (!resolvedTarget(step, typedPipeline)) errors.push(`Step ${step.id} needs a target or a pipeline default target.`);
-
-    for (const input of references(step)) {
-      if (step.uses === "evaluate" && input.value === "base") continue;
-      const source = ref(input.value);
-      if (!source) {
-        errors.push(`Step ${step.id} ${input.field} must be ${step.uses === "evaluate" ? "base or " : ""}a { from: \"step.output\" } reference.`);
-        continue;
-      }
-      const parsed = parseRef(source);
-      if (!parsed) { errors.push(`Step ${step.id} has an invalid reference: ${source.from}.`); continue; }
-      const producer = seen.get(parsed.stepId);
-      if (!producer) {
-        const existsLater = (pipeline.steps as unknown[]).some((candidate) => isRecord(candidate) && candidate.id === parsed.stepId);
-        errors.push(`Step ${step.id} has a ${existsLater ? "forward" : "missing"} reference to ${parsed.stepId}.`);
-      } else if (!OUTPUTS[producer.uses]?.includes(parsed.output)) {
-        errors.push(`Step ${parsed.stepId} does not produce ${parsed.output} for step ${step.id}; it produces ${OUTPUTS[producer.uses]?.join(", ") ?? "no outputs"}.`);
-      } else if (parsed.output !== input.expected) {
-        errors.push(`Step ${step.id} ${input.field} requires a ${input.expected} reference, not ${source.from}.`);
-      }
-    }
-    seen.set(step.id, step);
+  try {
+    parsePipeline(pipeline);
+    return [];
+  } catch (error) {
+    return [error instanceof Error ? error.message : String(error)];
   }
-  return errors;
 }
 
-export function canonicalPipeline(target: PipelineTarget = "local"): Pipeline {
-  return {
-    version: PIPELINE_VERSION,
-    name: `default-${target}`,
-    target,
-    steps: [
-      { id: "baseline", uses: "evaluate", target, with: { model: "base", evaluator: "behavior" } },
-      { id: "train", uses: "train", target },
-      { id: "candidate", uses: "evaluate", target, with: { model: { from: "train.model" }, evaluator: "behavior" } },
-      { id: "compare", uses: "compare", target, with: { before: { from: "baseline.report" }, after: { from: "candidate.report" } } },
-    ],
-  };
+/** The named compatibility recipe retained by both local and cloud executors. */
+export function canonicalPipeline(target: PipelineTarget = "local"): NormalizedPipeline {
+  return canonicalPortablePipeline(target);
 }
 
-export function createExecutionPlan(pipeline: Pipeline, selection: { only?: string[]; skip?: string[] } = {}): ExecutionPlan {
+/** Resolve a valid pipeline into an ordered plan with explicit cross-target transfers. */
+export function createExecutionPlan(pipeline: unknown, selection: { only?: string[]; skip?: string[] } = {}): ExecutionPlan {
   const errors = validatePipeline(pipeline);
   if (errors.length) throw new Error(`Invalid pipeline:\n- ${errors.join("\n- ")}`);
-  const allIds = new Set(pipeline.steps.map((step) => step.id));
+  const normalized = parsePipeline(pipeline);
+  const allIds = new Set(normalized.steps.map((step) => step.id));
   for (const id of [...(selection.only ?? []), ...(selection.skip ?? [])]) {
     if (!allIds.has(id)) throw new Error(`Unknown pipeline step: ${id}.`);
   }
   const only = selection.only?.length ? new Set(selection.only) : undefined;
   const skip = new Set(selection.skip ?? []);
-  const steps = pipeline.steps.filter((step) => (!only || only.has(step.id)) && !skip.has(step.id));
+  const steps = normalized.steps.filter((step) => (!only || only.has(step.id)) && !skip.has(step.id));
   if (!steps.length) throw new Error("Selection leaves no pipeline steps to run.");
   const retained = new Map(steps.map((step) => [step.id, step]));
-  const resolved = steps.map((step) => {
-    const target = resolvedTarget(step, pipeline)!;
+  const resolved = steps.map((step): ResolvedPipelineStep => {
     const transfers: ResolvedTransfer[] = [];
-    for (const input of references(step)) {
-      const source = ref(input.value);
-      if (!source) continue;
-      const parsed = parseRef(source)!;
-      const producer = retained.get(parsed.stepId);
-      if (!producer) throw new Error(`Step ${step.id} has a dependency on ${parsed.stepId}, which was omitted by --only or --skip.`);
-      const fromTarget = resolvedTarget(producer, pipeline)!;
-      if (fromTarget !== target) transfers.push({ from: source.from, from_target: fromTarget, to_target: target });
+    for (const reference of stepReferences(step)) {
+      const producer = retained.get(producerId(reference));
+      if (!producer) throw new Error(`Step ${step.id} has a dependency on ${producerId(reference)}, which was omitted by --only or --skip.`);
+      if (producer.target !== step.target) transfers.push({ from: reference.from, from_target: producer.target, to_target: step.target });
     }
-    const normalized = step.uses === "evaluate"
-      ? { ...step, with: { ...step.with, evaluator: step.with?.evaluator ?? "behavior" } }
-      : step;
-    return { ...normalized, target, transfers };
+    return { ...step, transfers };
   });
-  return { version: PIPELINE_VERSION, ...(pipeline.name ? { name: pipeline.name } : {}), steps: resolved };
+  return { version: 1, ...(normalized.name ? { name: normalized.name } : {}), steps: resolved };
 }
