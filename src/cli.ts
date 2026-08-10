@@ -39,6 +39,7 @@ import { registerInitCommand } from "./commands/init.js";
 import { registerEvalCommand } from "./commands/eval.js";
 import { registerPushCommand } from "./commands/push.js";
 import { registerAgentCommands } from "./commands/agent.js";
+import { registerPipelineCommands } from "./commands/pipeline.js";
 
 export interface SelfCommandOptions {
   cwd?: string;
@@ -351,6 +352,7 @@ export function createProgram(
   registerInitCommand(program);
   registerEvalCommand(program);
   registerPushCommand(program);
+  registerPipelineCommands(program);
   registerAgentCommands(program, {
     env,
     output: runtime.stdout ?? process.stdout,

@@ -2,10 +2,12 @@ import { defineConfig } from "tsup";
 import packageJson from "./package.json";
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  entry: {
+    index: "src/index.ts",
+    "local-runtime": "src/local-runtime/index.ts",
+  },
   format: ["esm"],
   target: "node22",
-  external: ["@tuned-tensor/local"],
   clean: true,
   sourcemap: true,
   define: {
