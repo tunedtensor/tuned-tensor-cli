@@ -90,7 +90,7 @@ export function registerTopupCommands(parent: Command) {
 
       const url = data.checkout_url;
       console.log(
-        `${chalk.bold("Checkout URL:")} ${chalk.cyan(url)}\n` +
+        `${chalk.bold("Checkout URL:")} ${chalk.hex("#A78BFA")(url)}\n` +
           chalk.dim("Complete the payment to credit your account.")
       );
 

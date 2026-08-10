@@ -78,7 +78,7 @@ export function registerAuthCommands(parent: Command) {
         console.log(
           `  To get your API key, go to ${chalk.bold("Settings → API Keys")} in the Tuned Tensor dashboard:`,
         );
-        console.log(`  ${chalk.cyan.underline(settingsUrl)}`);
+        console.log(`  ${chalk.hex("#A78BFA").underline(settingsUrl)}`);
         console.log();
 
         apiKey = await promptForApiKey();

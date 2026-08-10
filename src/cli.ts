@@ -396,7 +396,7 @@ export function createProgram(
         }, null, 2)}\n`);
         return;
       }
-      output.write(`${chalk.bold.cyan("Tuned Tensor status")}\n`);
+      output.write(`${chalk.bold.hex("#8B5CF6")("Tuned Tensor status")}\n`);
       output.write(`${formatShellStatus(context, target).join("\n")}\n\n`);
       output.write(`${chalk.bold("Context")}\n`);
       output.write(
