@@ -501,9 +501,9 @@ export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
     : accent.bold("tt");
   const lines = [
     heading,
-    chalk.dim(
-      `${snapshot.mode} · ${snapshot.context.projectName} · ${spec} · model ${activeModelLabel(snapshot)}`,
-    ),
+    `${accent(snapshot.mode)}${chalk.dim(
+      ` · ${snapshot.context.projectName} · ${spec} · model ${activeModelLabel(snapshot)}`,
+    )}`,
     chalk.dim("ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete"),
     "",
     chalk.dim("Ask TT anything. Known commands run directly."),

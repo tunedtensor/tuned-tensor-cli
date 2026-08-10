@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.9.2] - 2026-08-10
+
+### Changed
+
+- **Brand-aligned terminal output** — Table headers, detail labels, status
+  colors, markdown code spans, URLs, and the shell banner now use the Tuned
+  Tensor violet palette (#8B5CF6 / #A78BFA) instead of cyan/blue. The shell
+  banner renders the active workflow mode in the brand accent. No functional
+  changes.
+
 ## [0.9.0] - 2026-08-09
 
 ### Added

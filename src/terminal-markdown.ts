@@ -2,6 +2,8 @@ import chalk from "chalk";
 import { stripVTControlCharacters } from "node:util";
 
 const accent = chalk.hex("#8B5CF6");
+/* Code spans use the lighter brand violet for readability on dark terminals. */
+const code = chalk.hex("#A78BFA");
 
 /** Remove terminal control characters while preserving normal whitespace. */
 function sanitizeTerminalText(text: string): string {
@@ -52,7 +54,7 @@ function renderInlineMarkdown(text: string): string {
     if (text[index] === "`") {
       const close = closingDelimiter(text, "`", index);
       if (close > index + 1) {
-        rendered += chalk.cyan(text.slice(index + 1, close));
+        rendered += code(text.slice(index + 1, close));
         index = close + 1;
         continue;
       }
@@ -80,7 +82,7 @@ function renderInlineMarkdown(text: string): string {
 }
 
 function renderMarkdownLine(line: string, inCodeBlock: boolean): string {
-  if (inCodeBlock) return chalk.cyan(`  ${line}`);
+  if (inCodeBlock) return code(`  ${line}`);
 
   const heading = line.match(/^\s{0,3}#{1,6}\s+(.+)$/);
   if (heading) return chalk.bold(renderInlineMarkdown(heading[1]!));
