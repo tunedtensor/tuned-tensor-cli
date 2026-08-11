@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { writeFile as writeFileAsync } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   approvePreparedAction,
   rejectPreparedAction,
   type AgentMutationApi,
 } from "../agent-approval.js";
 import type { AgentAction } from "../agent-client.js";
+import { prepareLocalSpecProject } from "../local-spec-workspace.js";
 
 const SPEC_ID = "251f122f-dd8e-4894-a0ab-99965e976e29";
 const ACTION_ID = "ed8e4bca-ab1c-4c9f-8b65-9f7997f76670";
@@ -49,6 +54,163 @@ function updateAction(): AgentAction {
 }
 
 describe("deterministic local approvals", () => {
+  it("creates an approved local spec without contacting the cloud API", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "tt-local-spec-approval-"));
+    const client = api();
+    const spec = {
+      name: "Sentiment classifier",
+      base_model: "Qwen/Qwen3.5-2B" as const,
+      system_prompt: "Classify sentiment and return only the label.",
+      guidelines: ["Return positive, neutral, or negative."],
+      constraints: ["Return one lowercase label."],
+      examples: [
+        { input: "Excellent work.", output: "positive" },
+        { input: "This is disappointing.", output: "negative" },
+      ],
+    };
+
+    try {
+      const prepared = await prepareLocalSpecProject(workspace, "sentiment-demo", spec);
+      const action: AgentAction = {
+        id: ACTION_ID,
+        operation: "create_local_spec",
+        title: "Create local spec",
+        summary: "Create ./sentiment-demo/tunedtensor.json.",
+        risk: "Creates local files",
+        status: "proposed",
+        arguments: {
+          directory: "sentiment-demo",
+          spec,
+          workspace_fingerprint: prepared.workspaceFingerprint,
+        },
+      };
+      const transitions: string[] = [];
+
+      await expect(approvePreparedAction(action, client, async (value) => {
+        transitions.push(value.status ?? "");
+      }, { workspaceRoot: workspace })).resolves.toEqual({
+        created: true,
+        directory: "./sentiment-demo",
+        path: "./sentiment-demo/tunedtensor.json",
+      });
+
+      expect(transitions).toEqual(["executing", "completed"]);
+      expect(client.get).not.toHaveBeenCalled();
+      expect(client.post).not.toHaveBeenCalled();
+      expect(client.put).not.toHaveBeenCalled();
+      expect(JSON.parse(readFileSync(join(workspace, "sentiment-demo", "tunedtensor.json"), "utf8")))
+        .toEqual(spec);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("records a known local precondition failure without overwriting the target", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "tt-local-spec-race-"));
+    const client = api();
+    const spec = {
+      name: "Sentiment classifier",
+      base_model: "Qwen/Qwen3.5-2B" as const,
+      system_prompt: "Classify sentiment and return only the label.",
+      guidelines: ["Return positive, neutral, or negative."],
+      examples: [
+        { input: "Excellent work.", output: "positive" },
+        { input: "This is disappointing.", output: "negative" },
+      ],
+    };
+
+    try {
+      const prepared = await prepareLocalSpecProject(workspace, "sentiment-demo", spec);
+      const action: AgentAction = {
+        id: ACTION_ID,
+        operation: "create_local_spec",
+        title: "Create local spec",
+        summary: "Create ./sentiment-demo/tunedtensor.json.",
+        risk: "Creates local files",
+        status: "proposed",
+        arguments: {
+          directory: "sentiment-demo",
+          spec,
+          workspace_fingerprint: prepared.workspaceFingerprint,
+        },
+      };
+      const transitions: string[] = [];
+      mkdirSync(join(workspace, "sentiment-demo"));
+      writeFileSync(join(workspace, "sentiment-demo", "sentinel.txt"), "do not replace");
+
+      await expect(approvePreparedAction(action, client, async (value) => {
+        transitions.push(value.status ?? "");
+      }, { workspaceRoot: workspace })).rejects.toThrow(/refusing to overwrite/i);
+
+      expect(action.status).toBe("failed");
+      expect(transitions).toEqual(["executing", "failed"]);
+      expect(readFileSync(join(workspace, "sentiment-demo", "sentinel.txt"), "utf8"))
+        .toBe("do not replace");
+      expect(client.post).not.toHaveBeenCalled();
+      expect(client.put).not.toHaveBeenCalled();
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("records an unknown outcome without deleting a racing local spec", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "tt-local-spec-collision-"));
+    const client = api();
+    const transitions: string[] = [];
+    const spec = {
+      name: "Sentiment classifier",
+      base_model: "Qwen/Qwen3.5-2B" as const,
+      system_prompt: "Classify sentiment.",
+      guidelines: ["Return one sentiment label."],
+      examples: [
+        { input: "Great.", output: "positive" },
+        { input: "Awful.", output: "negative" },
+      ],
+    };
+    const prepared = await prepareLocalSpecProject(workspace, "sentiment-demo", spec);
+    const action: AgentAction = {
+      id: ACTION_ID,
+      operation: "create_local_spec",
+      title: "Create local spec",
+      summary: "Create ./sentiment-demo/tunedtensor.json.",
+      risk: "Creates local files",
+      status: "proposed",
+      arguments: {
+        directory: "sentiment-demo",
+        spec,
+        workspace_fingerprint: prepared.workspaceFingerprint,
+      },
+    };
+    const specPath = join(workspace, "sentiment-demo", "tunedtensor.json");
+
+    try {
+      await expect(approvePreparedAction(
+        action,
+        client,
+        async (next) => {
+          if (next.status) transitions.push(next.status);
+        },
+        {
+          workspaceRoot: workspace,
+          localFileOperations: {
+            writeFile: async (path, data, options) => {
+              await writeFileAsync(path, "external content", options);
+              await writeFileAsync(path, data, options);
+            },
+          },
+        },
+      )).rejects.toThrow(/outcome is unknown/i);
+
+      expect(action.status).toBe("outcome_unknown");
+      expect(transitions).toEqual(["executing", "outcome_unknown"]);
+      expect(readFileSync(specPath, "utf8")).toBe("external content");
+      expect(client.get).not.toHaveBeenCalled();
+      expect(client.post).not.toHaveBeenCalled();
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("seals execution before one guarded create and cannot repeat", async () => {
     const client = api();
     const action = createAction();

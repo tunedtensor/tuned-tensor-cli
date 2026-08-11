@@ -40,6 +40,11 @@ export interface AgentTurnResult {
   actions: AgentAction[];
 }
 
+export interface AgentTurnContext {
+  mode?: "cloud" | "local";
+  workspaceRoot?: string;
+}
+
 /**
  * UI-facing conversation seam implemented by the local Pi runtime.
  *
@@ -55,11 +60,13 @@ export interface AgentConversationClient {
     prompt: string,
     onEvent: (event: AgentStreamEvent) => void,
     signal?: AbortSignal,
+    context?: AgentTurnContext,
   ): Promise<AgentTurnResult>;
   approveAction(
     actionId: string,
     onEvent: (event: AgentStreamEvent) => void,
     signal?: AbortSignal,
+    context?: AgentTurnContext,
   ): Promise<AgentTurnResult>;
   rejectAction(actionId: string): Promise<void>;
 }

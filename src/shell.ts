@@ -23,7 +23,10 @@ export type { WorkflowMode } from "./command-catalog.js";
 
 export interface ShellAgent {
   busy: boolean;
-  handleLine(input: string): Promise<"continue" | "exit">;
+  handleLine(
+    input: string,
+    context?: { mode: WorkflowMode; workspaceRoot: string },
+  ): Promise<"continue" | "exit">;
   interrupt(): boolean;
 }
 
@@ -728,7 +731,10 @@ export class TunedTensorShellSession {
           if (!this.agent) {
             throw new ShellParseError("The conversational agent is unavailable.");
           }
-          await this.agent.handleLine(trimmed);
+          await this.agent.handleLine(trimmed, {
+            mode: this.mode,
+            workspaceRoot: this.cwd,
+          });
           await this.refreshContext();
           return "continue";
         }
@@ -753,7 +759,10 @@ export class TunedTensorShellSession {
         && this.agent
         && !hasCatalogIntent(input, this.mode)
       ) {
-        await this.agent.handleLine(input);
+        await this.agent.handleLine(input, {
+          mode: this.mode,
+          workspaceRoot: this.cwd,
+        });
         await this.refreshContext();
         return "continue";
       }

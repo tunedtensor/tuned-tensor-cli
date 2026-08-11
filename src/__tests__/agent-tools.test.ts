@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Value } from "typebox/value";
 import {
   boundedToolJson,
@@ -23,8 +26,9 @@ function fakeApi(): AgentToolApi {
   };
 }
 
-function tool(name: string, api: AgentToolApi) {
-  return createTunedTensorTools(api).find((candidate) => candidate.name === name)!;
+function tool(name: string, api: AgentToolApi, workspaceRoot?: string) {
+  return createTunedTensorTools(api, workspaceRoot ? { workspaceRoot } : undefined)
+    .find((candidate) => candidate.name === name)!;
 }
 
 describe("Tuned Tensor agent tools", () => {
@@ -62,6 +66,48 @@ describe("Tuned Tensor agent tools", () => {
     }));
     expect(api).not.toHaveProperty("postMutation");
     expect(result.details).toMatchObject({ operation: "update_spec" });
+  });
+
+  it("prepares a workspace-scoped local spec without calling the cloud API", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "tt-agent-workspace-"));
+    const api = fakeApi();
+    const spec = {
+      name: "Sentiment classifier",
+      description: "Classify short product feedback.",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Classify the sentiment and return only the label.",
+      guidelines: ["Return positive, neutral, or negative."],
+      constraints: ["Return one lowercase label."],
+      examples: [
+        { input: "This is excellent.", output: "positive" },
+        { input: "This is disappointing.", output: "negative" },
+      ],
+    };
+
+    try {
+      const output = await tool("prepare_create_local_spec", api, workspace).execute(
+        "call-local-spec",
+        { directory: "sentiment-demo", spec },
+      );
+
+      expect(api.get).not.toHaveBeenCalled();
+      expect(api.postRead).not.toHaveBeenCalled();
+      expect(api.propose).toHaveBeenCalledWith(expect.objectContaining({
+        operation: "create_local_spec",
+        arguments: {
+          directory: "sentiment-demo",
+          spec,
+          workspace_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+        preview: {
+          directory: "./sentiment-demo",
+          spec_path: "./sentiment-demo/tunedtensor.json",
+        },
+      }));
+      expect(output.details).toMatchObject({ operation: "create_local_spec" });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   it("validates and prepares pipeline plans without direct execution", async () => {

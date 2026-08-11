@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { LocalAgentStore } from "../agent-store.js";
@@ -9,6 +9,7 @@ import {
   type LocalPiAgentOptions,
 } from "../local-agent-client.js";
 import type { AgentToolApi } from "../agent-tools.js";
+import { prepareLocalSpecProject } from "../local-spec-workspace.js";
 
 const TT_SECRET = "tt_never_send_this_to_pi";
 let root: string;
@@ -65,6 +66,7 @@ describe("local Pi conversation client", () => {
     };
     const client = createLocalAgentClient({
       store: new LocalAgentStore(root, { secretValues: [TT_SECRET] }),
+      workspaceRoot: root,
       selection: { provider: "openai", model: "gpt-5.2", thinking: "high" },
       modelRuntime: {
         getProviders: () => [{ id: "openai" }],
@@ -87,10 +89,20 @@ describe("local Pi conversation client", () => {
     expect((await client.listThreads())[0]?.id).toBe(thread.id);
     expect((await client.getThread(thread.id)).thread.title).toBe("Inspect specs");
     expect(created[0]?.messages).toEqual([]);
+    expect(created[0]?.tools.map((candidate) => candidate.name)).toContain(
+      "prepare_create_local_spec",
+    );
+    expect(created[0]?.systemPrompt).toMatch(/workspace-scoped local spec/i);
     expect(JSON.stringify(created[0])).not.toContain(TT_SECRET);
 
+    await client.runTurn(thread.id, "Cloud-only turn", () => {}, undefined, { mode: "cloud" });
+    expect(created[1]?.tools.map((candidate) => candidate.name)).not.toContain(
+      "prepare_create_local_spec",
+    );
+    expect(created[1]?.systemPrompt).toMatch(/no filesystem tools/i);
+
     await client.runTurn(thread.id, "Continue", () => {});
-    expect(created[1]?.messages.length).toBeGreaterThan(0);
+    expect(created[2]?.messages.length).toBeGreaterThan(0);
     await client.runTurn(thread.id, `please use ${TT_SECRET}`, () => {});
     expect(prompts.at(-1)).toBe("please use [REDACTED]");
 
@@ -128,6 +140,7 @@ describe("local Pi conversation client", () => {
     });
     const client = createLocalAgentClient({
       store,
+      workspaceRoot: root,
       selection: { provider: "openai", model: "gpt-5.2", thinking: "high" },
       modelRuntime: {
         getProviders: () => [{ id: "openai" }],
@@ -153,5 +166,84 @@ describe("local Pi conversation client", () => {
       payload: expect.objectContaining({ status: "outcome_unknown" }),
     }));
     expect((await store.load(threadId)).actions[0]?.status).toBe("outcome_unknown");
+  });
+
+  it("executes an approved local spec action against the bound workspace", async () => {
+    const store = new LocalAgentStore(root);
+    const activeWorkspace = join(root, "active-workspace");
+    mkdirSync(activeWorkspace);
+    const threadId = "251f122f-dd8e-4894-a0ab-99965e976e29";
+    const actionId = "ed8e4bca-ab1c-4c9f-8b65-9f7997f76670";
+    const spec = {
+      name: "Sentiment classifier",
+      base_model: "Qwen/Qwen3.5-2B" as const,
+      system_prompt: "Classify sentiment and return only the label.",
+      guidelines: ["Return positive, neutral, or negative."],
+      examples: [
+        { input: "Excellent work.", output: "positive" },
+        { input: "This is disappointing.", output: "negative" },
+      ],
+    };
+    const prepared = await prepareLocalSpecProject(activeWorkspace, "sentiment-demo", spec);
+    await store.save({
+      thread: {
+        id: threadId,
+        title: "Create local spec",
+        status: "active",
+        last_message_at: null,
+        created_at: "2026-08-09T10:00:00.000Z",
+        updated_at: "2026-08-09T10:00:00.000Z",
+      },
+      messages: [],
+      actions: [{
+        id: actionId,
+        operation: "create_local_spec",
+        title: "Create local spec",
+        summary: "Create ./sentiment-demo/tunedtensor.json",
+        risk: "Creates local files",
+        status: "proposed",
+        arguments: {
+          directory: "sentiment-demo",
+          spec,
+          workspace_fingerprint: prepared.workspaceFingerprint,
+        },
+      }],
+    });
+    const mutationApi = { get: vi.fn(), post: vi.fn(), put: vi.fn() };
+    const client = createLocalAgentClient({
+      store,
+      workspaceRoot: root,
+      selection: { provider: "openai", model: "gpt-5.2", thinking: "high" },
+      modelRuntime: {
+        getProviders: () => [{ id: "openai" }],
+        getModels: () => [{ id: "gpt-5.2", provider: "openai", reasoning: true }],
+        getModel: () => ({ id: "gpt-5.2", provider: "openai", reasoning: true }),
+        hasConfiguredAuth: () => true,
+      },
+      createAgent: vi.fn(),
+      toolApi: { get: vi.fn(), postRead: vi.fn(), propose: vi.fn() },
+      mutationApi,
+    });
+
+    await expect(client.approveAction(actionId, () => {}, undefined, {
+      mode: "cloud",
+      workspaceRoot: activeWorkspace,
+    })).rejects.toThrow(/switch to local mode/i);
+
+    await expect(client.approveAction(actionId, () => {}, undefined, {
+      mode: "local",
+      workspaceRoot: activeWorkspace,
+    })).resolves.toMatchObject({
+      status: "completed",
+    });
+    expect(JSON.parse(readFileSync(
+      join(activeWorkspace, "sentiment-demo", "tunedtensor.json"),
+      "utf8",
+    )))
+      .toEqual(spec);
+    expect((await store.load(threadId)).actions[0]?.status).toBe("completed");
+    expect(mutationApi.get).not.toHaveBeenCalled();
+    expect(mutationApi.post).not.toHaveBeenCalled();
+    expect(mutationApi.put).not.toHaveBeenCalled();
   });
 });
