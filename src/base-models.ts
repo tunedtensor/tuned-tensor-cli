@@ -4,6 +4,7 @@ export const SUPPORTED_BASE_MODELS = [
   "Qwen/Qwen3.5-2B",
   "Qwen/Qwen3-VL-2B-Instruct",
   "Qwen/Qwen3.5-4B",
+  "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
   "meta-llama/Llama-3.2-3B-Instruct",
   "microsoft/Phi-4-mini-instruct",
   "ibm-granite/granite-3.3-2b-instruct",
@@ -34,6 +35,10 @@ for (const [alias, model] of [
   ["qwen/qwen3.5-4b", "Qwen/Qwen3.5-4B"],
   ["Qwen/Qwen3.5-4B-Base", "Qwen/Qwen3.5-4B"],
   ["qwen/qwen3.5-4b-base", "Qwen/Qwen3.5-4B"],
+  [
+    "nvidia/nvidia-nemotron-3.5-lightning-30b-a3b-bf16",
+    "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+  ],
   ["meta-llama/llama-3.2-3b-instruct", "meta-llama/Llama-3.2-3B-Instruct"],
   ["meta-llama/Llama-3.2-3B", "meta-llama/Llama-3.2-3B-Instruct"],
   ["meta-llama/llama-3.2-3b", "meta-llama/Llama-3.2-3B-Instruct"],

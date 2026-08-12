@@ -23,6 +23,7 @@ def build_assistant_only_example(
     messages: Any,
     *,
     max_length: int,
+    chat_template_kwargs: Mapping[str, Any] | None = None,
 ) -> dict[str, list[int]]:
     """Tokenize one chat row while computing loss only on the final assistant turn.
 
@@ -52,12 +53,14 @@ def build_assistant_only_example(
         raise ValueError("the final assistant message must contain non-empty text")
 
     try:
+        template_kwargs = dict(chat_template_kwargs or {})
         prompt_ids = _token_ids(
             tokenizer.apply_chat_template(
                 messages[:-1],
                 tokenize=True,
                 add_generation_prompt=True,
                 return_dict=False,
+                **template_kwargs,
             ),
             "prompt chat template",
         )
@@ -67,19 +70,20 @@ def build_assistant_only_example(
                 tokenize=True,
                 add_generation_prompt=False,
                 return_dict=False,
+                **template_kwargs,
             ),
             "full chat template",
         )
     except Exception as exc:
-        raise ValueError(f"Qwen chat-template rendering failed: {exc}") from exc
+        raise ValueError(f"Model chat-template rendering failed: {exc}") from exc
 
     if full_ids[: len(prompt_ids)] != prompt_ids:
         raise ValueError(
-            "Qwen chat-template output is not prefix-aligned; refusing to guess the assistant loss boundary"
+            "Model chat-template output is not prefix-aligned; refusing to guess the assistant loss boundary"
         )
     completion_ids = full_ids[len(prompt_ids) :]
     if not completion_ids:
-        raise ValueError("Qwen chat template produced no assistant completion tokens")
+        raise ValueError("Model chat template produced no assistant completion tokens")
     if len(completion_ids) >= max_length:
         raise ValueError(
             f"assistant completion requires {len(completion_ids)} tokens, but max_length={max_length}; "

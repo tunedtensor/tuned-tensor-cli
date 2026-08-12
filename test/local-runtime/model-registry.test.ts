@@ -11,8 +11,11 @@ import {
   TRAINING_MODELS,
 } from "../../src/local-runtime/model-registry.js";
 
-test("registry certifies exactly the native text-only Qwen training path", () => {
-  assert.deepEqual(TRAINING_MODELS.map((model) => model.id), ["Qwen/Qwen3.5-2B"]);
+test("registry certifies the native text-only Qwen and Nemotron training paths", () => {
+  assert.deepEqual(TRAINING_MODELS.map((model) => model.id), [
+    "Qwen/Qwen3.5-2B",
+    "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+  ]);
   assert.equal(canonicalizeTrainingModel(" qwen/QWEN3.5-2b "), "Qwen/Qwen3.5-2B");
   assert.deepEqual(resolveTrainingModel("Qwen/Qwen3.5-2B"), {
     id: "Qwen/Qwen3.5-2B",
@@ -24,6 +27,25 @@ test("registry certifies exactly the native text-only Qwen training path", () =>
     defaultLoraAlpha: 32,
     defaultLoraDropout: 0.05,
     defaultMaxSeqLength: 2048,
+    loraTargetModules: "all-linear",
+    gradientCheckpointing: false,
+  });
+  assert.equal(
+    canonicalizeTrainingModel(" NVIDIA/nvidia-nemotron-3.5-lightning-30b-a3b-bf16 "),
+    "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+  );
+  assert.deepEqual(resolveTrainingModel("nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"), {
+    id: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+    family: "nemotron_h",
+    defaultLearningRate: 0.00001,
+    defaultPerDeviceBatchSize: 1,
+    defaultGradientAccumulationSteps: 8,
+    defaultLoraRank: 16,
+    defaultLoraAlpha: 32,
+    defaultLoraDropout: 0.05,
+    defaultMaxSeqLength: 1024,
+    loraTargetModules: ["q_proj", "k_proj", "v_proj", "o_proj", "in_proj", "out_proj"],
+    gradientCheckpointing: true,
   });
 });
 
@@ -48,6 +70,28 @@ test("certified config rejects a larger same-family Qwen snapshot", () => {
       text_config: { ...config.text_config, hidden_size: 2560 },
     }),
     /certified Qwen\/Qwen3\.5-2B architecture/,
+  );
+});
+
+test("certified config accepts only the released Nemotron 3.5 Lightning BF16 architecture", () => {
+  const config = {
+    architectures: ["NemotronHForCausalLM"],
+    model_type: "nemotron_h",
+    hidden_size: 2688,
+    num_hidden_layers: 52,
+    num_attention_heads: 32,
+    num_key_value_heads: 2,
+    intermediate_size: 1856,
+    vocab_size: 131072,
+    n_routed_experts: 128,
+    num_experts_per_tok: 6,
+    num_nextn_predict_layers: 1,
+    max_position_embeddings: 262144,
+  };
+  assert.doesNotThrow(() => assertCertifiedBaseModelConfig(config));
+  assert.throws(
+    () => assertCertifiedBaseModelConfig({ ...config, n_routed_experts: 64 }),
+    /Nemotron-3\.5-Lightning-30B-A3B-BF16 architecture/,
   );
 });
 

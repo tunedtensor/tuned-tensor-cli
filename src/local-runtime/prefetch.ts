@@ -70,7 +70,10 @@ function transformersWeightName(name: string): boolean {
     || /^pytorch_model.*\.bin$/.test(lower);
 }
 
-export async function verifyLocalBaseModel(path: string): Promise<{ fileCount: number; sizeBytes: number }> {
+export async function verifyLocalBaseModel(
+  path: string,
+  expectedModelId?: string,
+): Promise<{ fileCount: number; sizeBytes: number }> {
   const root = await lstat(path).catch(() => null);
   if (!root) throw new Error(`paths.baseModel is set to ${path}, but that path does not exist.`);
   if (root.isSymbolicLink()) {
@@ -109,7 +112,11 @@ export async function verifyLocalBaseModel(path: string): Promise<{ fileCount: n
   if (!await required("config.json")) throw new Error(`Local base-model directory is missing config.json: ${path}`);
   try {
     const config = JSON.parse(await readFile(join(path, "config.json"), "utf8")) as unknown;
-    assertCertifiedBaseModelConfig(config, `Local base-model config ${join(path, "config.json")}`);
+    assertCertifiedBaseModelConfig(
+      config,
+      `Local base-model config ${join(path, "config.json")}`,
+      expectedModelId,
+    );
   } catch (error) {
     throw new Error(`Local base-model directory has an invalid or unsupported config.json: ${path}`, { cause: error });
   }
@@ -151,7 +158,10 @@ export async function prefetchBaseModel(args: {
 
   if (args.config.paths.baseModel) {
     const localPath = resolve(args.config.paths.baseModel);
-    const verified = await verifyLocalBaseModel(localPath);
+    const verified = await verifyLocalBaseModel(
+      localPath,
+      args.request.spec_snapshot.base_model,
+    );
     return {
       ok: true,
       status: args.localOnly ? "completed" : "skipped",

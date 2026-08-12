@@ -524,7 +524,12 @@ async function verifyStoredModel(model: LocalModelRecord): Promise<{
     typeof manifest.model.base_model_artifact_uri === "string"
     && typeof manifest.model.base_model_fingerprint === "string"
   ) {
-    const actualBaseFingerprint = await fingerprintLocalBaseModel(manifest.model.base_model_artifact_uri);
+    const actualBaseFingerprint = await fingerprintLocalBaseModel(
+      manifest.model.base_model_artifact_uri,
+      typeof manifest.model.base_model === "string"
+        ? manifest.model.base_model
+        : undefined,
+    );
     if (actualBaseFingerprint !== manifest.model.base_model_fingerprint) {
       throw new Error("Recorded local base-model content no longer matches the model artifact contract.");
     }
@@ -611,7 +616,12 @@ async function verifyModelArtifactPath(input: string): Promise<{
     typeof manifest.model.base_model_artifact_uri === "string"
     && typeof manifest.model.base_model_fingerprint === "string"
   ) {
-    const actualBaseFingerprint = await fingerprintLocalBaseModel(manifest.model.base_model_artifact_uri);
+    const actualBaseFingerprint = await fingerprintLocalBaseModel(
+      manifest.model.base_model_artifact_uri,
+      typeof manifest.model.base_model === "string"
+        ? manifest.model.base_model
+        : undefined,
+    );
     if (actualBaseFingerprint !== manifest.model.base_model_fingerprint) {
       throw new Error("Recorded local base-model content no longer matches the model artifact contract.");
     }

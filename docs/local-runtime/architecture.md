@@ -3,7 +3,9 @@
 This repository is the maintenance-mode local runtime behind the unified
 `tt local` workflow. The standalone `tt-local` product surface is deprecated;
 see [the deprecation note](../DEPRECATION.md). Its supported runtime boundary
-is text SFT of `Qwen/Qwen3.5-2B` into a LoRA adapter on CUDA.
+is text SFT of a registry-certified Transformers causal LM into a LoRA adapter
+on CUDA. Certified checkpoints are `Qwen/Qwen3.5-2B` and
+`nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16`.
 
 ## Workflow
 
@@ -40,7 +42,7 @@ The bundled Python project owns four small operations:
 
 - `prefetch.py`: download and verify the pinned Hugging Face snapshot;
 - `evaluate.py`: generate predictions without receiving reference answers;
-- `train.py`: perform CUDA-only Qwen LoRA SFT;
+- `train.py`: perform CUDA-only, model-specific LoRA SFT;
 - `serve.py`: load the base model and verified adapter for inference.
 
 Training uses assistant-only loss. Prompt tokens have label `-100`, and

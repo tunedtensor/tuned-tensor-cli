@@ -4,8 +4,9 @@
 > `tt-local` is deprecated. Install `@tuned-tensor/cli` and use `tt local`.
 > Existing projects still work.
 
-DGX Spark is the reference host for the local workflow's first supported path:
-`Qwen/Qwen3.5-2B` text SFT with a LoRA adapter.
+DGX Spark is the reference host for local text SFT with LoRA adapters. TT Local
+certifies `Qwen/Qwen3.5-2B` and the larger
+`nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` checkpoint.
 
 ## Check the host
 
@@ -27,6 +28,23 @@ mkdir -p ~/tuned-tensor-runs/support-adapter
 cd ~/tuned-tensor-runs/support-adapter
 tt local init --name "Support Adapter" --model Qwen/Qwen3.5-2B --profile spark
 ```
+
+For a Nemotron execution worker:
+
+```bash
+mkdir -p ~/tuned-tensor-runs/nemotron-worker
+cd ~/tuned-tensor-runs/nemotron-worker
+tt local init \
+  --name "Nemotron Worker" \
+  --model nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 \
+  --profile spark
+```
+
+Nemotron uses the BF16 customization checkpoint rather than the NVFP4
+deployment checkpoint. Its defaults enable activation checkpointing, cap the
+sequence length at 1,024 tokens, and apply LoRA only to shared attention and
+Mamba projections. The base weights require about 66 GB before cache and
+training overhead, so this path is not intended for ordinary consumer GPUs.
 
 Edit both generated examples in `tunedtensor.json`. For a meaningful run,
 replace them with a larger, representative dataset and a separate validation

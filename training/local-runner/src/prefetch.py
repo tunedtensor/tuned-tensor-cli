@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from model_contract import (
-    CERTIFIED_BASE_MODEL,
+    assert_certified_base_model,
     assert_certified_model_config,
 )
 
@@ -144,10 +144,7 @@ def main() -> None:
 
     payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
     base_model = str(payload["base_model"])
-    if base_model != CERTIFIED_BASE_MODEL:
-        raise ValueError(
-            f"The bundled trainer currently certifies only {CERTIFIED_BASE_MODEL}; got {base_model!r}"
-        )
+    assert_certified_base_model(base_model, "Prefetch base model")
     cache_dir = payload.get("model_cache")
     configure_hugging_face_cache(cache_dir)
 

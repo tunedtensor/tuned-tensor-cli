@@ -571,7 +571,10 @@ async function resolveBaseModelRevision(
 }
 
 /** Hash a local base model while permitting Hugging Face snapshot file links. */
-export async function fingerprintLocalBaseModel(uri: string): Promise<string> {
+export async function fingerprintLocalBaseModel(
+  uri: string,
+  expectedModelId?: string,
+): Promise<string> {
   const root = localModelArtifactPath(uri);
   const rootMetadata = await lstat(root);
   if (rootMetadata.isSymbolicLink()) {
@@ -580,7 +583,7 @@ export async function fingerprintLocalBaseModel(uri: string): Promise<string> {
   if (!rootMetadata.isDirectory()) {
     throw new Error(`Local base model must be a Hugging Face snapshot directory: ${root}`);
   }
-  await verifyLocalBaseModel(root);
+  await verifyLocalBaseModel(root, expectedModelId);
   const files: Array<{ path: string; size_bytes: number; sha256: string }> = [];
   const visit = async (directory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -1061,7 +1064,10 @@ async function computePreparedRun(args: {
   const runtimeFingerprintValue = await runtimeFingerprint();
   const baseModelRevision = await resolveBaseModelRevision(request, config);
   const baseModelFingerprint = config.paths.baseModel
-    ? await fingerprintLocalBaseModel(config.paths.baseModel)
+    ? await fingerprintLocalBaseModel(
+      config.paths.baseModel,
+      request.spec_snapshot.base_model,
+    )
     : undefined;
   const metadata: StageMetadata = {
     run_id: request.run_id,

@@ -34,6 +34,10 @@ export function buildTrainingHyperparameters(
     lora_alpha: String(hyper.lora_alpha ?? model.defaultLoraAlpha),
     lora_dropout: String(hyper.lora_dropout ?? model.defaultLoraDropout),
     max_seq_length: String(hyper.max_seq_length ?? model.defaultMaxSeqLength),
+    lora_target_modules: Array.isArray(model.loraTargetModules)
+      ? model.loraTargetModules.join(",")
+      : model.loraTargetModules,
+    gradient_checkpointing: String(model.gradientCheckpointing),
   };
 }
 

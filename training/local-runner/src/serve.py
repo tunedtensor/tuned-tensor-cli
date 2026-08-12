@@ -20,6 +20,7 @@ from evaluate import (
     resolve_adapter_path,
     sampling_kwargs,
 )
+from model_contract import chat_template_kwargs
 
 
 MODEL_ARTIFACT = os.environ.get("TT_MODEL_ARTIFACT")
@@ -73,7 +74,7 @@ def text_content(content: Any) -> str:
     parts: list[str] = []
     for part in content:
         if not isinstance(part, dict) or part.get("type") != "text":
-            raise ValueError("The bundled Qwen model server accepts text content only.")
+            raise ValueError("The bundled model server accepts text content only.")
         text = part.get("text")
         if not isinstance(text, str):
             raise ValueError("Every text content part must contain a string text field.")
@@ -104,7 +105,7 @@ def normalize_messages(raw_messages: Any) -> list[dict[str, str]]:
         raise ValueError("Request must contain at least one non-system message.")
     messages: list[dict[str, str]] = []
     if system_parts:
-        # Qwen permits one leading system message. Merge the invariant owner
+        # The certified chat templates accept one leading system message. Merge the invariant owner
         # prompt and any client context instead of triggering an implicit
         # template fallback with duplicate system turns.
         messages.append({"role": "system", "content": "\n\n".join(system_parts)})
@@ -120,9 +121,10 @@ def generate_text(messages: list[dict[str, str]], generation: dict[str, Any]) ->
             messages,
             tokenize=False,
             add_generation_prompt=True,
+            **chat_template_kwargs(BASE_MODEL),
         )
     except Exception as exc:
-        raise ValueError(f"Qwen chat-template rendering failed: {exc}") from exc
+        raise ValueError(f"Model chat-template rendering failed: {exc}") from exc
     inputs = TOKENIZER(prompt, return_tensors="pt")
     if int(inputs["input_ids"].shape[-1]) > MAX_PROMPT_TOKENS:
         raise ValueError(f"Prompt exceeds the {MAX_PROMPT_TOKENS}-token limit.")

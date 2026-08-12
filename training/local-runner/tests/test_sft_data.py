@@ -53,6 +53,34 @@ class BrokenTemplateTokenizer(FakeQwenTokenizer):
         raise RuntimeError("template mismatch")
 
 
+class NemotronStyleTokenizer(FakeQwenTokenizer):
+    THINK_CLOSE_TOKEN = 107
+
+    def apply_chat_template(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tokenize: bool,
+        add_generation_prompt: bool,
+        return_dict: bool,
+        **kwargs: Any,
+    ) -> list[int]:
+        tokens = super().apply_chat_template(
+            messages,
+            tokenize=tokenize,
+            add_generation_prompt=add_generation_prompt,
+            return_dict=return_dict,
+        )
+        if kwargs.get("enable_thinking") is False:
+            assistant_marker = self.ROLE_TOKENS["assistant"]
+            generation_marker = self.GENERATION_TOKEN
+            for index in range(len(tokens) - 1):
+                if tokens[index : index + 2] == [assistant_marker, generation_marker]:
+                    tokens.insert(index + 2, self.THINK_CLOSE_TOKEN)
+                    break
+        return tokens
+
+
 class AssistantOnlyExampleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tokenizer = FakeQwenTokenizer()
@@ -86,6 +114,25 @@ class AssistantOnlyExampleTests(unittest.TestCase):
         self.assertEqual(example["labels"][: len(prompt)], [IGNORE_INDEX] * len(prompt))
         self.assertEqual(example["labels"][len(prompt) :], completion)
         self.assertEqual(example["attention_mask"], [1] * len(full))
+
+    def test_passes_non_thinking_chat_template_kwargs_for_prefix_aligned_nemotron_sft(self) -> None:
+        tokenizer = NemotronStyleTokenizer()
+        example = build_assistant_only_example(
+            tokenizer,
+            self.messages,
+            max_length=128,
+            chat_template_kwargs={"enable_thinking": False},
+        )
+        prompt = tokenizer.apply_chat_template(
+            self.messages[:-1],
+            tokenize=True,
+            add_generation_prompt=True,
+            return_dict=False,
+            enable_thinking=False,
+        )
+
+        self.assertEqual(example["labels"][: len(prompt)], [IGNORE_INDEX] * len(prompt))
+        self.assertNotEqual(example["labels"][len(prompt) :], [])
 
     def test_truncates_old_prompt_tokens_without_dropping_any_answer_tokens(self) -> None:
         long_messages = [
