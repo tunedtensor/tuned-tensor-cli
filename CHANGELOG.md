@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0] - 2026-08-12
+
+### Added
+
+- Before opening the interactive `tt` shell, check npm briefly for a newer
+  stable CLI release and print the exact upgrade command when one is available.
+  Registry failures and timeouts stay silent and never block launch.
+
 ## [0.10.0] - 2026-08-12
 
 ### Added
