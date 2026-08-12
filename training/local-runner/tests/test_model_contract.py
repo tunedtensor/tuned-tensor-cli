@@ -9,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from model_contract import (
     NEMOTRON_BASE_MODEL,
+    NEMOTRON_BASE_MODEL_REVISION,
+    assert_certified_base_model_revision,
     assert_certified_model_config,
     chat_template_kwargs,
     parse_lora_target_modules,
@@ -77,6 +79,17 @@ class ModelContractTests(unittest.TestCase):
     def test_nemotron_uses_non_thinking_chat_rendering_for_task_specialization(self) -> None:
         self.assertEqual(chat_template_kwargs(NEMOTRON_BASE_MODEL), {"enable_thinking": False})
         self.assertEqual(chat_template_kwargs("Qwen/Qwen3.5-2B"), {})
+
+    def test_nemotron_pins_and_asserts_the_certified_revision(self) -> None:
+        assert_certified_base_model_revision(NEMOTRON_BASE_MODEL, NEMOTRON_BASE_MODEL_REVISION)
+        with self.assertRaisesRegex(ValueError, "base model revision is required"):
+            assert_certified_base_model_revision(NEMOTRON_BASE_MODEL, None)
+        with self.assertRaisesRegex(ValueError, NEMOTRON_BASE_MODEL_REVISION):
+            assert_certified_base_model_revision(NEMOTRON_BASE_MODEL, "deadbeef" * 5)
+
+    def test_revision_assertion_does_not_pin_the_qwen_model(self) -> None:
+        assert_certified_base_model_revision("Qwen/Qwen3.5-2B", None)
+        assert_certified_base_model_revision("Qwen/Qwen3.5-2B", "any-revision")
 
 
 if __name__ == "__main__":

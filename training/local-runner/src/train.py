@@ -17,6 +17,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingA
 from model_contract import (
     CERTIFIED_BASE_MODEL,
     assert_certified_base_model,
+    assert_certified_base_model_revision,
     assert_certified_model_config,
     chat_template_kwargs,
     parse_lora_target_modules,
@@ -71,6 +72,13 @@ def model_revision_kwargs(model_source: str) -> dict[str, str]:
 def assert_certified_request() -> None:
     requested_model = hp("base_model", CERTIFIED_BASE_MODEL)
     assert_certified_base_model(str(requested_model), "Training base model")
+    local_snapshot = BASE_MODEL_DIR.is_dir() and any(BASE_MODEL_DIR.iterdir())
+    if not local_snapshot:
+        assert_certified_base_model_revision(
+            str(requested_model),
+            hp("base_model_revision"),
+            "Training base model revision",
+        )
     loader = hp("model_loader", "causal_lm")
     if loader != "causal_lm":
         raise ValueError(f"The bundled trainer is text-only and requires model_loader=causal_lm; got {loader!r}")

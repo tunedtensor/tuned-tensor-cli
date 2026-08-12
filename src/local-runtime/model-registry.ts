@@ -3,9 +3,20 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { verifyTarGzipArchive } from "./artifacts.js";
 
+/**
+ * Immutable Hugging Face revision reviewed and certified for Nemotron
+ * 3.5 Lightning 30B-A3B-BF16 local fine-tuning. Prefetch, training,
+ * evaluation, and serving all default to this revision unless the caller
+ * explicitly overrides it.
+ */
+export const NEMOTRON_BF16_REVISION =
+  "ce38b6ab8b252b4b8ee7165b4605e93191cafd73";
+
 export interface TrainingModel {
   id: string;
   family: string;
+  /** Immutable Hugging Face revision this training path is bound to, if any. */
+  defaultRevision?: string;
   defaultLearningRate: number;
   defaultPerDeviceBatchSize: number;
   defaultGradientAccumulationSteps: number;
@@ -34,6 +45,7 @@ export const TRAINING_MODELS: TrainingModel[] = [
   {
     id: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
     family: "nemotron_h",
+    defaultRevision: NEMOTRON_BF16_REVISION,
     defaultLearningRate: 0.00001,
     defaultPerDeviceBatchSize: 1,
     defaultGradientAccumulationSteps: 8,
@@ -63,6 +75,11 @@ export function resolveTrainingModel(modelId: string): TrainingModel {
 
 export function canonicalizeTrainingModel(modelId: string): string {
   return resolveTrainingModel(modelId).id;
+}
+
+/** Resolve the immutable revision a training model is bound to, if any. */
+export function defaultBaseModelRevision(modelId: string): string | undefined {
+  return resolveTrainingModel(modelId).defaultRevision;
 }
 
 const CERTIFIED_QWEN_TEXT_CONFIG = {

@@ -8,6 +8,7 @@ import {
 import { fileUri, writeJson } from "./artifacts.js";
 import {
   assertCertifiedBaseModelConfig,
+  defaultBaseModelRevision,
   resolveTrainingModel,
 } from "./model-registry.js";
 import {
@@ -55,7 +56,9 @@ export function buildModelPrefetchPayload(
     base_model: model.id,
     ...(request.hyperparameters.base_model_revision
       ? { revision: request.hyperparameters.base_model_revision }
-      : {}),
+      : defaultBaseModelRevision(model.id)
+        ? { revision: defaultBaseModelRevision(model.id) }
+        : {}),
     ...(config.paths.modelCache ? { model_cache: resolve(config.paths.modelCache) } : {}),
   };
 }

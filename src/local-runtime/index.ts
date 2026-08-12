@@ -15,7 +15,7 @@ import {
   validateLocalFineTuneInput,
 } from "./orchestrator.js";
 import { runDoctor } from "./doctor.js";
-import { assertUsableModelArtifact } from "./model-registry.js";
+import { assertUsableModelArtifact, defaultBaseModelRevision } from "./model-registry.js";
 import {
   buildLocalBaseModelServerLaunch,
   buildLocalModelServerLaunch,
@@ -798,7 +798,7 @@ async function serveBaseModelFromCli(args: {
       systemPrompt: explicitSpecPath && !hasFlag(args.argv, "--no-spec-prompt")
         ? buildSystemMessage(spec!)
         : undefined,
-      baseModelRevision: spec?.hyperparameters?.base_model_revision,
+      baseModelRevision: spec?.hyperparameters?.base_model_revision ?? defaultBaseModelRevision(baseModel),
     },
   });
   if (hasFlag(args.argv, "--print-command")) {

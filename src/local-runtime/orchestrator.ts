@@ -50,7 +50,7 @@ import {
   splitSpecExamples,
 } from "./evaluation.js";
 import { launchProcessTraining } from "./process-training.js";
-import { assertUsableModelArtifact, localModelArtifactPath } from "./model-registry.js";
+import { assertUsableModelArtifact, defaultBaseModelRevision, localModelArtifactPath } from "./model-registry.js";
 import { ProcessCancelledError } from "./process-runner.js";
 import type { LocalRunReporter } from "./run-reporter.js";
 import { localRuntimePackageRoot } from "./package-root.js";
@@ -558,16 +558,19 @@ async function resolveBaseModelRevision(
     const match = resolve(config.paths.baseModel).match(/[\\/]snapshots[\\/]([^\\/]+)(?:[\\/]|$)/);
     if (match?.[1]) return match[1];
   }
-  if (!request.spec_snapshot.base_model.includes("/")) return undefined;
+  if (!request.spec_snapshot.base_model.includes("/")) {
+    return defaultBaseModelRevision(request.spec_snapshot.base_model);
+  }
   const repository = `models--${request.spec_snapshot.base_model.replaceAll("/", "--")}`;
   const cacheEnvironment = withHuggingFaceCacheEnvironment(process.env, config.paths.modelCache);
   const refPath = resolve(cacheEnvironment.HF_HUB_CACHE!, repository, "refs", "main");
   try {
     const revision = (await readFile(refPath, "utf8")).trim();
-    return revision || undefined;
+    if (revision) return revision;
   } catch {
-    return undefined;
+    // Fall through to the registered immutable revision, if any.
   }
+  return defaultBaseModelRevision(request.spec_snapshot.base_model);
 }
 
 /** Hash a local base model while permitting Hugging Face snapshot file links. */

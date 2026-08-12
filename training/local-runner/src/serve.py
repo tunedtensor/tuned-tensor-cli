@@ -20,7 +20,7 @@ from evaluate import (
     resolve_adapter_path,
     sampling_kwargs,
 )
-from model_contract import chat_template_kwargs
+from model_contract import assert_certified_base_model_revision, chat_template_kwargs
 
 
 MODEL_ARTIFACT = os.environ.get("TT_MODEL_ARTIFACT")
@@ -45,6 +45,8 @@ MAX_CONCURRENT_REQUESTS = int(os.environ.get("TT_MAX_CONCURRENT_REQUESTS", "1"))
 
 if MODEL_LOADER != "causal_lm":
     raise ValueError("The bundled model server is text-only and requires TT_MODEL_LOADER=causal_lm")
+if not Path(BASE_MODEL).exists():
+    assert_certified_base_model_revision(BASE_MODEL, BASE_MODEL_REVISION, "Serving base model revision")
 configure_hugging_face_cache(os.environ.get("HF_HOME"))
 import_runtime_dependencies()
 TEMP_DIR = TemporaryDirectory(prefix="tt-local-serve-")

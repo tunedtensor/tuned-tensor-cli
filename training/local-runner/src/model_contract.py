@@ -5,6 +5,11 @@ from typing import Any
 
 CERTIFIED_BASE_MODEL = "Qwen/Qwen3.5-2B"
 NEMOTRON_BASE_MODEL = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
+# Immutable Hugging Face revision reviewed for Nemotron local fine-tuning.
+# If there is an explicit path to the untarred/snapshot base model on disk we
+# cannot verify the revision from configuration alone; callers are encouraged
+# to pin it via TT_BASE_MODEL_REVISION / base_model_revision.
+NEMOTRON_BASE_MODEL_REVISION = "ce38b6ab8b252b4b8ee7165b4605e93191cafd73"
 CERTIFIED_BASE_MODELS = (CERTIFIED_BASE_MODEL, NEMOTRON_BASE_MODEL)
 CERTIFIED_QWEN_TEXT_CONFIG = {
     "model_type": "qwen3_5_text",
@@ -80,6 +85,22 @@ def assert_certified_base_model(model_id: str, label: str = "base model") -> Non
     if model_id not in CERTIFIED_BASE_MODELS:
         supported = ", ".join(CERTIFIED_BASE_MODELS)
         raise ValueError(f"{label} must be one of {supported}; got {model_id!r}")
+
+
+def assert_certified_base_model_revision(base_model: str, revision: str | None, label: str = "base model revision") -> None:
+    """Require the certified immutable revision for the Nemotron training model.
+
+    Qwen remains unpinned for backward compatibility; Nemotron is bound to the
+    reviewed Hugging Face revision unless a local snapshot is used directly.
+    """
+    if base_model != NEMOTRON_BASE_MODEL:
+        return
+    if revision is None:
+        raise ValueError(f"{label} is required for {NEMOTRON_BASE_MODEL}")
+    if revision != NEMOTRON_BASE_MODEL_REVISION:
+        raise ValueError(
+            f"{label} must be {NEMOTRON_BASE_MODEL_REVISION} for {NEMOTRON_BASE_MODEL}; got {revision!r}"
+        )
 
 
 def parse_lora_target_modules(value: str | None) -> str | list[str]:

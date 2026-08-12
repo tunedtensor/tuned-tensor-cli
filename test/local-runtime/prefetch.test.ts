@@ -69,6 +69,37 @@ test("prefetch payload contains only the certified model, revision, and shared c
   });
 });
 
+test("Nemotron prefetch defaults to the reviewed immutable revision", () => {
+  const nemotronRequest = fineTuneRunRequestSchema.parse({
+    ...request,
+    spec_snapshot: {
+      name: "Prefetch Nemotron",
+      system_prompt: "Return labels.",
+      base_model: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+      examples: [{ input: "hello", output: "greeting" }],
+    },
+  });
+  assert.deepEqual(buildModelPrefetchPayload(
+    nemotronRequest,
+    localRunnerConfigSchema.parse({ paths: {} }),
+  ), {
+    base_model: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+    revision: "ce38b6ab8b252b4b8ee7165b4605e93191cafd73",
+  });
+  // An explicit revision wins over the registered default.
+  const explicit = fineTuneRunRequestSchema.parse({
+    ...nemotronRequest,
+    hyperparameters: {
+      ...nemotronRequest.hyperparameters,
+      base_model_revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    },
+  });
+  assert.equal(
+    buildModelPrefetchPayload(explicit, localRunnerConfigSchema.parse({ paths: {} })).revision,
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  );
+});
+
 test("modelCache defines one Hugging Face home and removes legacy overrides", () => {
   const configured = join(tmpdir(), "tt-local-huggingface-home");
   const layout = resolveHuggingFaceCacheLayout(configured);

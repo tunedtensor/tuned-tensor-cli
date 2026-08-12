@@ -12,6 +12,7 @@ from typing import Any
 from model_contract import (
     CERTIFIED_BASE_MODELS,
     CERTIFIED_BASE_MODEL,
+    assert_certified_base_model_revision,
     assert_certified_model_config,
     chat_template_kwargs,
 )
@@ -148,9 +149,11 @@ def _assert_certified_model_source(base_model: str) -> None:
 def load_text_model(payload: dict[str, Any], adapter_path: str | None):
     base_model = str(payload["base_model"])
     _assert_certified_model_source(base_model)
+    revision = payload.get("base_model_revision")
+    if not Path(base_model).exists():
+        assert_certified_base_model_revision(base_model, revision, "Evaluation base model revision")
     device = resolve_device(str(payload.get("device", "cuda")))
     token = os.getenv("HF_TOKEN")
-    revision = payload.get("base_model_revision")
     source_kwargs: dict[str, Any] = {
         "trust_remote_code": False,
         "token": token,
