@@ -1,6 +1,6 @@
 {
   "name": "@tuned-tensor/cli",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "description": "Local Pi agent and unified cloud/local CLI for Tuned Tensor workflows",
   "type": "module",
   "bin": {
