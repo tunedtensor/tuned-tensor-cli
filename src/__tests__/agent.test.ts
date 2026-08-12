@@ -127,6 +127,46 @@ describe("TunedTensorAgentSession", () => {
     expect(stderr).toEqual([]);
   });
 
+  it("keeps a prepared local action pending until it is approved in local mode", async () => {
+    const client = fakeClient();
+    client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
+      const action = {
+        id: "local-action-123",
+        title: "Create local Tuned Tensor spec",
+        summary: "Create ./support/tunedtensor.json.",
+        risk: "medium",
+        operation: "create_local_spec",
+        arguments: {},
+      };
+      onEvent({ type: "approval_required", payload: { action } });
+      onEvent({ type: "final", payload: { status: "waiting_for_approval" } });
+      return {
+        threadId: thread.id,
+        turnId: "turn-local",
+        status: "waiting_for_approval",
+        response: "",
+        actions: [action],
+      };
+    });
+    const { io, stderr } = testIO();
+    const session = new TunedTensorAgentSession({ client, io });
+    const localContext = { mode: "local" as const, workspaceRoot: "/tmp/workspace" };
+
+    await session.handleLine("create a local support spec", localContext);
+    await session.handleLine("/approve", {
+      mode: "cloud",
+      workspaceRoot: "/tmp/workspace",
+    });
+
+    expect(client.approveAction).not.toHaveBeenCalled();
+    expect(session.snapshot().pendingActions).toHaveLength(1);
+    expect(stderr.join(" ")).toMatch(/switch to local mode/i);
+
+    await session.handleLine("/approve", localContext);
+    expect(client.approveAction).toHaveBeenCalledTimes(1);
+    expect(session.snapshot().pendingActions).toHaveLength(0);
+  });
+
   it("removes outcome-unknown actions and shows non-retryable recovery guidance", async () => {
     const client = fakeClient();
     client.approveAction = vi.fn(async (_actionId, onEvent) => {

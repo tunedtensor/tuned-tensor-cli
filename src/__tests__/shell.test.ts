@@ -371,7 +371,10 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
     }));
     const agent = {
       busy: false,
-      handleLine: vi.fn(async (_input: string) => "continue" as const),
+      handleLine: vi.fn(async (
+        _input: string,
+        _context?: { mode: "cloud" | "local"; workspaceRoot: string },
+      ) => "continue" as const),
       interrupt: vi.fn(() => false),
     };
     const writeError = vi.fn();
@@ -404,6 +407,13 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
       "/approve action-123",
       "Compare accuracy > latency & cost; summarize it.",
       "status of my latest run",
+    ]);
+    expect(agent.handleLine.mock.calls.map((call) => call[1])).toEqual([
+      { mode: "cloud", workspaceRoot: "/tmp/cloud-project" },
+      { mode: "cloud", workspaceRoot: "/tmp/cloud-project" },
+      { mode: "cloud", workspaceRoot: "/tmp/cloud-project" },
+      { mode: "cloud", workspaceRoot: "/tmp/cloud-project" },
+      { mode: "cloud", workspaceRoot: "/tmp/cloud-project" },
     ]);
     expect(run.mock.calls.map((call) => call[0])).toEqual([
       {

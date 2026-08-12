@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.10.0] - 2026-08-12
+
+### Added
+
+- **Approval-gated local spec scaffolding** — In local mode, the `tt` assistant
+  can prepare creation of one new workspace folder containing a canonical,
+  semantically validated `tunedtensor.json`. Filesystem mutation remains behind
+  explicit `/approve`, requires no cloud authentication, and does not expose
+  general shell or filesystem access.
+
+### Security
+
+- **Workspace-confined creation** — Bind prepared actions to the active workspace
+  identity, reject absolute, nested, traversal, symlink, existing, and changed
+  destinations, and use exclusive no-overwrite writes through stable Linux
+  directory handles. Cloud mode remains filesystem-free, while ambiguous write
+  outcomes are sealed for manual inspection instead of deleting paths that may
+  belong to another writer. Non-Linux approval fails before mutation.
+
 ## [0.9.2] - 2026-08-10
 
 ### Changed

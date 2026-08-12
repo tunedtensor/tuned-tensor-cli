@@ -80,6 +80,7 @@ async function createDefaultAgentClient(
   runtime: CliRuntime,
   env: NodeJS.ProcessEnv,
   cloud: { apiKey?: string; baseUrl?: string },
+  workspaceRoot: string,
 ): Promise<AgentConversationClient> {
   const selection = getAgentSelection(env);
   if (!selection) {
@@ -115,6 +116,7 @@ async function createDefaultAgentClient(
     store: runtime.agentStore ?? new LocalAgentStore(join(getConfigDir(), "agent"), {
       secretValues: [...(secret ? [secret] : []), ...providerSecrets],
     }),
+    workspaceRoot,
     selection,
     modelRuntime,
     toolApi,
@@ -127,13 +129,14 @@ function createLazyDefaultAgentClient(
   runtime: CliRuntime,
   env: NodeJS.ProcessEnv,
   cloud: { apiKey?: string; baseUrl?: string },
+  workspaceRoot: string,
 ): AgentConversationClient {
   let pending: Promise<AgentConversationClient> | undefined;
   const client = () => {
     if (!pending) {
       // Retry on the next call if creation fails (for example when the user
       // configures the agent later in the same shell session).
-      const attempt = createDefaultAgentClient(runtime, env, cloud);
+      const attempt = createDefaultAgentClient(runtime, env, cloud, workspaceRoot);
       pending = attempt;
       attempt.catch(() => {
         if (pending === attempt) pending = undefined;
@@ -145,10 +148,10 @@ function createLazyDefaultAgentClient(
     createThread: async () => await (await client()).createThread(),
     listThreads: async () => await (await client()).listThreads(),
     getThread: async (id) => await (await client()).getThread(id),
-    runTurn: async (id, prompt, onEvent, signal) =>
-      await (await client()).runTurn(id, prompt, onEvent, signal),
-    approveAction: async (id, onEvent, signal) =>
-      await (await client()).approveAction(id, onEvent, signal),
+    runTurn: async (id, prompt, onEvent, signal, context) =>
+      await (await client()).runTurn(id, prompt, onEvent, signal, context),
+    approveAction: async (id, onEvent, signal, context) =>
+      await (await client()).approveAction(id, onEvent, signal, context),
     rejectAction: async (id) => await (await client()).rejectAction(id),
   };
 }
@@ -315,7 +318,7 @@ export function createProgram(
       client: runtime.agentClient ?? createLazyDefaultAgentClient(runtime, shellEnvironment, {
         apiKey: root.apiKey ?? shellEnvironment.TUNED_TENSOR_API_KEY,
         baseUrl: root.baseUrl ?? shellEnvironment.TUNED_TENSOR_URL,
-      }),
+      }, cwd),
       output,
       error,
     });
@@ -533,7 +536,7 @@ export async function runCli(
       client: runtime.agentClient ?? createLazyDefaultAgentClient(runtime, env, {
         apiKey: env.TUNED_TENSOR_API_KEY,
         baseUrl: env.TUNED_TENSOR_URL,
-      }),
+      }, runtime.cwd ?? process.cwd()),
       output,
       error,
     });

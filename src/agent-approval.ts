@@ -1,4 +1,9 @@
 import type { AgentAction } from "./agent-client.js";
+import {
+  createLocalSpecProject,
+  isKnownLocalSpecFailure,
+  type LocalSpecFileOperations,
+} from "./local-spec-workspace.js";
 
 export interface AgentMutationApi {
   get(path: string): Promise<unknown>;
@@ -14,6 +19,10 @@ export interface AgentMutationGuard {
 
 export type PersistAction = (action: AgentAction) => Promise<void>;
 
+export interface AgentApprovalOptions {
+  workspaceRoot?: string;
+  localFileOperations?: Partial<LocalSpecFileOperations>;
+}
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -67,17 +76,37 @@ export async function approvePreparedAction(
   action: AgentAction,
   api: AgentMutationApi,
   persist: PersistAction,
+  options: AgentApprovalOptions = {},
 ): Promise<unknown> {
   if (action.status !== "proposed") {
     throw new Error(`Action ${action.id} is not proposed and cannot be approved.`);
   }
   let execute: (() => Promise<unknown>) | undefined;
   try {
-    await requireMutationGuardSupport(api);
     const input = args(action);
 
     switch (action.operation) {
+      case "create_local_spec": {
+        const workspaceRoot = options.workspaceRoot;
+        if (!workspaceRoot) {
+          throw new Error("A local workspace is required to create a local spec.");
+        }
+        const directory = requiredString(input.directory, "local directory");
+        const workspaceFingerprint = requiredString(
+          input.workspace_fingerprint,
+          "workspace fingerprint",
+        );
+        execute = async () => await createLocalSpecProject(
+          workspaceRoot,
+          directory,
+          input.spec,
+          workspaceFingerprint,
+          options.localFileOperations,
+        );
+        break;
+      }
       case "create_spec": {
+        await requireMutationGuardSupport(api);
         const spec = record(input.spec);
         if (!spec) throw new Error("Prepared create spec body is invalid.");
         execute = async () => data(await api.post("/behavior-specs", spec, {
@@ -87,6 +116,7 @@ export async function approvePreparedAction(
         break;
       }
       case "update_spec": {
+        await requireMutationGuardSupport(api);
         const specId = requiredString(input.spec_id, "spec ID");
         const expected = requiredString(input.expected_spec_updated_at, "spec version");
         const changes = record(input.changes);
@@ -127,6 +157,20 @@ export async function approvePreparedAction(
     await persist(action);
     return output;
   } catch (error) {
+    if (action.operation === "create_local_spec" && isKnownLocalSpecFailure(error)) {
+      action.status = "failed";
+      try {
+        await persist(action);
+      } catch (persistError) {
+        action.status = "outcome_unknown";
+        try { await persist(action); } catch { /* Keep the durable executing record fail-closed. */ }
+        throw new Error(
+          "Local spec creation did not apply, but its final action status could not be recorded. Inspect the workspace before preparing another action.",
+          { cause: persistError },
+        );
+      }
+      throw error;
+    }
     action.status = "outcome_unknown";
     try {
       await persist(action);
@@ -134,8 +178,11 @@ export async function approvePreparedAction(
       // The already-persisted executing record remains fail-closed.
     }
     const detail = error instanceof Error ? error.message : String(error);
+    const inspectionTarget = action.operation === "create_local_spec"
+      ? "local workspace"
+      : "remote resource";
     throw new Error(
-      `The mutation outcome is unknown and this action cannot be retried automatically. Inspect the remote resource before preparing another action. ${detail}`,
+      `The mutation outcome is unknown and this action cannot be retried automatically. Inspect the ${inspectionTarget} before preparing another action. ${detail}`,
       { cause: error },
     );
   }

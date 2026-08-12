@@ -6,6 +6,7 @@ import {
   type AgentStreamEvent,
   type AgentThread,
   type AgentThreadDetail,
+  type AgentTurnContext,
   type AgentTurnResult,
 } from "./agent-client.js";
 import { tokenizeShellInput } from "./shell.js";
@@ -337,18 +338,27 @@ export class TunedTensorAgentSession {
     }
   }
 
-  async send(prompt: string): Promise<AgentTurnResult | null> {
+  async send(prompt: string, context?: AgentTurnContext): Promise<AgentTurnResult | null> {
     const normalized = prompt.trim();
     if (!normalized) return null;
     const thread = await this.ensureThread();
-    return await this.runStream(async (signal) =>
-      await this.options.client.runTurn(
-        thread.id,
-        normalized,
-        (event) => this.renderEvent(event),
-        signal,
-      )
-    );
+    return await this.runStream(async (signal) => {
+      const onEvent = (event: AgentStreamEvent) => this.renderEvent(event);
+      return context
+        ? await this.options.client.runTurn(
+            thread.id,
+            normalized,
+            onEvent,
+            signal,
+            context,
+          )
+        : await this.options.client.runTurn(
+            thread.id,
+            normalized,
+            onEvent,
+            signal,
+          );
+    });
   }
 
   private resolvePendingAction(idOrPrefix?: string): AgentAction {
@@ -368,17 +378,22 @@ export class TunedTensorAgentSession {
     return candidates[0]!;
   }
 
-  private async approve(idOrPrefix?: string): Promise<void> {
+  private async approve(
+    idOrPrefix?: string,
+    context?: AgentTurnContext,
+  ): Promise<void> {
     const action = this.resolvePendingAction(idOrPrefix);
+    if (context?.mode === "cloud" && action.operation === "create_local_spec") {
+      throw new Error("Switch to local mode before approving local spec creation.");
+    }
     action.status = "executing";
     try {
-      await this.runStream(async (signal) =>
-        await this.options.client.approveAction(
-          action.id,
-          (event) => this.renderEvent(event),
-          signal,
-        ),
-      false);
+      await this.runStream(async (signal) => {
+        const onEvent = (event: AgentStreamEvent) => this.renderEvent(event);
+        return context
+          ? await this.options.client.approveAction(action.id, onEvent, signal, context)
+          : await this.options.client.approveAction(action.id, onEvent, signal);
+      }, false);
     } finally {
       // Approval is one-way once requested. Preflight failures, completed
       // actions, and unknown outcomes are all non-retryable under this ID.
@@ -406,7 +421,10 @@ export class TunedTensorAgentSession {
     return await this.options.client.getThread(matches[0]!.id);
   }
 
-  private async handleCommand(input: string): Promise<AgentLineAction> {
+  private async handleCommand(
+    input: string,
+    context?: AgentTurnContext,
+  ): Promise<AgentLineAction> {
     const tokens = tokenizeShellInput(input);
     const command = tokens[0]!.slice(1).toLowerCase();
     const args = tokens.slice(1);
@@ -451,7 +469,7 @@ export class TunedTensorAgentSession {
         return "continue";
       case "approve":
         if (args.length > 1) throw new Error("Usage: /approve [action-id]");
-        await this.approve(args[0]);
+        await this.approve(args[0], context);
         return "continue";
       case "reject":
         if (args.length > 1) throw new Error("Usage: /reject [action-id]");
@@ -480,13 +498,13 @@ export class TunedTensorAgentSession {
     }
   }
 
-  async handleLine(input: string): Promise<AgentLineAction> {
+  async handleLine(input: string, context?: AgentTurnContext): Promise<AgentLineAction> {
     try {
       const normalized = input.trim();
       if (!normalized) return "continue";
       if (/^(exit|quit)$/i.test(normalized)) return "exit";
-      if (normalized.startsWith("/")) return await this.handleCommand(normalized);
-      await this.send(normalized);
+      if (normalized.startsWith("/")) return await this.handleCommand(normalized, context);
+      await this.send(normalized, context);
       return "continue";
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -73,7 +73,11 @@ tt cloud support-agent › Ask whether my dataset is ready to train
 Ordinary sentences go through the locally orchestrated Pi model session. The
 model can call a
 strict, bounded set of authenticated Tuned Tensor read tools and prepare-only
-mutation tools; it has no shell or filesystem tool. Known CLI commands such as
+mutation tools; it has no shell or general filesystem tool. In `local` mode it
+can prepare one new folder directly beneath the shell's current working
+directory with a validated `tunedtensor.json`. The tool refuses path traversal,
+symlinked workspace roots, existing targets, and unsupported spec fields. It is
+not available to cloud-mode turns. Known CLI commands such as
 `runs list`, `doctor`, and `models list` still execute directly. Prefix a
 command with `:` when you want to make that intent explicit. Commands are
 routed to the mode shown in the prompt; prefix one with `cloud` or `local` to
@@ -92,9 +96,19 @@ Read operations execute immediately. Creating or updating a behaviour spec is
 a prepare-only model operation: the agent shows the exact proposed action, then
 waits for `/approve` or `/reject`. Starting or cancelling training remains an
 explicit `tt runs ...` command outside the model tool loop.
+Local spec creation also waits for `/approve`, never calls the cloud API, requires
+at least two examples for local validation, uses exclusive private folder/file
+creation, and never overwrites an existing path. Secure filesystem mutation is
+currently supported on Linux, where writes are anchored to open workspace and
+destination-directory handles. The proposal is bound to the current workspace
+so changing directories before approval fails safely instead of writing
+somewhere else. Ambiguous write failures remain sealed as `outcome_unknown` for
+manual inspection rather than deleting a path that could belong to a racing
+writer.
 `/approve` executes deterministic local code with an at-most-once mutation
-attempt. Before dispatch, the CLI requires the API to advertise mutation-guard
-support; older or incompatible servers are refused. The server conditionally
+attempt. For hosted mutations, before dispatch the CLI requires the API to
+advertise mutation-guard support; older or incompatible servers are refused.
+The server conditionally
 checks approved spec versions and assigns the action ID as an idempotent create
 ID. If a response or final state write is lost after dispatch, the action is
 retained as `outcome_unknown`, cannot be retried automatically, and directs the
