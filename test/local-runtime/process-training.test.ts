@@ -101,7 +101,7 @@ test("Nemotron training defaults use bounded LoRA targets and activation checkpo
     lora_alpha: "32",
     lora_dropout: "0.05",
     max_seq_length: "1024",
-    lora_target_modules: "q_proj,k_proj,v_proj,o_proj,in_proj,out_proj",
+    lora_target_modules: "q_proj,k_proj,v_proj,o_proj,in_proj",
     gradient_checkpointing: "true",
   });
 });

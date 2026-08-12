@@ -47,7 +47,7 @@ test("registry certifies the native text-only Qwen and Nemotron training paths",
     defaultLoraAlpha: 32,
     defaultLoraDropout: 0.05,
     defaultMaxSeqLength: 1024,
-    loraTargetModules: ["q_proj", "k_proj", "v_proj", "o_proj", "in_proj", "out_proj"],
+    loraTargetModules: ["q_proj", "k_proj", "v_proj", "o_proj", "in_proj"],
     gradientCheckpointing: true,
   });
 });

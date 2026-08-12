@@ -54,8 +54,9 @@ export const TRAINING_MODELS: TrainingModel[] = [
     defaultLoraDropout: 0.05,
     defaultMaxSeqLength: 1024,
     // Avoid one LoRA pair for every routed expert matrix. Adapt the shared
-    // attention and Mamba projections instead, keeping the adapter bounded.
-    loraTargetModules: ["q_proj", "k_proj", "v_proj", "o_proj", "in_proj", "out_proj"],
+    // attention (q/k/v/o) and Mamba input projections instead, keeping the
+    // adapter bounded. out_proj/conv1d are rejected by PEFT for Mamba models.
+    loraTargetModules: ["q_proj", "k_proj", "v_proj", "o_proj", "in_proj"],
     gradientCheckpointing: true,
   },
 ];
