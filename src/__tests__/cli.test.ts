@@ -306,6 +306,74 @@ describe("unified command routing", () => {
     expect(output).toContain("Target         local (--target)");
   });
 
+  it("checks for updates before starting the bare interactive shell", async () => {
+    const startShell = vi.fn(async () => {});
+    const checkForUpdate = vi.fn(async () => ({
+      currentVersion: "0.10.0",
+      latestVersion: "0.11.0",
+    }));
+    const stderr = new PassThrough();
+    let errors = "";
+    stderr.setEncoding("utf8");
+    stderr.on("data", (chunk: string) => { errors += chunk; });
+
+    await runCli("0.10.0", {
+      argv: ["node", "tt"],
+      env: { TERM: "xterm-256color" },
+      stdinIsTTY: true,
+      stdoutIsTTY: true,
+      stderr,
+      checkForUpdate,
+      startShell: startShell as never,
+    });
+
+    expect(checkForUpdate).toHaveBeenCalledWith("0.10.0");
+    expect(errors).toContain("tt 0.10.0");
+    expect(errors).toContain("npm install -g @tuned-tensor/cli@latest");
+    expect(startShell).toHaveBeenCalledTimes(1);
+    expect(checkForUpdate.mock.invocationCallOrder[0]).toBeLessThan(
+      startShell.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("does not check for updates for explicit commands", async () => {
+    const checkForUpdate = vi.fn(async () => null);
+    const stdout = new PassThrough();
+    let output = "";
+    stdout.setEncoding("utf8");
+    stdout.on("data", (chunk: string) => { output += chunk; });
+
+    await runCli("0.10.0", {
+      argv: ["node", "tt", "status", "--target", "local", "--json"],
+      cwd: "/tmp",
+      env: { TERM: "xterm-256color", HOME: "/tmp/tt-cli-update-home" },
+      stdinIsTTY: true,
+      stdoutIsTTY: true,
+      stdout,
+      checkForUpdate,
+    });
+
+    expect(output).toContain('"target": "local"');
+    expect(checkForUpdate).not.toHaveBeenCalled();
+  });
+
+  it("starts the shell when update discovery throws", async () => {
+    const startShell = vi.fn(async () => {});
+
+    await runCli("0.10.0", {
+      argv: ["node", "tt"],
+      env: { TERM: "xterm-256color" },
+      stdinIsTTY: true,
+      stdoutIsTTY: true,
+      checkForUpdate: async () => {
+        throw new Error("registry unavailable");
+      },
+      startShell: startShell as never,
+    });
+
+    expect(startShell).toHaveBeenCalledTimes(1);
+  });
+
   it("starts the shell only for a bare interactive invocation", async () => {
     const startShell = vi.fn(async () => {});
 

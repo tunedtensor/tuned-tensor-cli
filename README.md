@@ -63,6 +63,11 @@ Selection metadata can be overridden per process with
 After configuration, run `tt` to open one terminal for conversation and
 commands:
 
+Before the shell opens, `tt` performs a short, non-blocking npm version check.
+If a newer stable release is available it recommends
+`npm install -g @tuned-tensor/cli@latest`; offline or unavailable registry
+checks are ignored.
+
 ```text
 tt cloud support-agent › What happened in my latest training run?
 TT  Your latest run completed...

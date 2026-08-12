@@ -40,6 +40,7 @@ import { registerEvalCommand } from "./commands/eval.js";
 import { registerPushCommand } from "./commands/push.js";
 import { registerAgentCommands } from "./commands/agent.js";
 import { registerPipelineCommands } from "./commands/pipeline.js";
+import { checkForCliUpdate, formatCliUpdateNotice } from "./update-check.js";
 
 export interface SelfCommandOptions {
   cwd?: string;
@@ -67,6 +68,10 @@ export interface CliRuntime {
   stdoutIsTTY?: boolean;
   runSelfCommand?: SelfCommandRunner;
   runLocalCommand?: typeof executeLocalCommand;
+  checkForUpdate?: (currentVersion: string) => Promise<{
+    currentVersion: string;
+    latestVersion: string;
+  } | null>;
   startShell?: typeof startInteractiveShell;
   agentClient?: AgentConversationClient;
   modelRuntime?: AgentModelRuntime & { streamSimple?: (...args: any[]) => any };
@@ -529,9 +534,18 @@ export async function runCli(
       env,
     })
   ) {
-    const invokeSelf = runtime.runSelfCommand ?? runSelfCommand;
     const output = runtime.stdout ?? process.stdout;
     const error = runtime.stderr ?? process.stderr;
+    let update: Awaited<ReturnType<NonNullable<CliRuntime["checkForUpdate"]>>> = null;
+    try {
+      update = await (runtime.checkForUpdate ?? checkForCliUpdate)(version);
+    } catch {
+      // Version discovery is advisory and must never prevent shell launch.
+    }
+    if (update) {
+      error.write(`${formatCliUpdateNotice(update)}\n\n`);
+    }
+    const invokeSelf = runtime.runSelfCommand ?? runSelfCommand;
     const agent = createShellAgent({
       client: runtime.agentClient ?? createLazyDefaultAgentClient(runtime, env, {
         apiKey: env.TUNED_TENSOR_API_KEY,
