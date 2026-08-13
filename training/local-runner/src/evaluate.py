@@ -10,8 +10,12 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from model_contract import (
+    CERTIFIED_BASE_MODELS,
     CERTIFIED_BASE_MODEL,
+    assert_certified_base_model,
+    assert_certified_base_model_revision,
     assert_certified_model_config,
+    chat_template_kwargs,
 )
 
 MAX_ARCHIVE_MEMBERS = 20_000
@@ -111,6 +115,7 @@ def format_prompt(
     tokenizer: Any,
     system: str,
     prompt: str,
+    base_model: str = CERTIFIED_BASE_MODEL,
 ) -> str:
     messages = [
         {"role": "system", "content": system},
@@ -121,9 +126,10 @@ def format_prompt(
             messages,
             tokenize=False,
             add_generation_prompt=True,
+            **chat_template_kwargs(base_model),
         )
     except Exception as exc:
-        raise ValueError(f"Qwen chat-template rendering failed: {exc}") from exc
+        raise ValueError(f"Model chat-template rendering failed: {exc}") from exc
 
 
 def resolve_device(device: str) -> str:
@@ -135,30 +141,33 @@ def resolve_device(device: str) -> str:
 
 
 def _assert_certified_model_source(base_model: str) -> None:
-    if not Path(base_model).exists() and base_model != CERTIFIED_BASE_MODEL:
+    if not Path(base_model).exists() and base_model not in CERTIFIED_BASE_MODELS:
         raise ValueError(
-            f"The bundled evaluator currently certifies only {CERTIFIED_BASE_MODEL}; got {base_model!r}"
+            f"The bundled evaluator does not certify {base_model!r}"
         )
 
 
 def load_text_model(payload: dict[str, Any], adapter_path: str | None):
     base_model = str(payload["base_model"])
-    _assert_certified_model_source(base_model)
+    model_source = str(payload.get("model_source", base_model))
+    assert_certified_base_model(base_model, "Evaluation base model")
+    _assert_certified_model_source(model_source)
+    revision = payload.get("base_model_revision")
+    assert_certified_base_model_revision(base_model, revision, "Evaluation base model revision")
     device = resolve_device(str(payload.get("device", "cuda")))
     token = os.getenv("HF_TOKEN")
-    revision = payload.get("base_model_revision")
     source_kwargs: dict[str, Any] = {
         "trust_remote_code": False,
         "token": token,
     }
-    if not Path(base_model).exists():
+    if not Path(model_source).exists():
         source_kwargs["local_files_only"] = True
-    if revision and not Path(base_model).exists():
+    if revision and not Path(model_source).exists():
         source_kwargs["revision"] = revision
 
-    tokenizer = AutoTokenizer.from_pretrained(base_model, **source_kwargs)
+    tokenizer = AutoTokenizer.from_pretrained(model_source, **source_kwargs)
     if tokenizer.eos_token_id is None:
-        raise ValueError(f"{CERTIFIED_BASE_MODEL} tokenizer has no EOS token")
+        raise ValueError(f"{base_model} tokenizer has no EOS token")
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -172,8 +181,8 @@ def load_text_model(payload: dict[str, Any], adapter_path: str | None):
     if device == "cuda":
         model_kwargs["device_map"] = {"": torch.cuda.current_device()}
 
-    model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
-    assert_certified_model_config(model.config)
+    model = AutoModelForCausalLM.from_pretrained(model_source, **model_kwargs)
+    assert_certified_model_config(model.config, expected_model_id=base_model)
     if adapter_path:
         model = PeftModel.from_pretrained(model, adapter_path)
     if device != "cuda":
@@ -199,11 +208,12 @@ def generate_text_one(
     system: str,
     example: dict[str, Any],
     generation: dict[str, Any],
+    base_model: str = CERTIFIED_BASE_MODEL,
 ) -> dict[str, Any]:
     if example.get("input_assets"):
-        raise ValueError("The bundled Qwen SFT evaluator is text-only and does not accept input_assets")
+        raise ValueError("The bundled SFT evaluator is text-only and does not accept input_assets")
     prompt = str(example["input"])
-    formatted = format_prompt(tokenizer, system, prompt)
+    formatted = format_prompt(tokenizer, system, prompt, base_model)
     inputs = tokenizer(formatted, return_tensors="pt")
     target_device = next(model.parameters()).device
     inputs = {key: value.to(target_device) for key, value in inputs.items()}
@@ -253,6 +263,7 @@ def main() -> None:
                 str(payload.get("system", "")),
                 example,
                 generation,
+                str(payload["base_model"]),
             )
             for example in payload.get("examples", [])
         ]

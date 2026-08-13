@@ -44,6 +44,8 @@ test("builds only the certified Qwen LoRA SFT hyperparameters", () => {
     lora_alpha: "16",
     lora_dropout: "0.1",
     max_seq_length: "1024",
+    lora_target_modules: "all-linear",
+    gradient_checkpointing: "false",
   });
 });
 
@@ -71,6 +73,36 @@ test("default Qwen LoRA training parameters stay small", () => {
     lora_alpha: "32",
     lora_dropout: "0.05",
     max_seq_length: "2048",
+    lora_target_modules: "all-linear",
+    gradient_checkpointing: "false",
+  });
+});
+
+test("Nemotron training defaults use bounded LoRA targets and activation checkpointing", () => {
+  const request = fineTuneRunRequestSchema.parse({
+    run_id: "11111111-1111-4111-8111-111111111111",
+    user_id: "local-user",
+    behavior_spec_id: "22222222-2222-4222-8222-222222222222",
+    run_number: 1,
+    spec_snapshot: {
+      name: "Nemotron worker",
+      base_model: "nvidia/nvidia-nemotron-3.5-lightning-30b-a3b-bf16",
+      examples: [{ input: "hello", output: "greeting" }],
+    },
+  });
+
+  assert.deepEqual(buildTrainingHyperparameters(request), {
+    base_model: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+    n_epochs: "1",
+    learning_rate: "0.00001",
+    per_device_train_batch_size: "1",
+    gradient_accumulation_steps: "8",
+    lora_rank: "16",
+    lora_alpha: "32",
+    lora_dropout: "0.05",
+    max_seq_length: "1024",
+    lora_target_modules: "q_proj,k_proj,v_proj,o_proj,in_proj",
+    gradient_checkpointing: "true",
   });
 });
 

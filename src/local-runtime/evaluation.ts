@@ -22,6 +22,7 @@ import {
   minimalMachineLearningEnvironment,
   withOfflineHuggingFaceCacheEnvironment,
 } from "./huggingface-cache.js";
+import { defaultBaseModelRevision, resolveRequestedBaseModelRevision } from "./model-registry.js";
 
 function normalize(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
@@ -321,6 +322,7 @@ async function runTransformersInference(args: {
   kind: "baseline" | "candidate";
   modelId: string;
   baseModelId: string;
+  modelSource: string;
   baseModelRevision?: string;
   adapterPath?: string;
   examples: BehaviorSpecExample[];
@@ -339,6 +341,7 @@ async function runTransformersInference(args: {
     kind: args.kind,
     model_id: args.modelId,
     base_model: args.baseModelId,
+    model_source: args.modelSource,
     base_model_revision: args.baseModelRevision,
     model_loader: "causal_lm",
     adapter_path: fileUriToPath(args.adapterPath),
@@ -363,6 +366,7 @@ async function runTransformersInference(args: {
     "evaluate.py",
     ["--input", inputPath, "--output", outputPath],
   );
+
   await args.reporter?.onEvent?.({
     stage: `evaluating_${args.kind}`,
     status: "running",
@@ -588,6 +592,7 @@ export async function evaluateExamples(args: {
   kind: "baseline" | "candidate";
   modelId: string;
   baseModelId?: string;
+  modelSource?: string;
   baseModelRevision?: string;
   sourceFingerprint?: string;
   adapterPath?: string;
@@ -602,6 +607,17 @@ export async function evaluateExamples(args: {
   shouldCancel?: () => boolean | Promise<boolean>;
 }): Promise<EvalReport> {
   assertEvaluationScoringReady(args.config);
+  const baseModelId = args.baseModelId ?? args.modelId;
+  const requestedBaseModelRevision = resolveRequestedBaseModelRevision(
+    baseModelId,
+    args.baseModelRevision,
+  );
+  const localModelSource = args.modelSource
+    ? resolve(args.modelSource) !== resolve(baseModelId)
+    : false;
+  const baseModelRevision = localModelSource
+    ? defaultBaseModelRevision(baseModelId)
+    : requestedBaseModelRevision;
   const maxExamples = args.config.evaluation.maxExamples
     ?? args.maxExamples
     ?? args.examples.length;
@@ -615,14 +631,14 @@ export async function evaluateExamples(args: {
     && args.config.evaluation.baselineCache
     && !args.config.dryRun
     && baselineInputsAreStable({
-      baseModelRevision: args.baseModelRevision,
+      baseModelRevision,
       sourceFingerprint: args.sourceFingerprint,
       config: args.config,
     });
   const cacheKey = cacheEligible
     ? baselineCacheKey({
         modelId: args.modelId,
-        baseModelRevision: args.baseModelRevision,
+        baseModelRevision,
         sourceFingerprint: args.sourceFingerprint,
         system: args.system,
         examples,
@@ -657,8 +673,9 @@ export async function evaluateExamples(args: {
     : await runTransformersInference({
         kind: args.kind,
         modelId: args.modelId,
-        baseModelId: args.baseModelId ?? args.modelId,
-        baseModelRevision: args.baseModelRevision,
+        baseModelId,
+        modelSource: args.modelSource ?? args.modelId,
+        baseModelRevision,
         adapterPath: args.adapterPath,
         examples,
         system: args.system,

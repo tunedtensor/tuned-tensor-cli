@@ -33,13 +33,14 @@ input_path = sys.argv[sys.argv.index("--input") + 1]
 output_path = sys.argv[sys.argv.index("--output") + 1]
 payload = json.load(open(input_path))
 assert payload["protocol_version"] == 2
-assert payload["base_model"] == "Qwen/Qwen3.5-2B"
 assert payload["model_loader"] == "causal_lm"
 assert payload["trust_remote_code"] is False
 assert all(set(example) == {"id", "input"} for example in payload["examples"])
 
 config_path = Path(__file__).with_name("fake-uv-config.json")
 config = json.loads(config_path.read_text()) if config_path.exists() else {}
+if config.get("base_model"):
+    assert payload["base_model"] == config["base_model"]
 counter_path = config.get("counter")
 if counter_path:
     current = int(open(counter_path).read()) if os.path.exists(counter_path) else 0
@@ -95,15 +96,21 @@ function configFor(root: string, options: {
   counter?: string;
   scoring?: { mode: "exact_match" } | { mode: "json_fields"; fields?: string[] };
   baselineCache?: boolean;
+  baseModel?: string;
+  expectedBaseModel?: string;
 } = {}) {
   writeFileSync(join(root, "fake-uv-config.json"), JSON.stringify({
     answers: options.answers ?? {},
     ...(options.mode ? { mode: options.mode } : {}),
     ...(options.counter ? { counter: options.counter } : {}),
+    ...(options.expectedBaseModel ? { base_model: options.expectedBaseModel } : {}),
   }));
   return localRunnerConfigSchema.parse({
     storeRoot: join(root, "store"),
-    paths: { modelCache: join(root, "huggingface") },
+    paths: {
+      modelCache: join(root, "huggingface"),
+      ...(options.baseModel ? { baseModel: options.baseModel } : {}),
+    },
     evaluation: {
       inference: {
         device: "cpu",
@@ -167,6 +174,63 @@ test("Transformers evaluation uses the strict text-only protocol and opaque IDs"
     ) as Record<string, string>;
     assert.equal(cacheLine.HF_HOME, join(root, "huggingface"));
     assert.equal(cacheLine.HF_HUB_CACHE, join(root, "huggingface", "hub"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local evaluation keeps canonical model identity separate from the snapshot source", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-evaluation-source-"));
+  try {
+    await writeFakeUv(root);
+    const modelSource = join(root, "nemotron-snapshot");
+    const outputPath = join(root, "baseline.json");
+    await evaluateExamples({
+      kind: "baseline",
+      modelId: modelSource,
+      baseModelId: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+      modelSource,
+      baseModelRevision: "ce38b6ab8b252b4b8ee7165b4605e93191cafd73",
+      examples: [{ input: "hello", output: "hello" }],
+      system: "Answer.",
+      config: configFor(root, {
+        baseModel: modelSource,
+        expectedBaseModel: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+      }),
+      outputPath,
+    });
+    const payload = JSON.parse(
+      await readFile(`${outputPath}.inference-input.json`, "utf8"),
+    ) as Record<string, unknown>;
+    assert.equal(
+      payload.base_model,
+      "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+    );
+    assert.equal(payload.model_source, modelSource);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local evaluation rejects a non-certified explicit Nemotron revision before Python starts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-evaluation-revision-"));
+  try {
+    await writeFakeUv(root);
+    const modelSource = join(root, "nemotron-snapshot");
+    await assert.rejects(
+      evaluateExamples({
+        kind: "baseline",
+        modelId: modelSource,
+        baseModelId: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+        modelSource,
+        baseModelRevision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        examples: [{ input: "hello", output: "hello" }],
+        system: "Answer.",
+        config: configFor(root, { baseModel: modelSource }),
+        outputPath: join(root, "baseline.json"),
+      }),
+      /must use certified revision/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

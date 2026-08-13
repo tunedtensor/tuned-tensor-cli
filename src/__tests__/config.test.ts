@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { canonicalizeBaseModel } from "../base-models.js";
 
 let configModule: typeof import("../config.js");
 
@@ -31,6 +32,10 @@ afterEach(() => {
 });
 
 describe("config", () => {
+  it("canonicalizes the certified Nemotron Lightning base model", () => {
+    expect(canonicalizeBaseModel("nvidia/nvidia-nemotron-3.5-lightning-30b-a3b-bf16"))
+      .toBe("nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16");
+  });
   describe("readConfig", () => {
     it("returns empty object when no config file exists", () => {
       expect(configModule.readConfig()).toEqual({});

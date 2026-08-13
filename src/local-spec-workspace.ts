@@ -4,7 +4,7 @@ import { lstat, mkdir, open, realpath, rmdir, writeFile } from "node:fs/promises
 import { join } from "node:path";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
-import { SUPPORTED_BASE_MODELS } from "./base-models.js";
+import { TRAINING_MODELS } from "./local-runtime/model-registry.js";
 import { validateSpec } from "./eval/rules.js";
 import type { LocalSpec } from "./eval/types.js";
 
@@ -14,16 +14,16 @@ const FolderName = Type.String({
   pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$",
   description: "One new folder name directly beneath the current workspace",
 });
-const BaseModel = Type.Unsafe<(typeof SUPPORTED_BASE_MODELS)[number]>({
+const LocalBaseModel = Type.String({
   type: "string",
-  enum: [...SUPPORTED_BASE_MODELS],
+  enum: TRAINING_MODELS.map((model) => model.id),
 });
 const NonEmptyText = Type.String({ minLength: 1, maxLength: 1_000 });
 
 export const LocalProjectSpecSchema = Type.Object({
   name: Type.String({ minLength: 1, maxLength: 255 }),
   description: Type.Optional(Type.String({ maxLength: 5_000 })),
-  base_model: BaseModel,
+  base_model: LocalBaseModel,
   system_prompt: Type.String({ minLength: 1, maxLength: 10_000 }),
   guidelines: Type.Array(NonEmptyText, { minItems: 1, maxItems: 50 }),
   constraints: Type.Optional(Type.Array(NonEmptyText, { maxItems: 50 })),

@@ -3,9 +3,19 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { verifyTarGzipArchive } from "./artifacts.js";
 
+/**
+ * Immutable Hugging Face revision reviewed and certified for Nemotron
+ * 3.5 Lightning 30B-A3B-BF16 local fine-tuning. Prefetch, training,
+ * evaluation, and serving reject any different revision.
+ */
+export const NEMOTRON_BF16_REVISION =
+  "ce38b6ab8b252b4b8ee7165b4605e93191cafd73";
+
 export interface TrainingModel {
   id: string;
   family: string;
+  /** Immutable Hugging Face revision this training path is bound to, if any. */
+  defaultRevision?: string;
   defaultLearningRate: number;
   defaultPerDeviceBatchSize: number;
   defaultGradientAccumulationSteps: number;
@@ -13,6 +23,8 @@ export interface TrainingModel {
   defaultLoraAlpha: number;
   defaultLoraDropout: number;
   defaultMaxSeqLength: number;
+  loraTargetModules: "all-linear" | string[];
+  gradientCheckpointing: boolean;
 }
 
 export const TRAINING_MODELS: TrainingModel[] = [
@@ -26,6 +38,25 @@ export const TRAINING_MODELS: TrainingModel[] = [
     defaultLoraAlpha: 32,
     defaultLoraDropout: 0.05,
     defaultMaxSeqLength: 2048,
+    loraTargetModules: "all-linear",
+    gradientCheckpointing: false,
+  },
+  {
+    id: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+    family: "nemotron_h",
+    defaultRevision: NEMOTRON_BF16_REVISION,
+    defaultLearningRate: 0.00001,
+    defaultPerDeviceBatchSize: 1,
+    defaultGradientAccumulationSteps: 8,
+    defaultLoraRank: 16,
+    defaultLoraAlpha: 32,
+    defaultLoraDropout: 0.05,
+    defaultMaxSeqLength: 1024,
+    // Avoid one LoRA pair for every routed expert matrix. Adapt the shared
+    // attention (q/k/v/o) and Mamba input projections instead, keeping the
+    // adapter bounded. out_proj/conv1d are rejected by PEFT for Mamba models.
+    loraTargetModules: ["q_proj", "k_proj", "v_proj", "o_proj", "in_proj"],
+    gradientCheckpointing: true,
   },
 ];
 
@@ -36,7 +67,7 @@ export function resolveTrainingModel(modelId: string): TrainingModel {
   );
   if (!model) {
     throw new Error(
-      `Unsupported base model "${modelId}". Supported model: ${TRAINING_MODELS[0]!.id}`,
+      `Unsupported base model "${modelId}". Supported models: ${TRAINING_MODELS.map((item) => item.id).join(", ")}`,
     );
   }
   return model;
@@ -46,7 +77,30 @@ export function canonicalizeTrainingModel(modelId: string): string {
   return resolveTrainingModel(modelId).id;
 }
 
-const CERTIFIED_TEXT_CONFIG = {
+/** Resolve and enforce the immutable revision contract for a training model. */
+export function resolveRequestedBaseModelRevision(
+  modelId: string,
+  requestedRevision?: string,
+): string | undefined {
+  const model = resolveTrainingModel(modelId);
+  if (
+    model.defaultRevision
+    && requestedRevision
+    && requestedRevision !== model.defaultRevision
+  ) {
+    throw new Error(
+      `${model.id} must use certified revision ${model.defaultRevision}; got ${requestedRevision}.`,
+    );
+  }
+  return requestedRevision ?? model.defaultRevision;
+}
+
+/** Resolve the immutable revision a training model is bound to, if any. */
+export function defaultBaseModelRevision(modelId: string): string | undefined {
+  return resolveRequestedBaseModelRevision(modelId);
+}
+
+const CERTIFIED_QWEN_TEXT_CONFIG = {
   model_type: "qwen3_5_text",
   hidden_size: 2048,
   num_hidden_layers: 24,
@@ -56,38 +110,81 @@ const CERTIFIED_TEXT_CONFIG = {
   vocab_size: 248320,
 } as const;
 
+const CERTIFIED_NEMOTRON_CONFIG = {
+  hidden_size: 2688,
+  num_hidden_layers: 52,
+  num_attention_heads: 32,
+  num_key_value_heads: 2,
+  intermediate_size: 1856,
+  vocab_size: 131072,
+  n_routed_experts: 128,
+  num_experts_per_tok: 6,
+  num_nextn_predict_layers: 1,
+  max_position_embeddings: 262144,
+} as const;
+
 /** Reject a same-family snapshot that is not the certified 2B architecture. */
 export function assertCertifiedBaseModelConfig(
   value: unknown,
   label = "base-model config.json",
+  expectedModelId?: string,
 ): void {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} must contain a JSON object.`);
   }
   const config = value as Record<string, unknown>;
   const architectures = config.architectures;
-  const textConfig = config.text_config;
-  if (
-    config.model_type !== "qwen3_5"
-    || !Array.isArray(architectures)
-    || !architectures.includes("Qwen3_5ForConditionalGeneration")
-    || !textConfig
-    || typeof textConfig !== "object"
-    || Array.isArray(textConfig)
-  ) {
-    throw new Error(
-      `${label} is not the certified Qwen/Qwen3.5-2B architecture.`,
-    );
-  }
-  const text = textConfig as Record<string, unknown>;
-  for (const [key, expected] of Object.entries(CERTIFIED_TEXT_CONFIG)) {
-    if (text[key] !== expected) {
+  const expectedFamily = expectedModelId
+    ? resolveTrainingModel(expectedModelId).family
+    : undefined;
+  if (config.model_type === "qwen3_5") {
+    if (expectedFamily && expectedFamily !== "qwen3_5") {
+      throw new Error(`${label} does not match requested base model ${expectedModelId}.`);
+    }
+    const textConfig = config.text_config;
+    if (
+      !Array.isArray(architectures)
+      || !architectures.includes("Qwen3_5ForConditionalGeneration")
+      || !textConfig
+      || typeof textConfig !== "object"
+      || Array.isArray(textConfig)
+    ) {
       throw new Error(
-        `${label} is not the certified Qwen/Qwen3.5-2B architecture: `
-        + `text_config.${key} must be ${JSON.stringify(expected)}.`,
+        `${label} is not the certified Qwen/Qwen3.5-2B architecture.`,
       );
     }
+    const text = textConfig as Record<string, unknown>;
+    for (const [key, expected] of Object.entries(CERTIFIED_QWEN_TEXT_CONFIG)) {
+      if (text[key] !== expected) {
+        throw new Error(
+          `${label} is not the certified Qwen/Qwen3.5-2B architecture: `
+          + `text_config.${key} must be ${JSON.stringify(expected)}.`,
+        );
+      }
+    }
+    return;
   }
+  if (
+    config.model_type === "nemotron_h"
+    && Array.isArray(architectures)
+    && architectures.includes("NemotronHForCausalLM")
+  ) {
+    if (expectedFamily && expectedFamily !== "nemotron_h") {
+      throw new Error(`${label} does not match requested base model ${expectedModelId}.`);
+    }
+    for (const [key, expected] of Object.entries(CERTIFIED_NEMOTRON_CONFIG)) {
+      if (config[key] !== expected) {
+        throw new Error(
+          `${label} is not the certified nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 architecture: `
+          + `${key} must be ${JSON.stringify(expected)}.`,
+        );
+      }
+    }
+    return;
+  }
+  throw new Error(
+    `${label} is not a certified TT Local base-model architecture.`,
+  );
 }
 
 export interface ModelArtifactInspection {

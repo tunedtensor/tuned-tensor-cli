@@ -209,10 +209,14 @@ function placeholderSpecCheck(request: FineTuneRunRequest): DoctorCheck {
   };
 }
 
-async function localBaseModelCheck(path: string): Promise<DoctorCheck> {
+async function localBaseModelCheck(
+  path: string,
+  expectedModelId?: string,
+  modelCache?: string,
+): Promise<DoctorCheck> {
   const resolvedPath = resolve(path);
   try {
-    const verified = await verifyLocalBaseModel(resolvedPath);
+    const verified = await verifyLocalBaseModel(resolvedPath, expectedModelId, modelCache);
     return {
       name: "local-base-model",
       ok: true,
@@ -241,7 +245,13 @@ export async function runDoctor(config: LocalRunnerConfig, request?: FineTuneRun
     "model-cache",
     config.paths.modelCache ?? process.env.HF_HOME ?? join(homedir(), ".cache", "huggingface"),
   ));
-  if (config.paths.baseModel) checks.push(await localBaseModelCheck(config.paths.baseModel));
+  if (config.paths.baseModel) {
+    checks.push(await localBaseModelCheck(
+      config.paths.baseModel,
+      request?.spec_snapshot.base_model,
+      config.paths.modelCache,
+    ));
+  }
 
   if (request) {
     checks.push(placeholderSpecCheck(request));

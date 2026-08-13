@@ -14,6 +14,7 @@ import {
   minimalMachineLearningEnvironment,
   withOfflineHuggingFaceCacheEnvironment,
 } from "./huggingface-cache.js";
+import { verifyLocalBaseModel } from "./prefetch.js";
 
 export function buildTrainingHyperparameters(
   request: FineTuneRunRequest,
@@ -34,6 +35,10 @@ export function buildTrainingHyperparameters(
     lora_alpha: String(hyper.lora_alpha ?? model.defaultLoraAlpha),
     lora_dropout: String(hyper.lora_dropout ?? model.defaultLoraDropout),
     max_seq_length: String(hyper.max_seq_length ?? model.defaultMaxSeqLength),
+    lora_target_modules: Array.isArray(model.loraTargetModules)
+      ? model.loraTargetModules.join(",")
+      : model.loraTargetModules,
+    gradient_checkpointing: String(model.gradientCheckpointing),
   };
 }
 
@@ -189,6 +194,13 @@ export async function launchProcessTraining(args: {
   }
 
   if (config.paths.modelCache) await mkdir(resolve(config.paths.modelCache), { recursive: true });
+  if (config.paths.baseModel) {
+    await verifyLocalBaseModel(
+      resolve(config.paths.baseModel),
+      request.spec_snapshot.base_model,
+      config.paths.modelCache,
+    );
+  }
 
   await args.reporter?.onEvent?.({
     stage: "training",

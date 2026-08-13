@@ -11,8 +11,10 @@ import {
 import { mkdir as mkdirAsync, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Value } from "typebox/value";
 import {
   createLocalSpecProject,
+  LocalProjectSpecSchema,
   prepareLocalSpecProject,
 } from "../local-spec-workspace.js";
 
@@ -39,6 +41,20 @@ afterEach(() => {
 });
 
 describe("local spec workspace", () => {
+  it("accepts the certified Nemotron Lightning model in local specs", async () => {
+    const spec = {
+      name: "Nemotron Worker",
+      base_model: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+      system_prompt: "Return one label.",
+      guidelines: ["Return the requested label."],
+      examples: [
+        { input: "good", output: "positive" },
+        { input: "bad", output: "negative" },
+      ],
+    };
+
+    expect(Value.Check(LocalProjectSpecSchema, spec)).toBe(true);
+  });
   it.each(["../escape", "/tmp/escape", "nested/spec", "two words", ".", ".."])(
     "rejects unsafe or ambiguous folder name %s",
     async (directory) => {

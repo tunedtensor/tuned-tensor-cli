@@ -6,12 +6,16 @@ import {
   minimalMachineLearningEnvironment,
   withOfflineHuggingFaceCacheEnvironment,
 } from "./huggingface-cache.js";
-import { resolveTrainingModel } from "./model-registry.js";
+import {
+  defaultBaseModelRevision,
+  resolveRequestedBaseModelRevision,
+} from "./model-registry.js";
 import {
   buildBundledPythonCommand,
   withBundledPythonEnvironment,
 } from "./process-runner.js";
 import type { LocalModelRecord } from "./store.js";
+import { verifyLocalBaseModel } from "./prefetch.js";
 
 export interface LocalModelServeOptions {
   host?: string;
@@ -110,15 +114,22 @@ function buildModelServerLaunch(args: {
     );
   }
   const localBaseModelPath = recordedBaseModelPath ?? configuredBaseModelPath;
-  resolveTrainingModel(args.baseModel);
+  const requestedBaseModelRevision = resolveRequestedBaseModelRevision(
+    args.baseModel,
+    options.baseModelRevision,
+  );
+  const baseModelRevision = localBaseModelPath
+    ? defaultBaseModelRevision(args.baseModel)
+    : requestedBaseModelRevision;
   const entrypoint = buildBundledPythonCommand("serve.py");
   const env = withBundledPythonEnvironment(
     withOfflineHuggingFaceCacheEnvironment({
       ...minimalMachineLearningEnvironment(process.env),
       ...(artifactPath ? { TT_MODEL_ARTIFACT: artifactPath } : {}),
-      TT_BASE_MODEL: localBaseModelPath ?? args.baseModel,
-      ...(options.baseModelRevision && !localBaseModelPath
-        ? { TT_BASE_MODEL_REVISION: options.baseModelRevision }
+      TT_BASE_MODEL: args.baseModel,
+      ...(localBaseModelPath ? { TT_MODEL_SOURCE: localBaseModelPath } : {}),
+      ...(baseModelRevision
+        ? { TT_BASE_MODEL_REVISION: baseModelRevision }
         : {}),
       TT_MODEL_NAME: args.modelName,
       TT_MODEL_LOADER: "causal_lm",
@@ -172,7 +183,18 @@ export function buildLocalBaseModelServerLaunch(args: {
   });
 }
 
+export async function verifyLocalModelServerLaunch(
+  launch: LocalModelServerLaunch,
+): Promise<void> {
+  const modelSource = launch.env.TT_MODEL_SOURCE;
+  const expectedModelId = launch.env.TT_BASE_MODEL;
+  if (modelSource && expectedModelId) {
+    await verifyLocalBaseModel(modelSource, expectedModelId, launch.env.HF_HOME);
+  }
+}
+
 export async function serveLocalModel(launch: LocalModelServerLaunch): Promise<void> {
+  await verifyLocalModelServerLaunch(launch);
   await new Promise<void>((resolveServer, reject) => {
     const child = spawn(launch.command, launch.commandArgs, {
       env: launch.env,

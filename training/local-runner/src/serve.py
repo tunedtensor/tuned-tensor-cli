@@ -20,10 +20,12 @@ from evaluate import (
     resolve_adapter_path,
     sampling_kwargs,
 )
+from model_contract import assert_certified_base_model_revision, chat_template_kwargs
 
 
 MODEL_ARTIFACT = os.environ.get("TT_MODEL_ARTIFACT")
 BASE_MODEL = os.environ["TT_BASE_MODEL"]
+MODEL_SOURCE = os.environ.get("TT_MODEL_SOURCE", BASE_MODEL)
 BASE_MODEL_REVISION = os.environ.get("TT_BASE_MODEL_REVISION")
 MODEL_NAME = os.environ.get("TT_MODEL_NAME", "tuned-tensor-local")
 MODEL_LOADER = os.environ.get("TT_MODEL_LOADER", "causal_lm")
@@ -44,6 +46,7 @@ MAX_CONCURRENT_REQUESTS = int(os.environ.get("TT_MAX_CONCURRENT_REQUESTS", "1"))
 
 if MODEL_LOADER != "causal_lm":
     raise ValueError("The bundled model server is text-only and requires TT_MODEL_LOADER=causal_lm")
+assert_certified_base_model_revision(BASE_MODEL, BASE_MODEL_REVISION, "Serving base model revision")
 configure_hugging_face_cache(os.environ.get("HF_HOME"))
 import_runtime_dependencies()
 TEMP_DIR = TemporaryDirectory(prefix="tt-local-serve-")
@@ -54,6 +57,7 @@ ADAPTER_PATH = (
 )
 MODEL_PAYLOAD = {
     "base_model": BASE_MODEL,
+    "model_source": MODEL_SOURCE,
     "base_model_revision": BASE_MODEL_REVISION,
     "device": DEVICE_REQUEST,
     "model_loader": MODEL_LOADER,
@@ -73,7 +77,7 @@ def text_content(content: Any) -> str:
     parts: list[str] = []
     for part in content:
         if not isinstance(part, dict) or part.get("type") != "text":
-            raise ValueError("The bundled Qwen model server accepts text content only.")
+            raise ValueError("The bundled model server accepts text content only.")
         text = part.get("text")
         if not isinstance(text, str):
             raise ValueError("Every text content part must contain a string text field.")
@@ -104,7 +108,7 @@ def normalize_messages(raw_messages: Any) -> list[dict[str, str]]:
         raise ValueError("Request must contain at least one non-system message.")
     messages: list[dict[str, str]] = []
     if system_parts:
-        # Qwen permits one leading system message. Merge the invariant owner
+        # The certified chat templates accept one leading system message. Merge the invariant owner
         # prompt and any client context instead of triggering an implicit
         # template fallback with duplicate system turns.
         messages.append({"role": "system", "content": "\n\n".join(system_parts)})
@@ -120,9 +124,10 @@ def generate_text(messages: list[dict[str, str]], generation: dict[str, Any]) ->
             messages,
             tokenize=False,
             add_generation_prompt=True,
+            **chat_template_kwargs(BASE_MODEL),
         )
     except Exception as exc:
-        raise ValueError(f"Qwen chat-template rendering failed: {exc}") from exc
+        raise ValueError(f"Model chat-template rendering failed: {exc}") from exc
     inputs = TOKENIZER(prompt, return_tensors="pt")
     if int(inputs["input_ids"].shape[-1]) > MAX_PROMPT_TOKENS:
         raise ValueError(f"Prompt exceeds the {MAX_PROMPT_TOKENS}-token limit.")

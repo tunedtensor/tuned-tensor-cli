@@ -16,7 +16,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingA
 
 from model_contract import (
     CERTIFIED_BASE_MODEL,
+    assert_certified_base_model,
+    assert_certified_base_model_revision,
     assert_certified_model_config,
+    chat_template_kwargs,
+    parse_lora_target_modules,
 )
 from sft_data import IGNORE_INDEX, build_assistant_only_example
 
@@ -67,10 +71,12 @@ def model_revision_kwargs(model_source: str) -> dict[str, str]:
 
 def assert_certified_request() -> None:
     requested_model = hp("base_model", CERTIFIED_BASE_MODEL)
-    if requested_model != CERTIFIED_BASE_MODEL:
-        raise ValueError(
-            f"The bundled trainer currently certifies only {CERTIFIED_BASE_MODEL}; got {requested_model!r}"
-        )
+    assert_certified_base_model(str(requested_model), "Training base model")
+    assert_certified_base_model_revision(
+        str(requested_model),
+        hp("base_model_revision"),
+        "Training base model revision",
+    )
     loader = hp("model_loader", "causal_lm")
     if loader != "causal_lm":
         raise ValueError(f"The bundled trainer is text-only and requires model_loader=causal_lm; got {loader!r}")
@@ -111,7 +117,7 @@ def load_rows() -> list[dict[str, Any]]:
 def resolve_model_source() -> str:
     if BASE_MODEL_DIR.is_dir() and any(BASE_MODEL_DIR.iterdir()):
         return str(BASE_MODEL_DIR)
-    return CERTIFIED_BASE_MODEL
+    return str(hp("base_model", CERTIFIED_BASE_MODEL))
 
 
 class AssistantOnlyDataset(Dataset[dict[str, torch.Tensor]]):
@@ -121,6 +127,7 @@ class AssistantOnlyDataset(Dataset[dict[str, torch.Tensor]]):
         tokenizer: Any,
         *,
         max_length: int,
+        chat_template_kwargs: dict[str, Any] | None = None,
     ):
         self.examples: list[dict[str, torch.Tensor]] = []
         for row_index, row in enumerate(rows, start=1):
@@ -129,9 +136,10 @@ class AssistantOnlyDataset(Dataset[dict[str, torch.Tensor]]):
                     tokenizer,
                     row["messages"],
                     max_length=max_length,
+                    chat_template_kwargs=chat_template_kwargs,
                 )
             except Exception as exc:
-                raise ValueError(f"Training row {row_index} is not valid Qwen SFT data: {exc}") from exc
+                raise ValueError(f"Training row {row_index} is not valid chat SFT data: {exc}") from exc
             self.examples.append({
                 key: torch.tensor(value, dtype=torch.long)
                 for key, value in tokenized.items()
@@ -179,7 +187,7 @@ def create_model_and_tokenizer(model_source: str) -> tuple[Any, Any, torch.dtype
         source_kwargs["local_files_only"] = True
     tokenizer = AutoTokenizer.from_pretrained(model_source, **source_kwargs)
     if tokenizer.eos_token_id is None:
-        raise ValueError(f"{CERTIFIED_BASE_MODEL} tokenizer has no EOS token")
+        raise ValueError(f"{hp('base_model', CERTIFIED_BASE_MODEL)} tokenizer has no EOS token")
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -190,7 +198,10 @@ def create_model_and_tokenizer(model_source: str) -> tuple[Any, Any, torch.dtype
         dtype=dtype,
         device_map={"": torch.cuda.current_device()},
     )
-    assert_certified_model_config(model.config)
+    assert_certified_model_config(
+        model.config,
+        expected_model_id=str(hp("base_model", CERTIFIED_BASE_MODEL)),
+    )
     model.config.use_cache = False
     return model, tokenizer, dtype
 
@@ -202,7 +213,7 @@ def apply_lora(model: Any) -> Any:
         lora_dropout=hp_float("lora_dropout", 0.05),
         bias="none",
         task_type="CAUSAL_LM",
-        target_modules="all-linear",
+        target_modules=parse_lora_target_modules(hp("lora_target_modules", "all-linear")),
     )
     return get_peft_model(model, config)
 
@@ -217,11 +228,16 @@ def create_model_archive() -> Path:
 
 def run_training(rows: list[dict[str, Any]], model_source: str) -> tuple[dict[str, Any], torch.dtype]:
     model, tokenizer, dtype = create_model_and_tokenizer(model_source)
+    model.config.use_cache = False
     model = apply_lora(model)
+    if str(hp("gradient_checkpointing", "false")).lower() == "true":
+        model.enable_input_require_grads()
+        model.gradient_checkpointing_enable()
     dataset = AssistantOnlyDataset(
         rows,
         tokenizer,
         max_length=hp_int("max_seq_length", 2048),
+        chat_template_kwargs=chat_template_kwargs(str(hp("base_model", CERTIFIED_BASE_MODEL))),
     )
     collator = AssistantOnlyCollator(tokenizer.pad_token_id)
 
@@ -239,6 +255,7 @@ def run_training(rows: list[dict[str, Any]], model_source: str) -> tuple[dict[st
             bf16=dtype == torch.bfloat16,
             fp16=dtype == torch.float16,
             optim="adamw_torch",
+            gradient_checkpointing=str(hp("gradient_checkpointing", "false")).lower() == "true",
         )
         trainer = Trainer(
             model=model,
@@ -266,7 +283,7 @@ def main() -> None:
     archive_path = create_model_archive()
     output_metrics = {
         "training_rows": len(rows),
-        "base_model": CERTIFIED_BASE_MODEL,
+        "base_model": hp("base_model", CERTIFIED_BASE_MODEL),
         "base_model_revision": hp("base_model_revision"),
         "model_source": model_source,
         "model_loader": "causal_lm",
