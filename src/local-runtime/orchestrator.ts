@@ -1353,9 +1353,9 @@ async function runTrainStage(args: {
     request: args.prepared.request,
     artifacts: args.prepared.artifacts,
     config: args.config,
-    baseModelRevision: args.config.paths.baseModel
-      ? undefined
-      : args.prepared.metadata.base_model_revision ?? undefined,
+    // Python loads a configured snapshot by local path, but still needs this
+    // certified revision to enforce registry-pinned model provenance.
+    baseModelRevision: args.prepared.metadata.base_model_revision ?? undefined,
     reporter: args.runReporter,
     shouldCancel: () => args.store.isCancellationRequested(args.prepared.request.run_id),
   });
