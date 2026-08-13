@@ -635,6 +635,20 @@ test("request changes invalidate prepared and downstream stage artifacts", async
   }
 });
 
+test("training forwards the certified revision for a configured local model", async () => {
+  const source = await readFile(
+    new URL("../../src/local-runtime/orchestrator.ts", import.meta.url),
+    "utf8",
+  );
+  const launch = source.match(/launchProcessTraining\(\{[\s\S]*?\n  \}\);/)?.[0];
+  assert.ok(launch, "training launch call must remain present");
+  assert.match(
+    launch,
+    /baseModelRevision: args\.prepared\.metadata\.base_model_revision \?\? undefined/,
+  );
+  assert.doesNotMatch(launch, /baseModelRevision: args\.config\.paths\.baseModel/);
+});
+
 test("local base-model byte changes invalidate prepared outputs", async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-base-fingerprint-"));
   try {
