@@ -5,11 +5,12 @@ from typing import Any
 
 CERTIFIED_BASE_MODEL = "Qwen/Qwen3.5-2B"
 NEMOTRON_BASE_MODEL = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
+MUSE_GLIMMER_BASE_MODEL = "meta-models/Muse-Glimmer-30B"
 # Immutable Hugging Face revision reviewed for Nemotron local fine-tuning.
 # Node validates local snapshots against this revision and its certified file
 # digests before invoking Python.
 NEMOTRON_BASE_MODEL_REVISION = "ce38b6ab8b252b4b8ee7165b4605e93191cafd73"
-CERTIFIED_BASE_MODELS = (CERTIFIED_BASE_MODEL, NEMOTRON_BASE_MODEL)
+CERTIFIED_BASE_MODELS = (CERTIFIED_BASE_MODEL, NEMOTRON_BASE_MODEL, MUSE_GLIMMER_BASE_MODEL)
 CERTIFIED_QWEN_TEXT_CONFIG = {
     "model_type": "qwen3_5_text",
     "hidden_size": 2048,
@@ -18,6 +19,15 @@ CERTIFIED_QWEN_TEXT_CONFIG = {
     "num_key_value_heads": 2,
     "intermediate_size": 6144,
     "vocab_size": 248320,
+}
+CERTIFIED_MUSE_GLIMMER_TEXT_CONFIG = {
+    "model_type": "muse_glimmer_text",
+    "hidden_size": 6656,
+    "num_hidden_layers": 52,
+    "num_attention_heads": 32,
+    "num_key_value_heads": 2,
+    "intermediate_size": 19968,
+    "vocab_size": 202048,
 }
 CERTIFIED_NEMOTRON_CONFIG = {
     "hidden_size": 2688,
@@ -46,20 +56,35 @@ def assert_certified_model_config(
 ) -> None:
     model_type = _field(value, "model_type")
     architectures = _field(value, "architectures")
-    if model_type == "qwen3_5":
+
+    if model_type in ("qwen3_5", "qwen3_5_text"):
         actual_model_id = CERTIFIED_BASE_MODEL
-        text_config = _field(value, "text_config")
-        if (
-            not isinstance(architectures, (list, tuple))
-            or "Qwen3_5ForConditionalGeneration" not in architectures
-            or text_config is None
-        ):
-            raise ValueError(f"{label} is not the certified {CERTIFIED_BASE_MODEL} architecture")
-    elif model_type == "qwen3_5_text":
-        actual_model_id = CERTIFIED_BASE_MODEL
-        # AutoModelForCausalLM exposes the selected text sub-config after it
-        # dispatches the verified repository-level Qwen3.5 config.
-        text_config = value
+        if model_type == "qwen3_5":
+            text_config = _field(value, "text_config")
+            if (
+                not isinstance(architectures, (list, tuple))
+                or "Qwen3_5ForConditionalGeneration" not in architectures
+                or text_config is None
+            ):
+                raise ValueError(f"{label} is not the certified {CERTIFIED_BASE_MODEL} architecture")
+        else:
+            # AutoModelForCausalLM exposes the selected text sub-config after it
+            # dispatches the verified repository-level Qwen3.5 config.
+            text_config = value
+        certified = CERTIFIED_QWEN_TEXT_CONFIG
+    elif model_type in ("muse_glimmer", "muse_glimmer_text"):
+        actual_model_id = MUSE_GLIMMER_BASE_MODEL
+        if model_type == "muse_glimmer":
+            text_config = _field(value, "text_config")
+            if (
+                not isinstance(architectures, (list, tuple))
+                or "MuseGlimmerForConditionalGeneration" not in architectures
+                or text_config is None
+            ):
+                raise ValueError(f"{label} is not the certified {MUSE_GLIMMER_BASE_MODEL} architecture")
+        else:
+            text_config = value
+        certified = CERTIFIED_MUSE_GLIMMER_TEXT_CONFIG
     elif model_type == "nemotron_h":
         actual_model_id = NEMOTRON_BASE_MODEL
         if (
@@ -83,11 +108,11 @@ def assert_certified_model_config(
     else:
         raise ValueError(f"{label} is not a certified TT Local base-model architecture")
 
-    for name, expected in CERTIFIED_QWEN_TEXT_CONFIG.items():
+    for name, expected in certified.items():
         actual = _field(text_config, name)
         if actual != expected:
             raise ValueError(
-                f"{label} is not the certified {CERTIFIED_BASE_MODEL} architecture: "
+                f"{label} is not the certified {actual_model_id} architecture: "
                 f"text_config.{name} must be {expected!r}, got {actual!r}"
             )
     if expected_model_id and expected_model_id != actual_model_id:

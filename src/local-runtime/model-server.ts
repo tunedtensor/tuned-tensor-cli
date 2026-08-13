@@ -8,6 +8,7 @@ import {
 } from "./huggingface-cache.js";
 import {
   defaultBaseModelRevision,
+  resolveModelLoader,
   resolveRequestedBaseModelRevision,
 } from "./model-registry.js";
 import {
@@ -132,7 +133,7 @@ function buildModelServerLaunch(args: {
         ? { TT_BASE_MODEL_REVISION: baseModelRevision }
         : {}),
       TT_MODEL_NAME: args.modelName,
-      TT_MODEL_LOADER: "causal_lm",
+      TT_MODEL_LOADER: resolveModelLoader(args.baseModel),
       TT_HOST: host,
       TT_PORT: String(port),
       TT_DEVICE: options.device ?? args.config.evaluation.inference.device,

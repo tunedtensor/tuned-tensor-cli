@@ -9,20 +9,23 @@ import {
   assertUsableModelArtifact,
   canonicalizeTrainingModel,
   defaultBaseModelRevision,
+  resolveModelLoader,
   resolveRequestedBaseModelRevision,
   resolveTrainingModel,
   TRAINING_MODELS,
 } from "../../src/local-runtime/model-registry.js";
 
-test("registry certifies the native text-only Qwen and Nemotron training paths", () => {
+test("registry certifies the local Qwen, Nemotron, and Muse Glimmer training paths", () => {
   assert.deepEqual(TRAINING_MODELS.map((model) => model.id), [
     "Qwen/Qwen3.5-2B",
     "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+    "meta-models/Muse-Glimmer-30B",
   ]);
   assert.equal(canonicalizeTrainingModel(" qwen/QWEN3.5-2b "), "Qwen/Qwen3.5-2B");
   assert.deepEqual(resolveTrainingModel("Qwen/Qwen3.5-2B"), {
     id: "Qwen/Qwen3.5-2B",
     family: "qwen3_5",
+    modelLoader: "causal_lm",
     defaultLearningRate: 0.00001,
     defaultPerDeviceBatchSize: 1,
     defaultGradientAccumulationSteps: 8,
@@ -41,6 +44,7 @@ test("registry certifies the native text-only Qwen and Nemotron training paths",
     id: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
     family: "nemotron_h",
     defaultRevision: NEMOTRON_BF16_REVISION,
+    modelLoader: "causal_lm",
     defaultLearningRate: 0.00001,
     defaultPerDeviceBatchSize: 1,
     defaultGradientAccumulationSteps: 8,
@@ -99,7 +103,7 @@ test("certified config accepts only the released Nemotron 3.5 Lightning BF16 arc
   );
 });
 
-test("Nemotron is bound to the reviewed immutable Hugging Face revision", () => {
+test("Nemotron is bound to the reviewed immutable revision; Qwen and Muse Glimmer are not", () => {
   assert.equal(
     resolveTrainingModel("nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16").defaultRevision,
     NEMOTRON_BF16_REVISION,
@@ -108,8 +112,9 @@ test("Nemotron is bound to the reviewed immutable Hugging Face revision", () => 
     defaultBaseModelRevision("nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"),
     "ce38b6ab8b252b4b8ee7165b4605e93191cafd73",
   );
-  // Qwen remains unpinned for backward compatibility.
+  // Qwen and Muse Glimmer remain unpinned for backward compatibility.
   assert.equal(defaultBaseModelRevision("Qwen/Qwen3.5-2B"), undefined);
+  assert.equal(defaultBaseModelRevision("meta-models/Muse-Glimmer-30B"), undefined);
   assert.equal(
     resolveRequestedBaseModelRevision(
       "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
@@ -181,6 +186,49 @@ test("certified config rejects a Nemotron snapshot paired with a Qwen request", 
     "Local base-model config",
     "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
   ));
+});
+
+test("certified config accepts only the released Muse Glimmer text tower", () => {
+  const config = {
+    architectures: ["MuseGlimmerForConditionalGeneration"],
+    model_type: "muse_glimmer",
+    text_config: {
+      model_type: "muse_glimmer_text",
+      hidden_size: 6656,
+      num_hidden_layers: 52,
+      num_attention_heads: 32,
+      num_key_value_heads: 2,
+      intermediate_size: 19968,
+      vocab_size: 202048,
+    },
+  };
+  assert.doesNotThrow(() => assertCertifiedBaseModelConfig(config));
+  assert.throws(
+    () => assertCertifiedBaseModelConfig({
+      ...config,
+      text_config: { ...config.text_config, hidden_size: 6784 },
+    }),
+    /Muse-Glimmer-30B architecture/,
+  );
+  // Cross-model rejection: a valid Muse Glimmer snapshot paired with a Qwen request.
+  assert.throws(
+    () => assertCertifiedBaseModelConfig(config, "Local base-model config", "Qwen/Qwen3.5-2B"),
+    /does not match requested base model/,
+  );
+  assert.doesNotThrow(() => assertCertifiedBaseModelConfig(
+    config,
+    "Local base-model config",
+    "meta-models/Muse-Glimmer-30B",
+  ));
+});
+
+test("Muse Glimmer loads through the image-text-to-text loader", () => {
+  assert.equal(resolveModelLoader("meta-models/Muse-Glimmer-30B"), "image_text_to_text");
+  assert.equal(resolveModelLoader("Qwen/Qwen3.5-2B"), "causal_lm");
+  assert.equal(
+    resolveModelLoader("nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"),
+    "causal_lm",
+  );
 });
 
 test("optimizer state cannot masquerade as a LoRA adapter", async () => {

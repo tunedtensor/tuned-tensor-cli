@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from model_contract import (
+    MUSE_GLIMMER_BASE_MODEL,
     NEMOTRON_BASE_MODEL,
     NEMOTRON_BASE_MODEL_REVISION,
     assert_certified_base_model_revision,
@@ -88,6 +89,30 @@ class ModelContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Nemotron-3.5-Lightning-30B-A3B-BF16"):
             assert_certified_model_config({**config, "n_routed_experts": 64})
 
+    def test_accepts_only_the_released_muse_glimmer_text_tower(self) -> None:
+        config = {
+            "architectures": ["MuseGlimmerForConditionalGeneration"],
+            "model_type": "muse_glimmer",
+            "text_config": {
+                "model_type": "muse_glimmer_text",
+                "hidden_size": 6656,
+                "num_hidden_layers": 52,
+                "num_attention_heads": 32,
+                "num_key_value_heads": 2,
+                "intermediate_size": 19968,
+                "vocab_size": 202048,
+            },
+        }
+        assert_certified_model_config(config)
+        assert_certified_model_config(config["text_config"])
+        with self.assertRaisesRegex(ValueError, MUSE_GLIMMER_BASE_MODEL):
+            assert_certified_model_config({
+                **config,
+                "text_config": {**config["text_config"], "hidden_size": 6784},
+            })
+        with self.assertRaisesRegex(ValueError, "does not match requested base model"):
+            assert_certified_model_config(config, expected_model_id="Qwen/Qwen3.5-2B")
+
     def test_parses_model_specific_lora_targets(self) -> None:
         self.assertEqual(parse_lora_target_modules("all-linear"), "all-linear")
         self.assertEqual(
@@ -111,6 +136,10 @@ class ModelContractTests(unittest.TestCase):
     def test_revision_assertion_does_not_pin_the_qwen_model(self) -> None:
         assert_certified_base_model_revision("Qwen/Qwen3.5-2B", None)
         assert_certified_base_model_revision("Qwen/Qwen3.5-2B", "any-revision")
+
+    def test_revision_assertion_does_not_pin_the_muse_glimmer_model(self) -> None:
+        assert_certified_base_model_revision(MUSE_GLIMMER_BASE_MODEL, None)
+        assert_certified_base_model_revision(MUSE_GLIMMER_BASE_MODEL, "any-revision")
 
 
 if __name__ == "__main__":

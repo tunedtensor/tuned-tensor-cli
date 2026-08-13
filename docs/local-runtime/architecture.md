@@ -4,8 +4,12 @@ This repository is the maintenance-mode local runtime behind the unified
 `tt local` workflow. The standalone `tt-local` product surface is deprecated;
 see [the deprecation note](../DEPRECATION.md). Its supported runtime boundary
 is text SFT of a registry-certified Transformers causal LM into a LoRA adapter
-on CUDA. Certified checkpoints are `Qwen/Qwen3.5-2B` and
-`nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16`.
+on CUDA. Certified checkpoints are `Qwen/Qwen3.5-2B`,
+`nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16`, and
+`meta-models/Muse-Glimmer-30B`. Muse Glimmer is a vision-language checkpoint
+whose text tower is loaded through `AutoModelForImageTextToText` (its text
+tower is not exposed in the causal-LM auto mapping) with the vision tower
+frozen and unused during text SFT.
 
 ## Workflow
 

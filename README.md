@@ -221,13 +221,15 @@ tt local models verify local-<run-id>
 tt local models serve local-<run-id> --config local-runner.json
 ```
 
-Local currently certifies text SFT with `Qwen/Qwen3.5-2B` and
-`nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16`, using LoRA/PEFT and CUDA.
-The 30B/3B-active Nemotron path is intended for DGX Spark-class unified memory,
-uses activation checkpointing, and adapts bounded shared attention/Mamba
-projections rather than every routed expert matrix. Evaluation and serving may
-use CPU. Training artifacts, datasets, and model weights remain on the
-execution host.
+Local currently certifies text SFT with `Qwen/Qwen3.5-2B`,
+`nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16`, and
+`meta-models/Muse-Glimmer-30B`, using LoRA/PEFT and CUDA. The 30B/3B-active
+Nemotron path is intended for DGX Spark-class unified memory, uses activation
+checkpointing, and adapts bounded shared attention/Mamba projections rather
+than every routed expert matrix. Muse Glimmer is a vision-language checkpoint
+whose text tower is fine-tuned through the image-text-to-text loader with the
+vision tower frozen and unused. Evaluation and serving may use CPU. Training
+artifacts, datasets, and model weights remain on the execution host.
 
 Activation is optional and requires the run to pass a configured
 `generalRegression` gate. Once activated, use

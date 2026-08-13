@@ -12,7 +12,13 @@ import torch
 from peft import LoraConfig, get_peft_model
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForImageTextToText,
+    AutoTokenizer,
+    Trainer,
+    TrainingArguments,
+)
 
 from model_contract import (
     CERTIFIED_BASE_MODEL,
@@ -78,8 +84,11 @@ def assert_certified_request() -> None:
         "Training base model revision",
     )
     loader = hp("model_loader", "causal_lm")
-    if loader != "causal_lm":
-        raise ValueError(f"The bundled trainer is text-only and requires model_loader=causal_lm; got {loader!r}")
+    if loader not in ("causal_lm", "image_text_to_text"):
+        raise ValueError(
+            f"The bundled trainer does not support model_loader={loader!r}; "
+            "expected causal_lm or image_text_to_text"
+        )
 def require_cuda() -> dict[str, Any]:
     if not torch.cuda.is_available():
         raise RuntimeError(
@@ -192,7 +201,15 @@ def create_model_and_tokenizer(model_source: str) -> tuple[Any, Any, torch.dtype
         tokenizer.pad_token = tokenizer.eos_token
 
     dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-    model = AutoModelForCausalLM.from_pretrained(
+    # Multimodal checkpoints whose text tower is not registered in the
+    # causal-LM auto mapping (e.g. Muse Glimmer) load through
+    # AutoModelForImageTextToText; the vision tower stays frozen and unused.
+    model_class = (
+        AutoModelForImageTextToText
+        if hp("model_loader", "causal_lm") == "image_text_to_text"
+        else AutoModelForCausalLM
+    )
+    model = model_class.from_pretrained(
         model_source,
         **source_kwargs,
         dtype=dtype,
@@ -286,7 +303,7 @@ def main() -> None:
         "base_model": hp("base_model", CERTIFIED_BASE_MODEL),
         "base_model_revision": hp("base_model_revision"),
         "model_source": model_source,
-        "model_loader": "causal_lm",
+        "model_loader": hp("model_loader", "causal_lm"),
         "loss_mask": "final_assistant_only",
         "device": "cuda",
         "cuda_device": cuda["device_name"],

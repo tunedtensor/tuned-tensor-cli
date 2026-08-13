@@ -44,8 +44,11 @@ API_KEY = os.environ.get("TT_API_KEY", "")
 MAX_CONCURRENT_REQUESTS = int(os.environ.get("TT_MAX_CONCURRENT_REQUESTS", "1"))
 
 
-if MODEL_LOADER != "causal_lm":
-    raise ValueError("The bundled model server is text-only and requires TT_MODEL_LOADER=causal_lm")
+if MODEL_LOADER not in ("causal_lm", "image_text_to_text"):
+    raise ValueError(
+        f"The bundled model server does not support TT_MODEL_LOADER={MODEL_LOADER!r}; "
+        "expected causal_lm or image_text_to_text"
+    )
 assert_certified_base_model_revision(BASE_MODEL, BASE_MODEL_REVISION, "Serving base model revision")
 configure_hugging_face_cache(os.environ.get("HF_HOME"))
 import_runtime_dependencies()
@@ -62,7 +65,7 @@ MODEL_PAYLOAD = {
     "device": DEVICE_REQUEST,
     "model_loader": MODEL_LOADER,
 }
-MODEL, TOKENIZER, DEVICE = load_text_model(MODEL_PAYLOAD, ADAPTER_PATH)
+MODEL, TOKENIZER, DEVICE = load_text_model(MODEL_PAYLOAD, ADAPTER_PATH, MODEL_LOADER)
 GENERATION_LOCK = threading.Lock()
 REQUEST_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
 

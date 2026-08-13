@@ -22,7 +22,7 @@ import {
   minimalMachineLearningEnvironment,
   withOfflineHuggingFaceCacheEnvironment,
 } from "./huggingface-cache.js";
-import { defaultBaseModelRevision, resolveRequestedBaseModelRevision } from "./model-registry.js";
+import { defaultBaseModelRevision, resolveModelLoader, resolveRequestedBaseModelRevision } from "./model-registry.js";
 
 function normalize(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
@@ -343,7 +343,7 @@ async function runTransformersInference(args: {
     base_model: args.baseModelId,
     model_source: args.modelSource,
     base_model_revision: args.baseModelRevision,
-    model_loader: "causal_lm",
+    model_loader: resolveModelLoader(args.baseModelId),
     adapter_path: fileUriToPath(args.adapterPath),
     system: args.system,
     examples: args.examples.map((example, index) => ({
