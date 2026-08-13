@@ -9,6 +9,7 @@ import {
   assertUsableModelArtifact,
   canonicalizeTrainingModel,
   defaultBaseModelRevision,
+  resolveRequestedBaseModelRevision,
   resolveTrainingModel,
   TRAINING_MODELS,
 } from "../../src/local-runtime/model-registry.js";
@@ -109,6 +110,19 @@ test("Nemotron is bound to the reviewed immutable Hugging Face revision", () => 
   );
   // Qwen remains unpinned for backward compatibility.
   assert.equal(defaultBaseModelRevision("Qwen/Qwen3.5-2B"), undefined);
+  assert.equal(
+    resolveRequestedBaseModelRevision(
+      "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+    ),
+    NEMOTRON_BF16_REVISION,
+  );
+  assert.throws(
+    () => resolveRequestedBaseModelRevision(
+      "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ),
+    /must use certified revision/,
+  );
 });
 
 test("certified config rejects a same-family Qwen snapshot paired with a Nemotron request", () => {

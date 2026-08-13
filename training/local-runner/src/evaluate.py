@@ -12,6 +12,7 @@ from typing import Any
 from model_contract import (
     CERTIFIED_BASE_MODELS,
     CERTIFIED_BASE_MODEL,
+    assert_certified_base_model,
     assert_certified_base_model_revision,
     assert_certified_model_config,
     chat_template_kwargs,
@@ -148,22 +149,23 @@ def _assert_certified_model_source(base_model: str) -> None:
 
 def load_text_model(payload: dict[str, Any], adapter_path: str | None):
     base_model = str(payload["base_model"])
-    _assert_certified_model_source(base_model)
+    model_source = str(payload.get("model_source", base_model))
+    assert_certified_base_model(base_model, "Evaluation base model")
+    _assert_certified_model_source(model_source)
     revision = payload.get("base_model_revision")
-    if not Path(base_model).exists():
-        assert_certified_base_model_revision(base_model, revision, "Evaluation base model revision")
+    assert_certified_base_model_revision(base_model, revision, "Evaluation base model revision")
     device = resolve_device(str(payload.get("device", "cuda")))
     token = os.getenv("HF_TOKEN")
     source_kwargs: dict[str, Any] = {
         "trust_remote_code": False,
         "token": token,
     }
-    if not Path(base_model).exists():
+    if not Path(model_source).exists():
         source_kwargs["local_files_only"] = True
-    if revision and not Path(base_model).exists():
+    if revision and not Path(model_source).exists():
         source_kwargs["revision"] = revision
 
-    tokenizer = AutoTokenizer.from_pretrained(base_model, **source_kwargs)
+    tokenizer = AutoTokenizer.from_pretrained(model_source, **source_kwargs)
     if tokenizer.eos_token_id is None:
         raise ValueError(f"{base_model} tokenizer has no EOS token")
     if tokenizer.pad_token_id is None:
@@ -179,8 +181,8 @@ def load_text_model(payload: dict[str, Any], adapter_path: str | None):
     if device == "cuda":
         model_kwargs["device_map"] = {"": torch.cuda.current_device()}
 
-    model = AutoModelForCausalLM.from_pretrained(base_model, **model_kwargs)
-    assert_certified_model_config(model.config)
+    model = AutoModelForCausalLM.from_pretrained(model_source, **model_kwargs)
+    assert_certified_model_config(model.config, expected_model_id=base_model)
     if adapter_path:
         model = PeftModel.from_pretrained(model, adapter_path)
     if device != "cuda":

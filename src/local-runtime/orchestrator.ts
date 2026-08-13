@@ -50,7 +50,12 @@ import {
   splitSpecExamples,
 } from "./evaluation.js";
 import { launchProcessTraining } from "./process-training.js";
-import { assertUsableModelArtifact, defaultBaseModelRevision, localModelArtifactPath } from "./model-registry.js";
+import {
+  assertUsableModelArtifact,
+  defaultBaseModelRevision,
+  localModelArtifactPath,
+  resolveRequestedBaseModelRevision,
+} from "./model-registry.js";
 import { ProcessCancelledError } from "./process-runner.js";
 import type { LocalRunReporter } from "./run-reporter.js";
 import { localRuntimePackageRoot } from "./package-root.js";
@@ -552,12 +557,17 @@ async function resolveBaseModelRevision(
   request: FineTuneRunRequest,
   config: LocalRunnerConfig,
 ): Promise<string | undefined> {
-  const explicit = request.hyperparameters.base_model_revision;
-  if (explicit) return explicit;
+  const requested = resolveRequestedBaseModelRevision(
+    request.spec_snapshot.base_model,
+    request.hyperparameters.base_model_revision,
+  );
   if (config.paths.baseModel) {
-    const match = resolve(config.paths.baseModel).match(/[\\/]snapshots[\\/]([^\\/]+)(?:[\\/]|$)/);
-    if (match?.[1]) return match[1];
+    // A configured directory is certified by content. Only a registry-pinned
+    // model may therefore claim a revision; an arbitrary Qwen directory keeps
+    // its content fingerprint but does not inherit a user-supplied repo SHA.
+    return defaultBaseModelRevision(request.spec_snapshot.base_model);
   }
+  if (requested) return requested;
   if (!request.spec_snapshot.base_model.includes("/")) {
     return defaultBaseModelRevision(request.spec_snapshot.base_model);
   }
@@ -577,6 +587,7 @@ async function resolveBaseModelRevision(
 export async function fingerprintLocalBaseModel(
   uri: string,
   expectedModelId?: string,
+  modelCache?: string,
 ): Promise<string> {
   const root = localModelArtifactPath(uri);
   const rootMetadata = await lstat(root);
@@ -586,7 +597,7 @@ export async function fingerprintLocalBaseModel(
   if (!rootMetadata.isDirectory()) {
     throw new Error(`Local base model must be a Hugging Face snapshot directory: ${root}`);
   }
-  await verifyLocalBaseModel(root, expectedModelId);
+  await verifyLocalBaseModel(root, expectedModelId, modelCache);
   const files: Array<{ path: string; size_bytes: number; sha256: string }> = [];
   const visit = async (directory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -807,8 +818,7 @@ async function modelManifestContract(
     format,
     framework: "transformers-peft",
     base_model: prepared.request.spec_snapshot.base_model,
-    base_model_revision: prepared.metadata.base_model_revision
-      ?? prepared.request.hyperparameters.base_model_revision,
+    base_model_revision: prepared.metadata.base_model_revision ?? undefined,
     base_model_artifact_uri: training.base_model_artifact_uri,
     base_model_fingerprint: prepared.metadata.base_model_fingerprint ?? undefined,
     artifact_uri: training.model_artifact_uri,
@@ -1070,6 +1080,7 @@ async function computePreparedRun(args: {
     ? await fingerprintLocalBaseModel(
       config.paths.baseModel,
       request.spec_snapshot.base_model,
+      config.paths.modelCache,
     )
     : undefined;
   const metadata: StageMetadata = {
@@ -1236,7 +1247,8 @@ async function runBaselineStage(args: {
   const report = await evaluateExamples({
     kind: "baseline",
     modelId: args.prepared.baseModelForEvaluation,
-    baseModelId: args.prepared.baseModelForEvaluation,
+    baseModelId: args.prepared.request.spec_snapshot.base_model,
+    modelSource: args.prepared.baseModelForEvaluation,
     baseModelRevision: args.config.paths.baseModel
       ? undefined
       : args.prepared.metadata.base_model_revision ?? undefined,
@@ -1267,7 +1279,8 @@ async function runBaselineStage(args: {
     await evaluateExamples({
       kind: "baseline",
       modelId: args.prepared.baseModelForEvaluation,
-      baseModelId: args.prepared.baseModelForEvaluation,
+      baseModelId: args.prepared.request.spec_snapshot.base_model,
+      modelSource: args.prepared.baseModelForEvaluation,
       baseModelRevision: args.config.paths.baseModel
         ? undefined
         : args.prepared.metadata.base_model_revision ?? undefined,
@@ -1456,7 +1469,8 @@ async function runCandidateStage(args: {
   const report = await evaluateExamples({
     kind: "candidate",
     modelId: modelArtifact,
-    baseModelId: args.prepared.baseModelForEvaluation,
+    baseModelId: args.prepared.request.spec_snapshot.base_model,
+    modelSource: args.prepared.baseModelForEvaluation,
     baseModelRevision: args.config.paths.baseModel
       ? undefined
       : args.prepared.metadata.base_model_revision ?? undefined,
@@ -1487,7 +1501,8 @@ async function runCandidateStage(args: {
     await evaluateExamples({
       kind: "candidate",
       modelId: modelArtifact,
-      baseModelId: args.prepared.baseModelForEvaluation,
+      baseModelId: args.prepared.request.spec_snapshot.base_model,
+      modelSource: args.prepared.baseModelForEvaluation,
       baseModelRevision: args.config.paths.baseModel
         ? undefined
         : args.prepared.metadata.base_model_revision ?? undefined,

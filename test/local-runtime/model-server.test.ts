@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { localRunnerConfigSchema } from "../../src/local-runtime/contracts.js";
 import {
   buildLocalBaseModelServerLaunch,
   buildLocalModelServerLaunch,
+  serveLocalModel,
+  verifyLocalModelServerLaunch,
 } from "../../src/local-runtime/model-server.js";
 import type { LocalModelRecord } from "../../src/local-runtime/store.js";
 
@@ -52,7 +57,8 @@ test("serving launches the bundled text-only Qwen adapter with safe model settin
     value.endsWith("training/local-runner/src/serve.py")
   ));
   assert.equal(launch.env.TT_MODEL_ARTIFACT, "/tmp/model.tar.gz");
-  assert.equal(launch.env.TT_BASE_MODEL, "/tmp/qwen-snapshot");
+  assert.equal(launch.env.TT_BASE_MODEL, "Qwen/Qwen3.5-2B");
+  assert.equal(launch.env.TT_MODEL_SOURCE, "/tmp/qwen-snapshot");
   assert.equal(launch.env.TT_BASE_MODEL_REVISION, undefined);
   assert.equal(launch.env.TT_MODEL_LOADER, "causal_lm");
   assert.equal(launch.env.TT_TRUST_REMOTE_CODE, "false");
@@ -76,13 +82,38 @@ test("protected-base serving omits the adapter while remaining offline", () => {
         modelCache: "/tmp/huggingface",
       },
     }),
+    options: {
+      baseModelRevision: "0123456789abcdef0123456789abcdef01234567",
+    },
   });
   assert.equal(launch.artifactPath, undefined);
   assert.equal(launch.env.TT_MODEL_ARTIFACT, undefined);
-  assert.equal(launch.env.TT_BASE_MODEL, "/tmp/qwen-snapshot");
+  assert.equal(launch.env.TT_BASE_MODEL, "Qwen/Qwen3.5-2B");
+  assert.equal(launch.env.TT_MODEL_SOURCE, "/tmp/qwen-snapshot");
+  assert.equal(launch.env.TT_BASE_MODEL_REVISION, undefined);
   assert.equal(launch.env.HF_HUB_OFFLINE, "1");
   assert.equal(launch.env.TRANSFORMERS_OFFLINE, "1");
   assert.equal(launch.modelName, "base:Qwen/Qwen3.5-2B");
+});
+
+test("local Nemotron serving exports canonical identity separately from its snapshot", () => {
+  const snapshot = "/tmp/nemotron-snapshot";
+  const launch = buildLocalBaseModelServerLaunch({
+    baseModel: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+    config: localRunnerConfigSchema.parse({ paths: { baseModel: snapshot } }),
+    options: {
+      baseModelRevision: "ce38b6ab8b252b4b8ee7165b4605e93191cafd73",
+    },
+  });
+  assert.equal(
+    launch.env.TT_BASE_MODEL,
+    "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+  );
+  assert.equal(launch.env.TT_MODEL_SOURCE, snapshot);
+  assert.equal(
+    launch.env.TT_BASE_MODEL_REVISION,
+    "ce38b6ab8b252b4b8ee7165b4605e93191cafd73",
+  );
 });
 
 test("serving rejects unsafe artifacts, base-model mismatches, and invalid network bounds", () => {
@@ -116,6 +147,61 @@ test("serving rejects unsafe artifacts, base-model mismatches, and invalid netwo
     () => buildLocalModelServerLaunch({ model, config, options: { host: "0.0.0.0" } }),
     /--allow-remote/,
   );
+  assert.throws(
+    () => buildLocalBaseModelServerLaunch({
+      baseModel: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+      config: localRunnerConfigSchema.parse({}),
+      options: { baseModelRevision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+    }),
+    /must use certified revision/,
+  );
+});
+
+test("serving verifies that a configured local snapshot matches the selected model", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-serve-model-"));
+  try {
+    const snapshot = join(root, "qwen-snapshot");
+    await mkdir(snapshot);
+    await Promise.all([
+      writeFile(join(snapshot, "config.json"), JSON.stringify({
+        architectures: ["Qwen3_5ForConditionalGeneration"],
+        model_type: "qwen3_5",
+        text_config: {
+          model_type: "qwen3_5_text",
+          hidden_size: 2048,
+          num_hidden_layers: 24,
+          num_attention_heads: 8,
+          num_key_value_heads: 2,
+          intermediate_size: 6144,
+          vocab_size: 248320,
+        },
+      })),
+      writeFile(join(snapshot, "tokenizer_config.json"), "{}"),
+      writeFile(join(snapshot, "tokenizer.json"), "{}"),
+      writeFile(join(snapshot, "model.safetensors"), "weights"),
+    ]);
+    const launch = buildLocalBaseModelServerLaunch({
+      baseModel: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+      config: localRunnerConfigSchema.parse({ paths: { baseModel: snapshot } }),
+      options: {
+        baseModelRevision: "ce38b6ab8b252b4b8ee7165b4605e93191cafd73",
+      },
+    });
+    await assert.rejects(
+      verifyLocalModelServerLaunch(launch),
+      /does not match requested base model/,
+    );
+    await assert.rejects(
+      serveLocalModel({
+        ...launch,
+        command: join(root, "must-not-spawn"),
+        commandArgs: [],
+      }),
+      /does not match requested base model/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("an explicitly remote bind requires and forwards only the selected bearer token", () => {

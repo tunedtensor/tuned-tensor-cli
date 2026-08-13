@@ -6,9 +6,8 @@ from typing import Any
 CERTIFIED_BASE_MODEL = "Qwen/Qwen3.5-2B"
 NEMOTRON_BASE_MODEL = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
 # Immutable Hugging Face revision reviewed for Nemotron local fine-tuning.
-# If there is an explicit path to the untarred/snapshot base model on disk we
-# cannot verify the revision from configuration alone; callers are encouraged
-# to pin it via TT_BASE_MODEL_REVISION / base_model_revision.
+# Node validates local snapshots against this revision and its certified file
+# digests before invoking Python.
 NEMOTRON_BASE_MODEL_REVISION = "ce38b6ab8b252b4b8ee7165b4605e93191cafd73"
 CERTIFIED_BASE_MODELS = (CERTIFIED_BASE_MODEL, NEMOTRON_BASE_MODEL)
 CERTIFIED_QWEN_TEXT_CONFIG = {
@@ -40,10 +39,15 @@ def _field(value: Any, name: str) -> Any:
     return getattr(value, name, None)
 
 
-def assert_certified_model_config(value: Any, label: str = "base-model config") -> None:
+def assert_certified_model_config(
+    value: Any,
+    label: str = "base-model config",
+    expected_model_id: str | None = None,
+) -> None:
     model_type = _field(value, "model_type")
     architectures = _field(value, "architectures")
     if model_type == "qwen3_5":
+        actual_model_id = CERTIFIED_BASE_MODEL
         text_config = _field(value, "text_config")
         if (
             not isinstance(architectures, (list, tuple))
@@ -52,10 +56,12 @@ def assert_certified_model_config(value: Any, label: str = "base-model config") 
         ):
             raise ValueError(f"{label} is not the certified {CERTIFIED_BASE_MODEL} architecture")
     elif model_type == "qwen3_5_text":
+        actual_model_id = CERTIFIED_BASE_MODEL
         # AutoModelForCausalLM exposes the selected text sub-config after it
         # dispatches the verified repository-level Qwen3.5 config.
         text_config = value
     elif model_type == "nemotron_h":
+        actual_model_id = NEMOTRON_BASE_MODEL
         if (
             not isinstance(architectures, (list, tuple))
             or "NemotronHForCausalLM" not in architectures
@@ -68,6 +74,11 @@ def assert_certified_model_config(value: Any, label: str = "base-model config") 
                     f"{label} is not the certified {NEMOTRON_BASE_MODEL} architecture: "
                     f"{name} must be {expected!r}, got {actual!r}"
                 )
+        if expected_model_id and expected_model_id != actual_model_id:
+            raise ValueError(
+                f"{label} does not match requested base model {expected_model_id}; "
+                f"it matches {actual_model_id}"
+            )
         return
     else:
         raise ValueError(f"{label} is not a certified TT Local base-model architecture")
@@ -79,6 +90,11 @@ def assert_certified_model_config(value: Any, label: str = "base-model config") 
                 f"{label} is not the certified {CERTIFIED_BASE_MODEL} architecture: "
                 f"text_config.{name} must be {expected!r}, got {actual!r}"
             )
+    if expected_model_id and expected_model_id != actual_model_id:
+        raise ValueError(
+            f"{label} does not match requested base model {expected_model_id}; "
+            f"it matches {actual_model_id}"
+        )
 
 
 def assert_certified_base_model(model_id: str, label: str = "base model") -> None:
@@ -90,8 +106,8 @@ def assert_certified_base_model(model_id: str, label: str = "base model") -> Non
 def assert_certified_base_model_revision(base_model: str, revision: str | None, label: str = "base model revision") -> None:
     """Require the certified immutable revision for the Nemotron training model.
 
-    Qwen remains unpinned for backward compatibility; Nemotron is bound to the
-    reviewed Hugging Face revision unless a local snapshot is used directly.
+    Qwen remains unpinned for backward compatibility. Nemotron loads are bound
+    here; local snapshot contents are additionally verified by the Node runtime.
     """
     if base_model != NEMOTRON_BASE_MODEL:
         return

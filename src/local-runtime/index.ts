@@ -493,7 +493,7 @@ function createConsoleReporter(options: { verbose: boolean; quiet: boolean }): L
   };
 }
 
-async function verifyStoredModel(model: LocalModelRecord): Promise<{
+async function verifyStoredModel(model: LocalModelRecord, config: LocalRunnerConfig): Promise<{
   manifest_path: string;
   integrity: Awaited<ReturnType<typeof assertArtifactManifest>>;
   artifact: Awaited<ReturnType<typeof assertUsableModelArtifact>>;
@@ -529,6 +529,7 @@ async function verifyStoredModel(model: LocalModelRecord): Promise<{
       typeof manifest.model.base_model === "string"
         ? manifest.model.base_model
         : undefined,
+      config.paths.modelCache,
     );
     if (actualBaseFingerprint !== manifest.model.base_model_fingerprint) {
       throw new Error("Recorded local base-model content no longer matches the model artifact contract.");
@@ -563,7 +564,7 @@ async function verifyActivationEvidence(model: LocalModelRecord): Promise<void> 
   });
 }
 
-async function verifyModelArtifactPath(input: string): Promise<{
+async function verifyModelArtifactPath(input: string, config: LocalRunnerConfig): Promise<{
   manifest_path: string;
   integrity: Awaited<ReturnType<typeof assertArtifactManifest>>;
   artifact: Awaited<ReturnType<typeof assertUsableModelArtifact>>;
@@ -621,6 +622,7 @@ async function verifyModelArtifactPath(input: string): Promise<{
       typeof manifest.model.base_model === "string"
         ? manifest.model.base_model
         : undefined,
+      config.paths.modelCache,
     );
     if (actualBaseFingerprint !== manifest.model.base_model_fingerprint) {
       throw new Error("Recorded local base-model content no longer matches the model artifact contract.");
@@ -699,7 +701,7 @@ async function serveStoredModelFromCli(args: {
 }): Promise<void> {
   const store = createLocalStore(args.config.storeRoot);
   const model = await store.getModel(args.modelId);
-  const verified = await verifyStoredModel(model);
+  const verified = await verifyStoredModel(model, args.config);
   const launch = buildLocalModelServerLaunch({
     model,
     config: args.config,
@@ -1073,10 +1075,10 @@ async function main(argv: string[]): Promise<void> {
       const id = cli.positionals[0];
       if (!id) throw new Error("models verify requires <model-id-or-artifact-path>");
       if (await stat(resolve(id)).then(() => true, () => false)) {
-        return printJson({ ok: true, model: null, ...await verifyModelArtifactPath(id) });
+        return printJson({ ok: true, model: null, ...await verifyModelArtifactPath(id, config) });
       }
       const model = await store.getModel(id);
-      const verified = await verifyStoredModel(model);
+      const verified = await verifyStoredModel(model, config);
       return printJson({ ok: true, model, ...verified });
     }
     if (subcommand === "active") {
@@ -1091,7 +1093,7 @@ async function main(argv: string[]): Promise<void> {
       const id = cli.positionals[0];
       if (!id) throw new Error("models activate requires <model-id>");
       const model = await store.getModel(id);
-      const verified = await verifyStoredModel(model);
+      const verified = await verifyStoredModel(model, config);
       await verifyActivationEvidence(model);
       const pointer = await activateModel(store, model.id);
       return printJson({
@@ -1105,7 +1107,7 @@ async function main(argv: string[]): Promise<void> {
       const current = await getActiveModel(store);
       if (current.pointer?.previous_model_id) {
         const previous = await store.getModel(current.pointer.previous_model_id);
-        await verifyStoredModel(previous);
+        await verifyStoredModel(previous, config);
         await verifyActivationEvidence(previous);
       }
       const pointer = await rollbackActiveModel(store);

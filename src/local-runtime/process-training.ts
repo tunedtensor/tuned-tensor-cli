@@ -14,6 +14,7 @@ import {
   minimalMachineLearningEnvironment,
   withOfflineHuggingFaceCacheEnvironment,
 } from "./huggingface-cache.js";
+import { verifyLocalBaseModel } from "./prefetch.js";
 
 export function buildTrainingHyperparameters(
   request: FineTuneRunRequest,
@@ -193,6 +194,13 @@ export async function launchProcessTraining(args: {
   }
 
   if (config.paths.modelCache) await mkdir(resolve(config.paths.modelCache), { recursive: true });
+  if (config.paths.baseModel) {
+    await verifyLocalBaseModel(
+      resolve(config.paths.baseModel),
+      request.spec_snapshot.base_model,
+      config.paths.modelCache,
+    );
+  }
 
   await args.reporter?.onEvent?.({
     stage: "training",

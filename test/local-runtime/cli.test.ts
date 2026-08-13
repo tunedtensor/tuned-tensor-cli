@@ -339,11 +339,22 @@ fs.appendFileSync(${JSON.stringify(callsPath)}, isPrefetch ? "prefetch\\n" : "ot
 if (!isPrefetch) process.exit(23);
 const outputIndex = args.indexOf("--output");
 if (outputIndex === -1 || !args[outputIndex + 1]) process.exit(24);
+const revision = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const hfHome = process.env.HF_HOME;
+const hubCache = process.env.HF_HUB_CACHE;
+if (!hfHome || !hubCache) process.exit(25);
+const repository = require("node:path").join(hubCache, "models--Qwen--Qwen3.5-2B");
+const snapshotPath = require("node:path").join(repository, "snapshots", revision);
+fs.mkdirSync(snapshotPath, { recursive: true });
+fs.mkdirSync(require("node:path").join(repository, "blobs"), { recursive: true });
 fs.writeFileSync(args[outputIndex + 1], JSON.stringify({
   ok: true,
   base_model: "Qwen/Qwen3.5-2B",
-  snapshot_revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  snapshot_path: "/fake/snapshot",
+  model_cache: hfHome,
+  hf_home: hfHome,
+  hub_cache: hubCache,
+  snapshot_revision: revision,
+  snapshot_path: snapshotPath,
   file_count: 4,
   size_bytes: 100,
 }) + "\\n");

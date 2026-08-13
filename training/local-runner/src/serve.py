@@ -25,6 +25,7 @@ from model_contract import assert_certified_base_model_revision, chat_template_k
 
 MODEL_ARTIFACT = os.environ.get("TT_MODEL_ARTIFACT")
 BASE_MODEL = os.environ["TT_BASE_MODEL"]
+MODEL_SOURCE = os.environ.get("TT_MODEL_SOURCE", BASE_MODEL)
 BASE_MODEL_REVISION = os.environ.get("TT_BASE_MODEL_REVISION")
 MODEL_NAME = os.environ.get("TT_MODEL_NAME", "tuned-tensor-local")
 MODEL_LOADER = os.environ.get("TT_MODEL_LOADER", "causal_lm")
@@ -45,8 +46,7 @@ MAX_CONCURRENT_REQUESTS = int(os.environ.get("TT_MAX_CONCURRENT_REQUESTS", "1"))
 
 if MODEL_LOADER != "causal_lm":
     raise ValueError("The bundled model server is text-only and requires TT_MODEL_LOADER=causal_lm")
-if not Path(BASE_MODEL).exists():
-    assert_certified_base_model_revision(BASE_MODEL, BASE_MODEL_REVISION, "Serving base model revision")
+assert_certified_base_model_revision(BASE_MODEL, BASE_MODEL_REVISION, "Serving base model revision")
 configure_hugging_face_cache(os.environ.get("HF_HOME"))
 import_runtime_dependencies()
 TEMP_DIR = TemporaryDirectory(prefix="tt-local-serve-")
@@ -57,6 +57,7 @@ ADAPTER_PATH = (
 )
 MODEL_PAYLOAD = {
     "base_model": BASE_MODEL,
+    "model_source": MODEL_SOURCE,
     "base_model_revision": BASE_MODEL_REVISION,
     "device": DEVICE_REQUEST,
     "model_loader": MODEL_LOADER,

@@ -8,10 +8,16 @@ from typing import Any
 
 from model_contract import (
     assert_certified_base_model,
+    assert_certified_base_model_revision,
     assert_certified_model_config,
 )
 
 ALLOW_PATTERNS = [
+    ".gitattributes",
+    "LICENSE",
+    "README.md",
+    "*.md",
+    "*.png",
     "*.json",
     "*.model",
     "*.safetensors",
@@ -79,13 +85,17 @@ def hash_file(path: Path, algorithm: str, prefix: bytes = b"") -> str:
     return digest.hexdigest()
 
 
-def verify_snapshot(snapshot: Path) -> tuple[list[Path], int]:
+def verify_snapshot(snapshot: Path, expected_model_id: str | None = None) -> tuple[list[Path], int]:
     config = snapshot / "config.json"
     if not config.is_file() or config.stat().st_size == 0:
         raise ValueError(f"Cached snapshot is missing a non-empty config.json: {snapshot}")
     try:
         parsed_config = json.loads(config.read_text(encoding="utf-8"))
-        assert_certified_model_config(parsed_config, f"Cached config {config}")
+        assert_certified_model_config(
+            parsed_config,
+            f"Cached config {config}",
+            expected_model_id=expected_model_id,
+        )
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Cached snapshot has an invalid config.json: {snapshot}") from exc
 
@@ -145,6 +155,12 @@ def main() -> None:
     payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
     base_model = str(payload["base_model"])
     assert_certified_base_model(base_model, "Prefetch base model")
+    requested_revision = payload.get("revision")
+    assert_certified_base_model_revision(
+        base_model,
+        requested_revision,
+        "Prefetch base model revision",
+    )
     cache_dir = payload.get("model_cache")
     configure_hugging_face_cache(cache_dir)
 
@@ -168,8 +184,12 @@ def main() -> None:
         raise ValueError(
             "Hugging Face snapshot did not resolve to a 40-character immutable commit SHA"
         )
+    if requested_revision and snapshot_revision.lower() != str(requested_revision).lower():
+        raise ValueError(
+            f"Hugging Face returned revision {snapshot_revision}, not requested revision {requested_revision}"
+        )
     print(f"Verifying snapshot files under {snapshot}...", flush=True)
-    snapshot_files, verified_blob_count = verify_snapshot(snapshot)
+    snapshot_files, verified_blob_count = verify_snapshot(snapshot, base_model)
 
     write_json(args.output, {
         "ok": True,

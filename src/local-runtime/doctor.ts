@@ -212,10 +212,11 @@ function placeholderSpecCheck(request: FineTuneRunRequest): DoctorCheck {
 async function localBaseModelCheck(
   path: string,
   expectedModelId?: string,
+  modelCache?: string,
 ): Promise<DoctorCheck> {
   const resolvedPath = resolve(path);
   try {
-    const verified = await verifyLocalBaseModel(resolvedPath, expectedModelId);
+    const verified = await verifyLocalBaseModel(resolvedPath, expectedModelId, modelCache);
     return {
       name: "local-base-model",
       ok: true,
@@ -248,6 +249,7 @@ export async function runDoctor(config: LocalRunnerConfig, request?: FineTuneRun
     checks.push(await localBaseModelCheck(
       config.paths.baseModel,
       request?.spec_snapshot.base_model,
+      config.paths.modelCache,
     ));
   }
 

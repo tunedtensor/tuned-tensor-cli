@@ -6,8 +6,7 @@ import { verifyTarGzipArchive } from "./artifacts.js";
 /**
  * Immutable Hugging Face revision reviewed and certified for Nemotron
  * 3.5 Lightning 30B-A3B-BF16 local fine-tuning. Prefetch, training,
- * evaluation, and serving all default to this revision unless the caller
- * explicitly overrides it.
+ * evaluation, and serving reject any different revision.
  */
 export const NEMOTRON_BF16_REVISION =
   "ce38b6ab8b252b4b8ee7165b4605e93191cafd73";
@@ -78,9 +77,27 @@ export function canonicalizeTrainingModel(modelId: string): string {
   return resolveTrainingModel(modelId).id;
 }
 
+/** Resolve and enforce the immutable revision contract for a training model. */
+export function resolveRequestedBaseModelRevision(
+  modelId: string,
+  requestedRevision?: string,
+): string | undefined {
+  const model = resolveTrainingModel(modelId);
+  if (
+    model.defaultRevision
+    && requestedRevision
+    && requestedRevision !== model.defaultRevision
+  ) {
+    throw new Error(
+      `${model.id} must use certified revision ${model.defaultRevision}; got ${requestedRevision}.`,
+    );
+  }
+  return requestedRevision ?? model.defaultRevision;
+}
+
 /** Resolve the immutable revision a training model is bound to, if any. */
 export function defaultBaseModelRevision(modelId: string): string | undefined {
-  return resolveTrainingModel(modelId).defaultRevision;
+  return resolveRequestedBaseModelRevision(modelId);
 }
 
 const CERTIFIED_QWEN_TEXT_CONFIG = {

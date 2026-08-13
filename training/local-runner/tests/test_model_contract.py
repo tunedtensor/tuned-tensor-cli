@@ -37,6 +37,27 @@ class ModelContractTests(unittest.TestCase):
         assert_certified_model_config(self.config)
         assert_certified_model_config(self.config["text_config"])
 
+    def test_config_validation_is_bound_to_the_requested_model_family(self) -> None:
+        with self.assertRaisesRegex(ValueError, "does not match requested base model"):
+            assert_certified_model_config(self.config, expected_model_id=NEMOTRON_BASE_MODEL)
+
+        nemotron = {
+            "architectures": ["NemotronHForCausalLM"],
+            "model_type": "nemotron_h",
+            "hidden_size": 2688,
+            "num_hidden_layers": 52,
+            "num_attention_heads": 32,
+            "num_key_value_heads": 2,
+            "intermediate_size": 1856,
+            "vocab_size": 131072,
+            "n_routed_experts": 128,
+            "num_experts_per_tok": 6,
+            "num_nextn_predict_layers": 1,
+            "max_position_embeddings": 262144,
+        }
+        with self.assertRaisesRegex(ValueError, "does not match requested base model"):
+            assert_certified_model_config(nemotron, expected_model_id="Qwen/Qwen3.5-2B")
+
     def test_rejects_a_larger_same_family_snapshot(self) -> None:
         larger = {
             **self.config,

@@ -1,5 +1,7 @@
-import { lstat, mkdir, readFile, readdir, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   baseModelRevisionSchema,
   type FineTuneRunRequest,
@@ -9,6 +11,7 @@ import { fileUri, writeJson } from "./artifacts.js";
 import {
   assertCertifiedBaseModelConfig,
   defaultBaseModelRevision,
+  resolveRequestedBaseModelRevision,
   resolveTrainingModel,
 } from "./model-registry.js";
 import {
@@ -17,7 +20,11 @@ import {
   withBundledPythonEnvironment,
 } from "./process-runner.js";
 import type { LocalRunReporter } from "./run-reporter.js";
-import { minimalMachineLearningEnvironment, withHuggingFaceCacheEnvironment } from "./huggingface-cache.js";
+import {
+  minimalMachineLearningEnvironment,
+  resolveHuggingFaceCacheLayout,
+  withHuggingFaceCacheEnvironment,
+} from "./huggingface-cache.js";
 
 export interface ModelPrefetchPayload {
   base_model: string;
@@ -47,18 +54,215 @@ export interface ModelPrefetchReport {
   reason?: string;
 }
 
+type CertifiedFileDigest = { algorithm: "sha1" | "sha256"; digest: string };
+
+const NEMOTRON_BF16_FILE_DIGESTS: Readonly<Record<string, CertifiedFileDigest>> = {
+  ".gitattributes": { algorithm: "sha1", digest: "fe3f694ce14b577c9833fca6e83c5e26a7119127" },
+  "LICENSE": { algorithm: "sha1", digest: "4d76cc87c9edb280753e3bee3b499ae461113835" },
+  "README.md": { algorithm: "sha1", digest: "8ec43ee9f3ee345202e4a6ef752c51b2619f7425" },
+  "accuracy_plot.png": { algorithm: "sha256", digest: "1397995f8a5d34d819a069d86c02914990e9ecfc2fce101e233924da9cf5ddcf" },
+  "agentic_coding_benchmarks.png": { algorithm: "sha256", digest: "06cf5486ae94ecd7cc6f91ae3b4bae21c7435253a294cb89f54f7ec42eda8847" },
+  "bias.md": { algorithm: "sha1", digest: "cdcc8055f965222fabddabcabf22885d3a8bacc1" },
+  "chat_template.jinja": { algorithm: "sha1", digest: "d85b0c772f8fe585063847c5f6bf5ec48eb210be" },
+  "config.json": { algorithm: "sha1", digest: "993b612989e6aa67da45f908ea5983cb777e7678" },
+  "explainability.md": { algorithm: "sha1", digest: "2435f23c865e7daba6a6eceef2f214b86df75d24" },
+  "generation_config.json": { algorithm: "sha1", digest: "a41201df53f9d0769947989353b5d02e70491c56" },
+  "model.safetensors.index.json": { algorithm: "sha1", digest: "3cd409443b1896d9adc5c3981af301841f85329a" },
+  "special_tokens_map.json": { algorithm: "sha1", digest: "0451f37912edb7f8a4bf04d77eef13f6130f0515" },
+  "tokenizer.json": { algorithm: "sha256", digest: "623c34567aebb18582765289fbe23d901c62704d6518d71866e0e58db892b5b7" },
+  "tokenizer_config.json": { algorithm: "sha1", digest: "c96e5ad00986bfa0b666d4bc425666f1c51d6d1b" },
+  "model-00001-of-00014.safetensors": { algorithm: "sha256", digest: "7a3e74d24969eac6657cb9b6422091fd062b7d30fd4bc90ecee6c3d7f692626a" },
+  "model-00002-of-00014.safetensors": { algorithm: "sha256", digest: "a80c3846e959f6dda34aa031cbb668b766643691ac7e5c9f43f62e6fb1221059" },
+  "model-00003-of-00014.safetensors": { algorithm: "sha256", digest: "996bf3a46668e14075cb82259390267c2b1f71446caeb3a5f1f9e0bd7a079ae7" },
+  "model-00004-of-00014.safetensors": { algorithm: "sha256", digest: "cce1d79e7ff2e2b746b9d97166156aa1dcec796116675cc7fd1aa70a8d73ccb2" },
+  "model-00005-of-00014.safetensors": { algorithm: "sha256", digest: "9338f59d3fd5f074288c71a9559452d5b5c581da00e9ccb9fe7aa2ce9b04d2ad" },
+  "model-00006-of-00014.safetensors": { algorithm: "sha256", digest: "e947fa4097c68263ba3d097fceb32a300a22cebd9d909fb5198af7d18a4022fe" },
+  "model-00007-of-00014.safetensors": { algorithm: "sha256", digest: "c7362630bf4256275ca58354ed8f31506cec67ffab30573e753703fd5ae48795" },
+  "model-00008-of-00014.safetensors": { algorithm: "sha256", digest: "1b33a5a6b5505b25b57c90ddda19e9cd1598176468917df0c56116fa6f6072cb" },
+  "model-00009-of-00014.safetensors": { algorithm: "sha256", digest: "fcc9b48caff427beaf1f87b78cf4ab42bc2a3c43b3c487bccb013ba22d7468b2" },
+  "model-00010-of-00014.safetensors": { algorithm: "sha256", digest: "d1924fd54d1b77a15aff8df591a317e8a82a58e46d6f5742fa21e90e0be3cfa6" },
+  "model-00011-of-00014.safetensors": { algorithm: "sha256", digest: "e9d0b83bcf04bd4d5758b94e6495a3f1595d121d82faffaa27ce6a884e2c8757" },
+  "model-00012-of-00014.safetensors": { algorithm: "sha256", digest: "fce184f112cb0b97024cadc60f993f6f660e365d04e21c240fb3c75747bd3a01" },
+  "model-00013-of-00014.safetensors": { algorithm: "sha256", digest: "f427d037d2a3e4d44323325aa38571e3551e8ad702f469c3dacc4e59ea2e50d1" },
+  "model-00014-of-00014.safetensors": { algorithm: "sha256", digest: "64577b275ca4e7e5266eae0903674f7f46ec2a8cbf4f4f1a3207f80d503cd1d0" },
+  "privacy.md": { algorithm: "sha1", digest: "e3bf30aa1c42a488298ef37383647dc99e1cd39e" },
+  "safety.md": { algorithm: "sha1", digest: "f53bf94a4635862eed5cf3e0bc799b93f81d20ac" },
+};
+
+
+async function certifiedFileDigest(path: string, expected: CertifiedFileDigest): Promise<string> {
+  const metadata = await stat(path);
+  const digest = createHash(expected.algorithm);
+  if (expected.algorithm === "sha1") digest.update(`blob ${metadata.size}\0`);
+  for await (const chunk of createReadStream(path)) digest.update(chunk);
+  return digest.digest("hex");
+}
+
+function isStrictPhysicalDescendant(parent: string, child: string): boolean {
+  const candidate = relative(parent, child);
+  return candidate !== ""
+    && candidate !== ".."
+    && !candidate.startsWith(`..${sep}`)
+    && !isAbsolute(candidate);
+}
+
+async function verifySnapshotCacheLocation(
+  path: string,
+  modelId: string,
+  revision: string,
+  modelCache: string,
+): Promise<{ repositoryRoot: string; physicalBlobRoot: string }> {
+  const repository = `models--${modelId.replaceAll("/", "--")}`;
+  const layout = resolveHuggingFaceCacheLayout(modelCache);
+  const repositoryRoot = join(layout.hubCache, repository);
+  const expectedPath = join(repositoryRoot, "snapshots", revision);
+  const [
+    physicalCacheRoot,
+    physicalHubRoot,
+    physicalRepositoryRoot,
+    physicalBlobRoot,
+    physicalPath,
+    physicalExpectedPath,
+  ] = await Promise.all([
+    realpath(layout.hfHome).catch(() => null),
+    realpath(layout.hubCache).catch(() => null),
+    realpath(repositoryRoot).catch(() => null),
+    realpath(join(repositoryRoot, "blobs")).catch(() => null),
+    realpath(path).catch(() => null),
+    realpath(expectedPath).catch(() => null),
+  ]);
+  if (
+    !physicalCacheRoot
+    || !physicalHubRoot
+    || !physicalRepositoryRoot
+    || !physicalBlobRoot
+    || !physicalPath
+    || !physicalExpectedPath
+    || physicalPath !== physicalExpectedPath
+  ) {
+    throw new Error(
+      `${modelId} must use the certified Hugging Face cache snapshot ${expectedPath}; got ${path}.`,
+    );
+  }
+  if (!isStrictPhysicalDescendant(physicalCacheRoot, physicalHubRoot)) {
+    throw new Error(`Hugging Face hub cache escapes its configured cache root: ${layout.hubCache}`);
+  }
+  if (!isStrictPhysicalDescendant(physicalHubRoot, physicalRepositoryRoot)) {
+    throw new Error(`Hugging Face repository escapes its configured hub cache: ${repositoryRoot}`);
+  }
+  if (!isStrictPhysicalDescendant(physicalRepositoryRoot, physicalBlobRoot)) {
+    throw new Error(`Hugging Face blob store escapes its repository: ${join(repositoryRoot, "blobs")}`);
+  }
+  if (!isStrictPhysicalDescendant(physicalRepositoryRoot, physicalExpectedPath)) {
+    throw new Error(`Hugging Face snapshot escapes its configured repository: ${expectedPath}`);
+  }
+  return { repositoryRoot, physicalBlobRoot };
+}
+
+async function requireReportedCachePath(
+  label: string,
+  reported: string | undefined,
+  expected: string,
+): Promise<void> {
+  const [physicalReported, physicalExpected] = await Promise.all([
+    reported ? realpath(reported).catch(() => null) : null,
+    realpath(expected).catch(() => null),
+  ]);
+  if (!physicalReported || !physicalExpected || physicalReported !== physicalExpected) {
+    throw new Error(`Model prefetch returned an unexpected ${label}: ${String(reported)}.`);
+  }
+}
+
+export async function verifyModelPrefetchCacheReport(args: {
+  modelId: string;
+  revision: string;
+  modelCache: string;
+  output: {
+    model_cache?: string;
+    hf_home?: string;
+    hub_cache?: string;
+    snapshot_path?: string;
+  };
+}): Promise<void> {
+  if (!args.output.snapshot_path) {
+    throw new Error("Model prefetch did not return a snapshot path.");
+  }
+  const effectiveHubCache = resolveHuggingFaceCacheLayout(args.modelCache).hubCache;
+  await Promise.all([
+    requireReportedCachePath("model cache", args.output.model_cache, args.modelCache),
+    requireReportedCachePath("HF home", args.output.hf_home, args.modelCache),
+    requireReportedCachePath("hub cache", args.output.hub_cache, effectiveHubCache),
+  ]);
+  await verifySnapshotCacheLocation(
+    args.output.snapshot_path,
+    args.modelId,
+    args.revision,
+    args.modelCache,
+  );
+}
+
+async function verifyCertifiedLocalSnapshot(
+  path: string,
+  modelId: string,
+  snapshotFiles: ReadonlyArray<string>,
+  modelCache?: string,
+): Promise<void> {
+  const revision = defaultBaseModelRevision(modelId);
+  if (!revision) return;
+  if (!modelCache) {
+    throw new Error(`A certified local snapshot for ${modelId} requires paths.modelCache.`);
+  }
+  const { physicalBlobRoot } = await verifySnapshotCacheLocation(
+    path,
+    modelId,
+    revision,
+    modelCache,
+  );
+
+  const physicalFiles = new Map<string, string>();
+  for (const file of snapshotFiles) {
+    const metadata = await lstat(file);
+    const target = await realpath(file);
+    if (metadata.isSymbolicLink()) {
+      if (!isStrictPhysicalDescendant(physicalBlobRoot, target)) {
+        throw new Error(`Certified snapshot symbolic link escapes its Hugging Face blob store: ${file}`);
+      }
+    }
+    physicalFiles.set(file, target);
+  }
+  const actualFiles = new Set(snapshotFiles.map((file) => relative(path, file).split("\\").join("/")));
+  const expectedFiles = new Set(Object.keys(NEMOTRON_BF16_FILE_DIGESTS));
+  const unexpected = [...actualFiles].filter((name) => !expectedFiles.has(name)).sort();
+  if (unexpected.length > 0) {
+    throw new Error(`Certified snapshot contains unexpected file: ${join(path, unexpected[0]!)}`);
+  }
+  for (const [name, expected] of Object.entries(NEMOTRON_BF16_FILE_DIGESTS)) {
+    if (!actualFiles.has(name)) {
+      throw new Error(`Certified snapshot file is missing: ${join(path, name)}`);
+    }
+    const file = join(path, name);
+    const physicalFile = physicalFiles.get(file)!;
+    if (await certifiedFileDigest(physicalFile, expected) !== expected.digest) {
+      throw new Error(`Certified snapshot file checksum mismatch: ${file}`);
+    }
+    if (await realpath(file) !== physicalFile) {
+      throw new Error(`Certified snapshot file changed during verification: ${file}`);
+    }
+  }
+}
+
 export function buildModelPrefetchPayload(
   request: FineTuneRunRequest,
   config: LocalRunnerConfig,
 ): ModelPrefetchPayload {
   const model = resolveTrainingModel(request.spec_snapshot.base_model);
+  const revision = resolveRequestedBaseModelRevision(
+    model.id,
+    request.hyperparameters.base_model_revision,
+  );
   return {
     base_model: model.id,
-    ...(request.hyperparameters.base_model_revision
-      ? { revision: request.hyperparameters.base_model_revision }
-      : defaultBaseModelRevision(model.id)
-        ? { revision: defaultBaseModelRevision(model.id) }
-        : {}),
+    ...(revision ? { revision } : {}),
     ...(config.paths.modelCache ? { model_cache: resolve(config.paths.modelCache) } : {}),
   };
 }
@@ -76,6 +280,7 @@ function transformersWeightName(name: string): boolean {
 export async function verifyLocalBaseModel(
   path: string,
   expectedModelId?: string,
+  modelCache?: string,
 ): Promise<{ fileCount: number; sizeBytes: number }> {
   const root = await lstat(path).catch(() => null);
   if (!root) throw new Error(`paths.baseModel is set to ${path}, but that path does not exist.`);
@@ -91,14 +296,19 @@ export async function verifyLocalBaseModel(
   const visit = async (directory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const child = join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        const metadata = await stat(child);
+        if (!metadata.isFile()) {
+          throw new Error(`Local base model contains a non-file symbolic link: ${child}`);
+        }
+        files.push({ path: child, size: metadata.size });
+        continue;
+      }
       if (entry.isDirectory()) {
         await visit(child);
         continue;
       }
       const metadata = await stat(child);
-      if (entry.isSymbolicLink() && !metadata.isFile()) {
-        throw new Error(`Local base model contains a non-file symbolic link: ${child}`);
-      }
       if (metadata.isFile()) files.push({ path: child, size: metadata.size });
     }
   };
@@ -121,7 +331,19 @@ export async function verifyLocalBaseModel(
       expectedModelId,
     );
   } catch (error) {
-    throw new Error(`Local base-model directory has an invalid or unsupported config.json: ${path}`, { cause: error });
+    const detail = error instanceof Error ? `: ${error.message}` : "";
+    throw new Error(
+      `Local base-model directory has an invalid or unsupported config.json: ${path}${detail}`,
+      { cause: error },
+    );
+  }
+  if (expectedModelId) {
+    await verifyCertifiedLocalSnapshot(
+      path,
+      expectedModelId,
+      files.map((file) => file.path),
+      modelCache,
+    );
   }
   const vocabNames = [
     "tokenizer.json", "tokenizer.model", "sentencepiece.bpe.model", "spiece.model", "vocab.json", "tokenizer.tiktoken",
@@ -152,6 +374,10 @@ export async function prefetchBaseModel(args: {
   reporter?: LocalRunReporter;
   localOnly?: boolean;
 }): Promise<ModelPrefetchReport> {
+  const payload: ModelPrefetchPayload = {
+    ...buildModelPrefetchPayload(args.request, args.config),
+    ...(args.localOnly ? { local_files_only: true } : {}),
+  };
   const artifactDir = resolve(
     args.config.artifactRoot,
     args.localOnly ? "verify-base" : "prefetch",
@@ -164,6 +390,7 @@ export async function prefetchBaseModel(args: {
     const verified = await verifyLocalBaseModel(
       localPath,
       args.request.spec_snapshot.base_model,
+      args.config.paths.modelCache,
     );
     return {
       ok: true,
@@ -179,10 +406,6 @@ export async function prefetchBaseModel(args: {
     };
   }
 
-  const payload: ModelPrefetchPayload = {
-    ...buildModelPrefetchPayload(args.request, args.config),
-    ...(args.localOnly ? { local_files_only: true } : {}),
-  };
   const inputPath = join(artifactDir, "prefetch-input.json");
   const outputPath = join(artifactDir, "prefetch-output.json");
   const logPath = join(artifactDir, "prefetch.log");
@@ -207,12 +430,13 @@ export async function prefetchBaseModel(args: {
     },
   });
 
-  const env = withBundledPythonEnvironment(
-    withHuggingFaceCacheEnvironment(
-      minimalMachineLearningEnvironment(process.env),
-      payload.model_cache,
-    ),
+  const cacheEnvironment = withHuggingFaceCacheEnvironment(
+    minimalMachineLearningEnvironment(process.env),
+    payload.model_cache,
   );
+  const effectiveModelCache = cacheEnvironment.HF_HOME!;
+  const effectiveHubCache = resolveHuggingFaceCacheLayout(effectiveModelCache).hubCache;
+  const env = withBundledPythonEnvironment(cacheEnvironment);
 
   const { exitCode } = await runLoggedProcess({
     command: entrypoint.command,
@@ -247,6 +471,27 @@ export async function prefetchBaseModel(args: {
       "Model prefetch did not resolve the base model to a 40-character immutable commit SHA.",
     );
   }
+  if (output.base_model !== payload.base_model) {
+    throw new Error(`Model prefetch returned ${String(output.base_model)} for requested model ${payload.base_model}.`);
+  }
+  if (payload.revision && snapshotRevision.data !== payload.revision.toLowerCase()) {
+    throw new Error(
+      `Model prefetch resolved a different revision (${snapshotRevision.data}) than requested (${payload.revision}).`,
+    );
+  }
+  await verifyModelPrefetchCacheReport({
+    modelId: payload.base_model,
+    revision: snapshotRevision.data,
+    modelCache: effectiveModelCache,
+    output,
+  });
+  if (defaultBaseModelRevision(payload.base_model)) {
+    await verifyLocalBaseModel(
+      output.snapshot_path!,
+      payload.base_model,
+      effectiveModelCache,
+    );
+  }
 
   await args.reporter?.onEvent?.({
     stage: "model_prefetch",
@@ -254,8 +499,8 @@ export async function prefetchBaseModel(args: {
     message: "Base model is available in the local Hugging Face cache.",
     details: {
       base_model: output.base_model ?? payload.base_model,
-      hf_home: output.hf_home ?? output.model_cache ?? payload.model_cache ?? null,
-      hub_cache: output.hub_cache ?? null,
+      hf_home: effectiveModelCache,
+      hub_cache: effectiveHubCache,
       snapshot_path: output.snapshot_path ?? null,
       snapshot_revision: snapshotRevision.data,
       file_count: output.file_count ?? null,
@@ -268,9 +513,9 @@ export async function prefetchBaseModel(args: {
     ok: true,
     status: "completed",
     base_model: output.base_model ?? payload.base_model,
-    model_cache: output.model_cache ?? payload.model_cache,
-    hf_home: output.hf_home ?? output.model_cache ?? payload.model_cache,
-    hub_cache: output.hub_cache,
+    model_cache: effectiveModelCache,
+    hf_home: effectiveModelCache,
+    hub_cache: effectiveHubCache,
     snapshot_path: output.snapshot_path,
     snapshot_revision: snapshotRevision.data,
     file_count: output.file_count,

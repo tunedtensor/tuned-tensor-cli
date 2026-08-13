@@ -661,12 +661,15 @@ test("local base-model byte changes invalidate prepared outputs", async () => {
     const request = requestFixture({
       runId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     });
+    request.hyperparameters.base_model_revision = "0123456789abcdef0123456789abcdef01234567";
     const config = configFixture(root, { paths: { baseModel } });
     const firstRun = await runLocalFineTune({ request, config });
     const metadataPath = join(firstRun.artifactDir, "stage-metadata.json");
     const before = JSON.parse(await readFile(metadataPath, "utf8")) as {
       base_model_fingerprint: string;
+      base_model_revision: string | null;
     };
+    assert.equal(before.base_model_revision, null);
 
     await writeFile(join(baseModel, "model.safetensors"), "weights-v2");
     const secondRun = await runLocalFineTune({ request, config });
