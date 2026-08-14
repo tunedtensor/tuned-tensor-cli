@@ -625,10 +625,23 @@ export class TunedTensorShellSession {
   }
 
   private modelLines(): string[] {
-    return styleDetailLines([
-      detailLine("Active model", this.context.local.activeModelId ?? "base"),
+    const active = this.context.local.activeModelId ?? "base";
+    const lines = styleDetailLines([
+      detailLine("Active model", active),
+      detailLine("Base model", this.context.spec?.baseModel ?? "—"),
       detailLine("Change", "/model <id> to activate a verified local model"),
     ]);
+    lines.push("", chalk.bold("Available models"));
+    const models = this.context.local.models;
+    if (models.length === 0) {
+      lines.push(chalk.dim("  none — complete a verified local run to create an activatable model"));
+    } else {
+      for (const model of models) {
+        const marker = model.id === active ? chalk.dim(" (active)") : "";
+        lines.push(`  ${accent(model.id)}  ${model.name || model.baseModel || "—"}${marker}`);
+      }
+    }
+    return lines;
   }
 
   private async handleSlash(command: ParsedSlashCommand): Promise<ShellLineAction> {

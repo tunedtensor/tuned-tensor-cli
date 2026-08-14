@@ -127,8 +127,9 @@ without changing the default.
 The shell banner and `/context` surface the assistant's configured provider and
 model (`agent provider/model`) separately from the workflow model, so the
 model answering your prompts is always visible. `/model` shows the active
-local serving model, and `/model <id>` activates a verified local serving
-model. Configure the assistant model explicitly with `tt agent configure`.
+local serving model and a preview of available local models; `/model <id>`
+activates a verified local serving model. Configure the assistant model
+explicitly with `tt agent configure`.
 The shell keeps normal terminal scrollback and command history only for the
 current process.
 

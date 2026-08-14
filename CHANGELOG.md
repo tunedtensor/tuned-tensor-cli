@@ -12,6 +12,8 @@
 - The interactive shell now runs the local workflow by default. Hosted commands
   are one-shot: prefix a command with `cloud` (for example `cloud runs list`).
   Removed the `/mode`, `/cloud`, and `/local` session slash commands.
+- `/model` now lists the available local models alongside the active model, so
+  users can see what they can activate.
 - `tt agent status` now reports the resolved provider and model display names
   alongside the configured IDs.
 

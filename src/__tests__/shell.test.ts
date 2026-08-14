@@ -18,7 +18,7 @@ import {
   type ShellSessionIO,
 } from "../shell.js";
 import { createCommandCompleter } from "../command-catalog.js";
-import type { ShellContext } from "../shell-context.js";
+import type { ShellContext, ShellLocalModel } from "../shell-context.js";
 
 describe("tokenizeShellInput", () => {
   it("parses whitespace, quotes, escapes, empty values, and joined fragments", () => {
@@ -225,7 +225,11 @@ describe("foreground SIGINT handoff", () => {
   });
 });
 
-function fakeContext(cwd: string, target: "cloud" | "local"): ShellContext {
+function fakeContext(
+  cwd: string,
+  target: "cloud" | "local",
+  models: ShellLocalModel[] = [],
+): ShellContext {
   return {
     cwd,
     projectName: cwd.split("/").filter(Boolean).at(-1) ?? cwd,
@@ -243,6 +247,7 @@ function fakeContext(cwd: string, target: "cloud" | "local"): ShellContext {
       artifactRoot: `${cwd}/.tt-local/artifacts`,
       storeRoot: `${cwd}/.tt-local/store`,
       activeModelId: target === "local" ? "model_abc123" : undefined,
+      models,
     },
     warnings: [],
   };
@@ -508,12 +513,26 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
         requests.push(request);
         return { exitCode: 0 };
       },
-      contextProvider: async ({ cwd }) => fakeContext(cwd, "local"),
+      contextProvider: async ({ cwd }) => fakeContext(cwd, "local", [
+        {
+          id: "model_abc123",
+          name: "Qwen/Qwen3.5-2B (abc12345)",
+          baseModel: "Qwen/Qwen3.5-2B",
+        },
+        {
+          id: "model_def456",
+          name: "Qwen/Qwen3.5-2B (def45678)",
+          baseModel: "Qwen/Qwen3.5-2B",
+        },
+      ]),
     });
 
     await session.handleLine("/model");
     expect(stdout.join("")).toContain("Active model");
     expect(stdout.join("")).toContain("model_abc123");
+    expect(stdout.join("")).toContain("Available models");
+    expect(stdout.join("")).toContain("model_def456");
+    expect(stdout.join("")).toContain("(active)");
 
     await session.handleLine("/model model_def456");
     expect(requests).toEqual([

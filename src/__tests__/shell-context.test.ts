@@ -41,6 +41,7 @@ describe("discoverShellContext", () => {
     const fullKey = `tt_${"s".repeat(48)}`;
     await mkdir(cloudConfigDirectory, { recursive: true });
     await mkdir(join(storeRoot, "runs", runId), { recursive: true });
+    await mkdir(join(storeRoot, "models", "local-model-one"), { recursive: true });
     await writeFile(join(project, "tunedtensor.json"), JSON.stringify({
       id: "22222222-2222-4222-8222-222222222222",
       name: "Support Adapter",
@@ -57,6 +58,12 @@ describe("discoverShellContext", () => {
     }));
     await writeFile(join(storeRoot, "active-model.json"), JSON.stringify({
       model_id: "local-model-one",
+    }));
+    await writeFile(join(storeRoot, "models", "local-model-one", "model.json"), JSON.stringify({
+      id: "local-model-one",
+      name: "Qwen/Qwen3.5-2B (11111111)",
+      base_model: "Qwen/Qwen3.5-2B",
+      created_at: "2026-07-25T10:00:00.000Z",
     }));
     await writeFile(join(storeRoot, "runs", runId, "state.json"), JSON.stringify({
       id: runId,
@@ -88,6 +95,12 @@ describe("discoverShellContext", () => {
         status: "completed",
       },
     });
+    expect(context.local.models).toEqual([{
+      id: "local-model-one",
+      name: "Qwen/Qwen3.5-2B (11111111)",
+      baseModel: "Qwen/Qwen3.5-2B",
+      createdAt: "2026-07-25T10:00:00.000Z",
+    }]);
     expect(context.cloud).toMatchObject({
       authenticated: true,
       baseUrl: "https://api.example.test",
