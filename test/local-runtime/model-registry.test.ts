@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+  MUSE_GLIMMER_BF16_REVISION,
   NEMOTRON_BF16_REVISION,
   assertCertifiedBaseModelConfig,
   assertUsableModelArtifact,
@@ -103,27 +104,45 @@ test("certified config accepts only the released Nemotron 3.5 Lightning BF16 arc
   );
 });
 
-test("Nemotron is bound to the reviewed immutable revision; Qwen and Muse Glimmer are not", () => {
+test("Nemotron and Muse Glimmer are bound to reviewed immutable revisions; Qwen is not", () => {
   assert.equal(
     resolveTrainingModel("nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16").defaultRevision,
     NEMOTRON_BF16_REVISION,
   );
   assert.equal(
+    resolveTrainingModel("meta-models/Muse-Glimmer-30B").defaultRevision,
+    MUSE_GLIMMER_BF16_REVISION,
+  );
+  assert.equal(
     defaultBaseModelRevision("nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"),
     "ce38b6ab8b252b4b8ee7165b4605e93191cafd73",
   );
-  // Qwen and Muse Glimmer remain unpinned for backward compatibility.
+  assert.equal(
+    defaultBaseModelRevision("meta-models/Muse-Glimmer-30B"),
+    "a4e59da52a7bc87ae7251dd5545c0dd437c44b68",
+  );
+  // Qwen remains unpinned for backward compatibility.
   assert.equal(defaultBaseModelRevision("Qwen/Qwen3.5-2B"), undefined);
-  assert.equal(defaultBaseModelRevision("meta-models/Muse-Glimmer-30B"), undefined);
   assert.equal(
     resolveRequestedBaseModelRevision(
       "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
     ),
     NEMOTRON_BF16_REVISION,
   );
+  assert.equal(
+    resolveRequestedBaseModelRevision("meta-models/Muse-Glimmer-30B"),
+    MUSE_GLIMMER_BF16_REVISION,
+  );
   assert.throws(
     () => resolveRequestedBaseModelRevision(
       "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ),
+    /must use certified revision/,
+  );
+  assert.throws(
+    () => resolveRequestedBaseModelRevision(
+      "meta-models/Muse-Glimmer-30B",
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     ),
     /must use certified revision/,

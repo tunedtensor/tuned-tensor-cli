@@ -11,6 +11,10 @@ import { verifyTarGzipArchive } from "./artifacts.js";
 export const NEMOTRON_BF16_REVISION =
   "ce38b6ab8b252b4b8ee7165b4605e93191cafd73";
 
+/** Immutable Hugging Face revision reviewed and certified for Muse Glimmer. */
+export const MUSE_GLIMMER_BF16_REVISION =
+  "a4e59da52a7bc87ae7251dd5545c0dd437c44b68";
+
 /**
  * How the bundled text-only runtime loads a training model. Causal-LM
  * checkpoints load through AutoModelForCausalLM; multimodal checkpoints whose
@@ -72,6 +76,7 @@ export const TRAINING_MODELS: TrainingModel[] = [
   {
     id: "meta-models/Muse-Glimmer-30B",
     family: "muse_glimmer",
+    defaultRevision: MUSE_GLIMMER_BF16_REVISION,
     // Muse Glimmer is a vision-language model whose text tower is not exposed
     // through the causal-LM auto mapping, so the bundled runtime loads the full
     // conditional-generation checkpoint (vision tower frozen and unused) via

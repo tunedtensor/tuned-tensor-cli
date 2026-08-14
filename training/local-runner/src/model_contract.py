@@ -10,6 +10,8 @@ MUSE_GLIMMER_BASE_MODEL = "meta-models/Muse-Glimmer-30B"
 # Node validates local snapshots against this revision and its certified file
 # digests before invoking Python.
 NEMOTRON_BASE_MODEL_REVISION = "ce38b6ab8b252b4b8ee7165b4605e93191cafd73"
+# Immutable Hugging Face revision reviewed and certified for Muse Glimmer.
+MUSE_GLIMMER_BASE_MODEL_REVISION = "a4e59da52a7bc87ae7251dd5545c0dd437c44b68"
 CERTIFIED_BASE_MODELS = (CERTIFIED_BASE_MODEL, NEMOTRON_BASE_MODEL, MUSE_GLIMMER_BASE_MODEL)
 CERTIFIED_QWEN_TEXT_CONFIG = {
     "model_type": "qwen3_5_text",
@@ -129,18 +131,23 @@ def assert_certified_base_model(model_id: str, label: str = "base model") -> Non
 
 
 def assert_certified_base_model_revision(base_model: str, revision: str | None, label: str = "base model revision") -> None:
-    """Require the certified immutable revision for the Nemotron training model.
+    """Require the certified immutable revision for pinned training models.
 
-    Qwen remains unpinned for backward compatibility. Nemotron loads are bound
-    here; local snapshot contents are additionally verified by the Node runtime.
+    Qwen remains unpinned for backward compatibility. Nemotron and Muse
+    Glimmer loads are bound here; local snapshot contents are additionally
+    verified by the Node runtime.
     """
-    if base_model != NEMOTRON_BASE_MODEL:
+    expected = {
+        NEMOTRON_BASE_MODEL: NEMOTRON_BASE_MODEL_REVISION,
+        MUSE_GLIMMER_BASE_MODEL: MUSE_GLIMMER_BASE_MODEL_REVISION,
+    }.get(base_model)
+    if expected is None:
         return
     if revision is None:
-        raise ValueError(f"{label} is required for {NEMOTRON_BASE_MODEL}")
-    if revision != NEMOTRON_BASE_MODEL_REVISION:
+        raise ValueError(f"{label} is required for {base_model}")
+    if revision != expected:
         raise ValueError(
-            f"{label} must be {NEMOTRON_BASE_MODEL_REVISION} for {NEMOTRON_BASE_MODEL}; got {revision!r}"
+            f"{label} must be {expected} for {base_model}; got {revision!r}"
         )
 
 
