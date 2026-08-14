@@ -189,7 +189,7 @@ export function routeShellCommand(
   const override = args[0];
   if (override === "cloud" || override === "local") {
     if (args.length === 1) {
-      throw new ShellParseError(`Add a ${override} command, or use \`/mode ${override}\` to switch workflows.`);
+      throw new ShellParseError(`Add a ${override} command, e.g. \`${override} runs list\`.`);
     }
     return { target: override, args: args.slice(1) };
   }
@@ -235,9 +235,6 @@ export type SlashCommandName =
   | "help"
   | "status"
   | "context"
-  | "mode"
-  | "cloud"
-  | "local"
   | "model"
   | "clear"
   | "cd"
@@ -252,9 +249,6 @@ const SLASH_NAMES = new Set([
   "help",
   "status",
   "context",
-  "mode",
-  "cloud",
-  "local",
   "model",
   "clear",
   "cd",
@@ -562,8 +556,8 @@ export function resetShellPromptStyle(): string {
 }
 
 export class TunedTensorShellSession {
-  private mode: WorkflowMode;
-  private modeSource: TargetSource | "session";
+  private readonly mode: WorkflowMode = "local";
+  private readonly modeSource: TargetSource = "default-local";
   private cwd: string;
   private context: ShellContext;
 
@@ -576,8 +570,6 @@ export class TunedTensorShellSession {
     private readonly version: string | undefined,
     initialContext: ShellContext,
   ) {
-    this.mode = initialContext.inferredTarget;
-    this.modeSource = initialContext.targetSource;
     this.cwd = initialContext.cwd;
     this.context = initialContext;
   }
@@ -626,10 +618,6 @@ export class TunedTensorShellSession {
   private async refreshContext(): Promise<void> {
     this.context = await this.contextProvider({ cwd: this.cwd, env: this.env });
     this.cwd = this.context.cwd;
-    if (this.modeSource !== "session" && this.modeSource !== "environment") {
-      this.mode = this.context.inferredTarget;
-      this.modeSource = this.context.targetSource;
-    }
   }
 
   private writeLines(lines: string[]): void {
@@ -637,15 +625,9 @@ export class TunedTensorShellSession {
   }
 
   private modelLines(): string[] {
-    if (this.mode === "local") {
-      return styleDetailLines([
-        detailLine("Active model", this.context.local.activeModelId ?? "base"),
-        detailLine("Change", "/model <id> to activate a verified local model"),
-      ]);
-    }
     return styleDetailLines([
-      detailLine("Base model", this.context.spec?.baseModel ?? "—"),
-      detailLine("Change", "edit base_model in tunedtensor.json, then run push"),
+      detailLine("Active model", this.context.local.activeModelId ?? "base"),
+      detailLine("Change", "/model <id> to activate a verified local model"),
     ]);
   }
 
@@ -669,26 +651,6 @@ export class TunedTensorShellSession {
           formatShellContext(this.context, this.mode, this.modeSource),
         ));
         return "continue";
-      case "mode": {
-        if (command.args.length === 0) {
-          this.io.write(`Current workflow: ${this.mode}\n`);
-          return "continue";
-        }
-        if (command.args.length !== 1 || !["cloud", "local"].includes(command.args[0]!)) {
-          throw new ShellParseError("Usage: /mode cloud|local");
-        }
-        this.mode = command.args[0] as WorkflowMode;
-        this.modeSource = "session";
-        this.io.write(`${successMark()} Workflow switched to ${this.mode}.\n`);
-        return "continue";
-      }
-      case "cloud":
-      case "local":
-        assertNoArgs(command.name, command.args);
-        this.mode = command.name;
-        this.modeSource = "session";
-        this.io.write(`${successMark()} Workflow switched to ${this.mode}.\n`);
-        return "continue";
       case "model": {
         if (command.args.length === 0) {
           await this.refreshContext();
@@ -697,11 +659,6 @@ export class TunedTensorShellSession {
         }
         if (command.args.length !== 1) {
           throw new ShellParseError("Usage: /model [model-id]");
-        }
-        if (this.mode !== "local") {
-          throw new ShellParseError(
-            "Activating models is a local workflow action. Use /mode local first; cloud specs change base_model in tunedtensor.json.",
-          );
         }
         await this.runner({
           target: "local",

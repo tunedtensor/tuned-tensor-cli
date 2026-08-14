@@ -6,11 +6,12 @@
 
 - Surface the conversational agent's model provider and underlying model in the
   shell banner, `/context`, `/status`, and `tt agent status`.
-- Add `/cloud` and `/local` slash aliases to switch workflows in one word
-  (aliases for `/mode cloud|local`).
 
 ### Changed
 
+- The interactive shell now runs the local workflow by default. Hosted commands
+  are one-shot: prefix a command with `cloud` (for example `cloud runs list`).
+  Removed the `/mode`, `/cloud`, and `/local` session slash commands.
 - `tt agent status` now reports the resolved provider and model display names
   alongside the configured IDs.
 

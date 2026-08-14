@@ -270,7 +270,7 @@ describe("unified command routing", () => {
     ]);
 
     expect(JSON.parse(output)).toMatchObject({
-      target: "cloud",
+      target: "local",
       context: {
         cloud: {
           authenticated: true,

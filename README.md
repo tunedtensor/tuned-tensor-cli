@@ -8,8 +8,9 @@
 
 Existing commands such as `tt runs`, `tt models`, and `tt push` remain hosted
 commands. The local workflow lives under `tt local`, so scripts keep their
-current meaning while people can switch between both targets in one
-interactive shell.
+current meaning. In the interactive shell the local workflow is the default;
+prefix a command with `cloud` (for example `cloud runs list`) to run one hosted
+command without changing the default.
 
 ## Install
 
@@ -69,24 +70,24 @@ If a newer stable release is available it recommends
 checks are ignored.
 
 ```text
-tt cloud support-agent › What happened in my latest training run?
+tt local support-agent › What happened in my latest training run?
 TT  Your latest run completed...
-tt cloud support-agent › runs list
-tt cloud support-agent › Ask whether my dataset is ready to train
+tt local support-agent › runs list
+tt local support-agent › Ask whether my dataset is ready to train
 ```
 
 Ordinary sentences go through the locally orchestrated Pi model session. The
 model can call a
 strict, bounded set of authenticated Tuned Tensor read tools and prepare-only
-mutation tools; it has no shell or general filesystem tool. In `local` mode it
-can prepare one new folder directly beneath the shell's current working
-directory with a validated `tunedtensor.json`. The tool refuses path traversal,
-symlinked workspace roots, existing targets, and unsupported spec fields. It is
-not available to cloud-mode turns. Known CLI commands such as
-`runs list`, `doctor`, and `models list` still execute directly. Prefix a
-command with `:` when you want to make that intent explicit. Commands are
-routed to the mode shown in the prompt; prefix one with `cloud` or `local` to
-override the mode without switching it.
+mutation tools; it has no shell or general filesystem tool. The shell runs the
+local workflow by default, so it can prepare one new folder directly beneath
+the shell's current working directory with a validated `tunedtensor.json`. The
+tool refuses path traversal,
+symlinked workspace roots, existing targets, and unsupported spec fields. Known
+CLI commands such as `runs list`, `doctor`, and `models list` still execute
+directly. Prefix a command with `:` when you want to make that intent
+explicit. Commands run in the local workflow by default; prefix one with
+`cloud` (or `local`) to override the target for that one command.
 
 Agent conversations are durable and local under
 `~/.config/tuned-tensor/agent/threads` (or the XDG config equivalent), with
@@ -119,16 +120,17 @@ ID. If a response or final state write is lost after dispatch, the action is
 retained as `outcome_unknown`, cannot be retried automatically, and directs the
 user to inspect the remote resource. `/reject` never calls a mutation endpoint.
 
-Useful shell controls include `/help`, `/status`, `/context`, `/cloud`,
-`/local`, `/mode`, `/model`, `/cd`, `/clear`, and `/exit`. `/cloud` and
-`/local` switch the workflow in one word (aliases for `/mode cloud|local`).
+Useful shell controls include `/help`, `/status`, `/context`, `/model`, `/cd`,
+`/clear`, and `/exit`. The shell runs the local workflow by default; prefix a
+command with `cloud` (for example `cloud runs list`) to run one hosted command
+without changing the default.
 The shell banner and `/context` surface the assistant's configured provider and
 model (`agent provider/model`) separately from the workflow model, so the
-model answering your prompts is always visible. `/model` retains its workflow
-meaning: it shows the active local serving model or cloud spec base model, and
-`/model <id>` activates a verified local serving model. Configure the assistant
-model explicitly with `tt agent configure`. The shell keeps normal terminal
-scrollback and command history only for the current process.
+model answering your prompts is always visible. `/model` shows the active
+local serving model, and `/model <id>` activates a verified local serving
+model. Configure the assistant model explicitly with `tt agent configure`.
+The shell keeps normal terminal scrollback and command history only for the
+current process.
 
 Explicit commands remain non-interactive, including in CI. `tt --help` shows
 the complete command surface, `tt status` inspects both targets without a

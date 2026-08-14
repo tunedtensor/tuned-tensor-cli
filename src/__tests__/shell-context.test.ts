@@ -71,7 +71,7 @@ describe("discoverShellContext", () => {
     });
 
     expect(context.inferredTarget).toBe("local");
-    expect(context.targetSource).toBe("adjacent-config");
+    expect(context.targetSource).toBe("default-local");
     expect(context.spec).toMatchObject({
       name: "Support Adapter",
       baseModel: "Qwen/Qwen3.5-2B",
@@ -165,7 +165,7 @@ describe("discoverShellContext", () => {
     );
   });
 
-  it("only infers local from a config adjacent to the current directory", async () => {
+  it("defaults to local even without an adjacent local config", async () => {
     const root = await temporaryRoot();
     const child = join(root, "child");
     await mkdir(child);
@@ -176,7 +176,8 @@ describe("discoverShellContext", () => {
       env: { HOME: join(root, "home") },
     });
 
-    expect(context.inferredTarget).toBe("cloud");
+    expect(context.inferredTarget).toBe("local");
+    expect(context.targetSource).toBe("default-local");
     expect(context.local.configPath).toBeUndefined();
   });
 
@@ -191,7 +192,7 @@ describe("discoverShellContext", () => {
       env: { HOME: home },
     });
 
-    expect(context.inferredTarget).toBe("cloud");
+    expect(context.inferredTarget).toBe("local");
     expect(context.spec).toBeUndefined();
     expect(existsSync(join(project, ".tt-local"))).toBe(false);
     expect(existsSync(home)).toBe(false);

@@ -475,7 +475,7 @@ export function createProgram(
 
   program
     .command("shell")
-    .description("Open the interactive cloud/local terminal")
+    .description("Open the conversational terminal (local by default)")
     .action(openShell);
 
   program.addHelpText(

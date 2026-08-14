@@ -113,10 +113,7 @@ describe("isCatalogCommand", () => {
 describe("parseSlashCommand", () => {
   it("parses the palette, slash commands, and question-mark help alias", () => {
     expect(parseSlashCommand("/")).toEqual({ name: "palette", args: [] });
-    expect(parseSlashCommand("/mode local")).toEqual({
-      name: "mode",
-      args: ["local"],
-    });
+    expect(parseSlashCommand("/model")).toEqual({ name: "model", args: [] });
     expect(parseSlashCommand("? runs")).toEqual({
       name: "help",
       args: ["runs"],
@@ -128,6 +125,12 @@ describe("parseSlashCommand", () => {
     expect(() => parseSlashCommand("/help | cat")).toThrow(/operator/);
   });
 
+  it("rejects the removed mode-switching slash commands", () => {
+    expect(() => parseSlashCommand("/mode cloud")).toThrow(/Unknown session command/);
+    expect(() => parseSlashCommand("/cloud")).toThrow(/Unknown session command/);
+    expect(() => parseSlashCommand("/local")).toThrow(/Unknown session command/);
+  });
+
   it("parses /model and suggests fixes for mistyped session commands", () => {
     expect(parseSlashCommand("/model")).toEqual({ name: "model", args: [] });
     expect(parseSlashCommand("/model abc123")).toEqual({
@@ -136,11 +139,6 @@ describe("parseSlashCommand", () => {
     });
     expect(() => parseSlashCommand("/stat")).toThrow(/Did you mean \/status\?/);
     expect(() => parseSlashCommand("/models")).toThrow(/need no slash/);
-  });
-
-  it("parses the one-word cloud/local switch aliases", () => {
-    expect(parseSlashCommand("/cloud")).toEqual({ name: "cloud", args: [] });
-    expect(parseSlashCommand("/local")).toEqual({ name: "local", args: [] });
   });
 });
 
@@ -151,11 +149,7 @@ describe("command completion", () => {
 
     expect(complete("runs c")[0]).toContain("runs compare");
     expect(complete("cloud runs e")[0]).toContain("cloud runs estimate");
-    expect(complete("/mo")[0]).toEqual([
-      "/mode cloud",
-      "/mode local",
-      "/model",
-    ]);
+    expect(complete("/mo")[0]).toEqual(["/model"]);
     expect(complete("cl")[0]).toContain("cloud ");
 
     mode = "cloud";
@@ -236,7 +230,7 @@ function fakeContext(cwd: string, target: "cloud" | "local"): ShellContext {
     cwd,
     projectName: cwd.split("/").filter(Boolean).at(-1) ?? cwd,
     inferredTarget: target,
-    targetSource: target === "local" ? "adjacent-config" : "default-cloud",
+    targetSource: "default-local",
     cloud: {
       authenticated: true,
       keyPrefix: "tt_test…",
@@ -257,17 +251,17 @@ function fakeContext(cwd: string, target: "cloud" | "local"): ShellContext {
 describe("renderShellBanner", () => {
   it("shows a compact heading, context, controls, and version", () => {
     const banner = renderShellBanner({
-      mode: "cloud",
-      modeSource: "default-cloud",
-      cwd: "/tmp/cloud-project",
-      context: fakeContext("/tmp/cloud-project", "cloud"),
+      mode: "local",
+      modeSource: "default-local",
+      cwd: "/tmp/local-project",
+      context: fakeContext("/tmp/local-project", "local"),
       version: "0.6.0",
     });
     const rows = banner.trimEnd().split("\n");
     expect(rows).toHaveLength(6);
     expect(rows[0]).toContain("tt");
     expect(banner).toContain("v0.6.0");
-    expect(banner).toContain("cloud");
+    expect(banner).toContain("local");
     expect(banner).toContain("agent");
     expect(banner).toContain("workflow model");
     expect(banner).toContain("ctrl+c stop/clear");
@@ -278,7 +272,7 @@ describe("renderShellBanner", () => {
   it("omits the version when none is provided", () => {
     const banner = renderShellBanner({
       mode: "local",
-      modeSource: "adjacent-config",
+      modeSource: "default-local",
       cwd: "/tmp/local-project",
       context: fakeContext("/tmp/local-project", "local"),
     });
@@ -336,7 +330,7 @@ describe("renderShellPrompt", () => {
   });
 });
 
-describe("TunedTensorShellSession", () => {  it("routes commands, switches modes, and recovers from parse errors", async () => {
+describe("TunedTensorShellSession", () => {  it("routes to local by default, honors a one-shot cloud prefix, and recovers from parse errors", async () => {
     const requests: ShellCommandRequest[] = [];
     const stdout: string[] = [];
     const stderr: string[] = [];
@@ -366,13 +360,13 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
     expect(requests).toEqual([
       { target: "local", args: ["runs", "list"], cwd: "/tmp/local-project" },
       { target: "cloud", args: ["auth", "status"], cwd: "/tmp/local-project" },
-      { target: "cloud", args: ["runs", "list"], cwd: "/tmp/local-project" },
+      { target: "local", args: ["runs", "list"], cwd: "/tmp/local-project" },
     ]);
-    expect(stdout.join("")).toContain("Workflow switched to cloud");
+    expect(stderr.join("")).toMatch(/Unknown session command/);
     expect(stderr.join("")).toMatch(/Shell operator/);
   });
 
-  it("switches workflows with the /cloud and /local aliases", async () => {
+  it("stays local even when the discovered context favours cloud", async () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
     const session = await createShellSession({
@@ -387,17 +381,15 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
       contextProvider: async ({ cwd }) => fakeContext(cwd, "cloud"),
     });
 
-    expect(session.snapshot().mode).toBe("cloud");
-    await session.handleLine("/local");
     expect(session.snapshot().mode).toBe("local");
-    expect(stdout.join("")).toContain("Workflow switched to local");
 
+    await session.handleLine("/local");
     await session.handleLine("/cloud");
-    expect(session.snapshot().mode).toBe("cloud");
-    expect(stdout.join("")).toContain("Workflow switched to cloud");
+    await session.handleLine("/mode local");
 
-    await session.handleLine("/local extra");
-    expect(stderr.join("")).toContain("/local does not accept arguments");
+    expect(session.snapshot().mode).toBe("local");
+    expect(stdout.join("")).not.toContain("Workflow switched");
+    expect(stderr.join("")).toMatch(/Unknown session command/);
   });
 
   it("sends natural language and agent slash commands to the in-shell agent", async () => {
@@ -444,20 +436,20 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
       "status of my latest run",
     ]);
     expect(agent.handleLine.mock.calls.map((call) => call[1])).toEqual([
-      { mode: "cloud", workspaceRoot: "/tmp/cloud-project" },
-      { mode: "cloud", workspaceRoot: "/tmp/cloud-project" },
-      { mode: "cloud", workspaceRoot: "/tmp/cloud-project" },
-      { mode: "cloud", workspaceRoot: "/tmp/cloud-project" },
-      { mode: "cloud", workspaceRoot: "/tmp/cloud-project" },
+      { mode: "local", workspaceRoot: "/tmp/cloud-project" },
+      { mode: "local", workspaceRoot: "/tmp/cloud-project" },
+      { mode: "local", workspaceRoot: "/tmp/cloud-project" },
+      { mode: "local", workspaceRoot: "/tmp/cloud-project" },
+      { mode: "local", workspaceRoot: "/tmp/cloud-project" },
     ]);
     expect(run.mock.calls.map((call) => call[0])).toEqual([
       {
-        target: "cloud",
+        target: "local",
         args: ["runs", "list"],
         cwd: "/tmp/cloud-project",
       },
       {
-        target: "cloud",
+        target: "local",
         args: ["balance"],
         cwd: "/tmp/cloud-project",
       },
@@ -494,9 +486,9 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
     expect(await session.handleLine("/exit")).toBe("exit");
 
     const output = stdout.join("");
-    expect(output).toContain("TT cloud commands matching");
+    expect(output).toContain("TT local commands matching");
     expect(output).toContain("Cloud endpoint");
-    expect(output).toContain("Remote status");
+    expect(output).toContain("Host checks");
     expect(clear).toHaveBeenCalledTimes(1);
     expect(run).not.toHaveBeenCalled();
   });
@@ -504,13 +496,12 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
   it("shows and activates models through /model", async () => {
     const requests: ShellCommandRequest[] = [];
     const stdout: string[] = [];
-    const stderr: string[] = [];
     const session = await createShellSession({
       cwd: "/tmp/local-project",
       env: {},
       io: {
         write: (text) => stdout.push(text),
-        writeError: (text) => stderr.push(text),
+        writeError: vi.fn(),
         clear: vi.fn(),
       },
       runner: async (request) => {
@@ -532,12 +523,6 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
         cwd: "/tmp/local-project",
       },
     ]);
-
-    await session.handleLine("/mode cloud");
-    await session.handleLine("/model");
-    expect(stdout.join("")).toContain("Base model");
-    await session.handleLine("/model model_def456");
-    expect(stderr.join("")).toMatch(/local workflow action/);
     expect(requests).toHaveLength(1);
   });
 });
