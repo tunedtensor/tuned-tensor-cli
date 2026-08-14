@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.12.0-beta.0] - 2026-08-14
+
+### Added
+
+- Surface the conversational agent's model provider and underlying model in the
+  shell banner, `/context`, `/status`, and `tt agent status`.
+- Add `/cloud` and `/local` slash aliases to switch workflows in one word
+  (aliases for `/mode cloud|local`).
+
+### Changed
+
+- `tt agent status` now reports the resolved provider and model display names
+  alongside the configured IDs.
+
+### Internal
+
+- Publish beta prereleases under the `beta` npm dist-tag; stable releases stay
+  on `latest`.
+- Verify the GitHub release tag matches `package.json` before publishing and
+  publish with npm provenance.
+- Smoke-test the packed npm artifact across Ubuntu, macOS, and Windows on
+  Node.js 22 and 24.
+
 ## [0.11.0] - 2026-08-12
 
 ### Added
