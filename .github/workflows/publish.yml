@@ -4,13 +4,13 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   publish:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-      id-token: write
 
     steps:
       - uses: actions/checkout@v5
@@ -24,10 +24,34 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v9.0.0
 
+      # The release tag is the source of truth. Refuse to publish if it drifts
+      # from package.json so a bad tag can never overwrite a published version.
+      - name: Verify release tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          tag_version="${RELEASE_TAG#v}"
+          if [ "$package_version" != "$tag_version" ]; then
+            echo "Release tag '${RELEASE_TAG}' does not match package.json version '${package_version}'."
+            exit 1
+          fi
+
+      # Stable releases go to `latest`; GitHub pre-releases go to `beta` so
+      # `npm i -g @tuned-tensor/cli` users never receive a prerelease.
+      - name: Resolve npm dist-tag
+        id: dist-tag
+        run: |
+          if [ "${{ github.event.release.prerelease }}" = "true" ]; then
+            echo "tag=beta" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npm publish --access public
+      - run: npm publish --access public --tag "${{ steps.dist-tag.outputs.tag }}" --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
