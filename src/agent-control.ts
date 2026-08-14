@@ -20,7 +20,7 @@ import {
 export interface AgentModelChoice {
   provider: string;
   id: string;
-  name?: string;
+  name: string;
   authenticated: boolean;
   thinking: boolean;
 }
@@ -71,7 +71,7 @@ function modelRelevance(
   if (!q) return undefined;
   const fullId = modelKey(model).toLowerCase();
   const bareId = model.id.toLowerCase();
-  const name = (model.name ?? "").toLowerCase();
+  const name = model.name.toLowerCase();
   if (fullId === q || bareId === q) return 0;
   if (fullId.startsWith(q)) return 1;
   if (bareId.startsWith(q)) return 2;

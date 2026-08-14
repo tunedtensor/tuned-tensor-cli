@@ -55,6 +55,16 @@ export function readConfig(): Config {
   }
 }
 
+let configRevision = 0;
+
+/**
+ * Monotonic counter bumped on every local config write, so in-process caches
+ * can detect selection changes without re-reading the file each time.
+ */
+export function getConfigRevision(): number {
+  return configRevision;
+}
+
 export function writeConfig(config: Config): void {
   const dir = getConfigDir();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -64,6 +74,7 @@ export function writeConfig(config: Config): void {
     mode: 0o600,
   });
   chmodSync(path, 0o600);
+  configRevision += 1;
 }
 
 export function updateConfig(partial: Partial<Config>): void {

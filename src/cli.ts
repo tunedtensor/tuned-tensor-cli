@@ -11,7 +11,7 @@ import { createPiModelRuntime, type AgentModelRuntime } from "./agent-model.js";
 import type { AgentToolApi } from "./agent-tools.js";
 import type { AgentMutationApi } from "./agent-approval.js";
 import { get, post, put } from "./client.js";
-import { getAgentSelection, getApiKey, getConfigDir } from "./config.js";
+import { getAgentSelection, getApiKey, getConfigDir, getConfigRevision } from "./config.js";
 import { join } from "node:path";
 import { TunedTensorAgentSession } from "./agent.js";
 import { executeLocalCommand } from "./local-runner.js";
@@ -151,21 +151,15 @@ function createLazyDefaultAgentClient(
   getModelRuntime: () => Promise<AgentModelRuntime & { streamSimple?: (...args: any[]) => any }>,
 ): AgentConversationClient {
   let pending: Promise<AgentConversationClient> | undefined;
-  let pendingKey: string | undefined;
-  const selectionKey = (): string => {
-    try {
-      return JSON.stringify(getAgentSelection(env) ?? null);
-    } catch {
-      return "invalid";
-    }
-  };
+  let builtRevision = -1;
   const client = () => {
-    const key = selectionKey();
-    if (!pending || pendingKey !== key) {
-      pendingKey = key;
+    const revision = getConfigRevision();
+    if (!pending || builtRevision !== revision) {
+      builtRevision = revision;
       // Retry on the next call if creation fails (for example when the user
       // configures the agent later in the same shell session). Changing the
-      // model with `/model` also recreates the client here.
+      // model with `/model` writes config and bumps the revision, which also
+      // recreates the client here.
       const attempt = createDefaultAgentClient(runtime, env, cloud, workspaceRoot, getModelRuntime);
       pending = attempt;
       attempt.catch(() => {

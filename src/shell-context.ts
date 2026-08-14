@@ -331,18 +331,16 @@ function targetSourceLabel(source: TargetSource): string {
 export function formatShellContext(
   context: ShellContext,
   selectedTarget: WorkflowMode,
-  targetSource: TargetSource | "session" | "command-option",
+  targetSource: TargetSource | "command-option",
 ): string[] {
   const specLabel = context.spec
     ? context.spec.parseError
       ? `${context.spec.path} (invalid JSON)`
       : context.spec.path
     : "not found";
-  const sourceLabel = targetSource === "session"
-    ? "session"
-    : targetSource === "command-option"
-      ? "--target"
-      : targetSourceLabel(targetSource);
+  const sourceLabel = targetSource === "command-option"
+    ? "--target"
+    : targetSourceLabel(targetSource);
   const lines = [
     `Target         ${selectedTarget} (${sourceLabel})`,
     `Project        ${context.projectName}`,

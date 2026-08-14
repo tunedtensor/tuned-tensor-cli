@@ -367,7 +367,7 @@ export interface CreateShellSessionOptions {
 
 export interface ShellSessionSnapshot {
   mode: WorkflowMode;
-  modeSource: TargetSource | "session";
+  modeSource: TargetSource;
   cwd: string;
   context: ShellContext;
   version?: string;
@@ -495,9 +495,7 @@ function helpText(mode: WorkflowMode, query?: string, palette = false): string {
 }
 
 function activeModelLabel(snapshot: ShellSessionSnapshot): string {
-  return snapshot.mode === "local"
-    ? snapshot.context.local.activeModelId ?? "base"
-    : snapshot.context.spec?.baseModel ?? "—";
+  return snapshot.context.local.activeModelId ?? "base";
 }
 
 function agentModelLabel(context: ShellContext): string {
@@ -697,11 +695,11 @@ export class TunedTensorShellSession {
   }
 
   private formatAgentModelChoice(
-    model: { provider: string; id: string; name?: string },
+    model: { provider: string; id: string; name: string },
     summary: { provider: string; model: string } | undefined,
   ): string {
     const active = summary?.provider === model.provider && summary?.model === model.id;
-    const displayName = model.name && model.name !== model.id ? `  ${model.name}` : "";
+    const displayName = model.name !== model.id ? `  ${model.name}` : "";
     return `  ${accent(`${model.provider}/${model.id}`)}${displayName}${active ? chalk.dim(" (active)") : ""}`;
   }
 
