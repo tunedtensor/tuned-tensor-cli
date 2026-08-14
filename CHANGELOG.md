@@ -22,6 +22,7 @@
   layer shared by the shell and the `tt agent ...` commands.
 - The lazy agent client detects selection changes via a config revision counter
   instead of re-reading the config file on every turn.
+- Drop Windows from the npm smoke-test matrix; keep Ubuntu and macOS.
 
 ## [0.12.0-beta.0] - 2026-08-14
 
