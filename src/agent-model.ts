@@ -37,7 +37,7 @@ export function resolveAgentModel(
   const resolved = resolveAgentModelDefinition(runtime, selection);
   if (!runtime.hasConfiguredAuth(selection.provider)) {
     throw new Error(
-      `Authenticate Pi provider "${selection.provider}" first (for example with Pi's /login), then retry. Provider secrets are never accepted by tt flags.`,
+      `Authenticate provider "${selection.provider}" first, then retry. Provider secrets are never accepted by tt flags.`,
     );
   }
   return resolved;
@@ -52,7 +52,7 @@ export function resolveAgentModelDefinition(
   );
   if (!provider) {
     throw new Error(
-      `Unknown Pi provider "${selection.provider}". Run \`tt agent models --all\` to list providers and models.`,
+      `Unknown provider "${selection.provider}". Run \`tt agent models --all\` to list providers and models.`,
     );
   }
   const model = runtime.getModel(selection.provider, selection.model);
@@ -83,8 +83,8 @@ export async function createPiModelRuntime(): Promise<ModelRuntime> {
 /**
  * OpenRouter attributes requests to an app via the HTTP-Referer/X-Title
  * headers. Without them the OpenRouter dashboard shows tt's agent traffic as
- * "Unknown" app. Pi composes provider-level `headers` from models.json over
- * its built-in openrouter provider, so we merge ours in (preserving any
+ * "Unknown" app. tt composes provider-level `headers` from models.json over
+ * the built-in openrouter provider, so we merge ours in (preserving any
  * existing user config) before the runtime loads.
  */
 const OPENROUTER_APP_HEADERS: Record<string, string> = {

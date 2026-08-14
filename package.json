@@ -1,7 +1,7 @@
 {
   "name": "@tuned-tensor/cli",
   "version": "0.12.0-beta.0",
-  "description": "Local Pi agent and unified cloud/local CLI for Tuned Tensor workflows",
+  "description": "Local TT agent and unified cloud/local CLI for Tuned Tensor workflows",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tunedtensor/tuned-tensor-cli.git"

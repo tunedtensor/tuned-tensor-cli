@@ -15,7 +15,7 @@ export interface AgentCommandsOptions {
 }
 
 export function registerAgentCommands(parent: Command, options: AgentCommandsOptions): void {
-  const agent = parent.command("agent").description("Configure the laptop-local Pi agent");
+  const agent = parent.command("agent").description("Configure the laptop-local TT agent");
 
   agent.command("status").description("Show the selected local provider, model, thinking, and auth state")
     .action(async () => {
@@ -44,13 +44,13 @@ export function registerAgentCommands(parent: Command, options: AgentCommandsOpt
         : `Local agent: ${modelLabel} (thinking: ${value.thinking}, auth: ${value.authenticated ? "configured" : "required"})\n`);
     });
 
-  agent.command("models").description("List Pi provider models available to the local agent")
-    .option("--provider <provider>", "Filter by Pi provider ID")
+  agent.command("models").description("List provider models available to the local agent")
+    .option("--provider <provider>", "Filter by provider ID")
     .option("--all", "Include models whose provider auth is not configured")
     .action(async (commandOptions: { provider?: string; all?: boolean }) => {
       const runtime = await options.getRuntime();
       if (commandOptions.provider && !runtime.getProviders().some((provider) => provider.id === commandOptions.provider)) {
-        throw new Error(`Unknown Pi provider "${commandOptions.provider}".`);
+        throw new Error(`Unknown provider "${commandOptions.provider}".`);
       }
       const models = listAgentModels(runtime, {
         provider: commandOptions.provider,
@@ -61,7 +61,7 @@ export function registerAgentCommands(parent: Command, options: AgentCommandsOpt
         return;
       }
       if (models.length === 0) {
-        options.output.write("No matching authenticated Pi models. Use --all to inspect the full catalog.\n");
+        options.output.write("No matching authenticated models. Use --all to inspect the full catalog.\n");
         return;
       }
       for (const model of models) {
@@ -69,9 +69,9 @@ export function registerAgentCommands(parent: Command, options: AgentCommandsOpt
       }
     });
 
-  agent.command("configure").description("Select the local Pi provider, model, and thinking level")
-    .requiredOption("--provider <provider>", "Pi provider ID")
-    .requiredOption("--model <model>", "Pi model ID")
+  agent.command("configure").description("Select the local provider, model, and thinking level")
+    .requiredOption("--provider <provider>", "Provider ID")
+    .requiredOption("--model <model>", "Model ID")
     .option("--thinking <level>", "off, minimal, low, medium, high, xhigh, or max", "medium")
     .action(async (commandOptions: { provider: string; model: string; thinking: string }) => {
       const result = setAgentModel(

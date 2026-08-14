@@ -180,7 +180,7 @@ describe("config", () => {
       );
     });
 
-    it("accepts Pi's max thinking level", () => {
+    it("accepts the max thinking level", () => {
       process.env.TUNED_TENSOR_AGENT_PROVIDER = "openai";
       process.env.TUNED_TENSOR_AGENT_MODEL = "gpt-5.2";
       process.env.TUNED_TENSOR_AGENT_THINKING = "max";

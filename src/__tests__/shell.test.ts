@@ -496,7 +496,7 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("lists, searches, and changes the Pi agent model through /model", async () => {
+  it("lists, searches, and changes the TT agent model through /model", async () => {
     const configRoot = mkdtempSync(join(tmpdir(), "tt-shell-model-"));
     process.env.XDG_CONFIG_HOME = configRoot;
     const stdout: string[] = [];

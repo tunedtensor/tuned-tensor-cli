@@ -46,7 +46,7 @@ export interface AgentTurnContext {
 }
 
 /**
- * UI-facing conversation seam implemented by the local Pi runtime.
+ * UI-facing conversation seam implemented by the local agent runtime.
  *
  * This contract intentionally has no transport assumptions: ordinary CLI
  * flows do not call hosted `/agent/*` runtime endpoints.

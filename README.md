@@ -36,17 +36,17 @@ npm link
 
 ## Conversational terminal
 
-The interactive agent harness and conversation state now run on your laptop
-with Pi. Inference runs through the provider/model you select, which may be a
+The interactive agent harness and conversation state run on your laptop.
+Inference runs through the provider/model you select, which may be a
 local endpoint or a remote provider. Tuned Tensor remains an authenticated
 typed tool provider: `tt auth login` is used only for Tuned Tensor REST calls
 and is never sent to the selected model.
 Tool results needed to answer a request are sent to the model you selected, so
 choose a local or remote provider whose data policy fits your workload.
 
-Pi reuses provider authentication and custom model definitions from
+`tt` reuses provider authentication and custom model definitions from
 `~/.pi/agent/auth.json` and `~/.pi/agent/models.json`. Authenticate a provider
-with Pi's normal login flow; `tt` deliberately has no provider-secret flags.
+through its normal login flow; `tt` deliberately has no provider-secret flags.
 Then inspect and select a provider/model:
 
 ```bash
@@ -76,7 +76,7 @@ tt local support-agent › runs list
 tt local support-agent › Ask whether my dataset is ready to train
 ```
 
-Ordinary sentences go through the locally orchestrated Pi model session. The
+Ordinary sentences go through the locally orchestrated model session. The
 model can call a
 strict, bounded set of authenticated Tuned Tensor read tools and prepare-only
 mutation tools; it has no shell or general filesystem tool. The shell runs the
@@ -127,7 +127,7 @@ without changing the default.
 The shell banner and `/context` surface the assistant's configured provider and
 model (`agent provider/model`) separately from the workflow model, so the
 model answering your prompts is always visible. `/model` shows and changes the
-laptop-local Pi agent model: run it with no arguments for a short list of
+laptop-local TT agent model: run it with no arguments for a short list of
 suggestions, search with `/model <query>` (only the closest matches are
 shown), or switch with `/model <provider>/<model>` (for example
 `/model anthropic/claude-sonnet-4-5`). The equivalent non-interactive commands
@@ -173,7 +173,7 @@ tt --json pipeline run --file pipeline.json \
 to an omitted predecessor. Local plans execute directly and may omit, reorder,
 or repeat supported components. Cloud and mixed-target plans remain preview-only
 until the bounded hosted dispatcher and artifact handoff are deployed; execution
-fails closed rather than silently running the fixed cloud workflow. The Pi agent
+fails closed rather than silently running the fixed cloud workflow. The TT agent
 may describe, validate, and prepare a plan, but has no direct pipeline-execute
 tool.
 

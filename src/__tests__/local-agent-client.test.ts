@@ -19,8 +19,8 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-describe("local Pi conversation client", () => {
-  it("maps Pi streaming events to the existing UI seam and resumes locally", async () => {
+describe("local agent conversation client", () => {
+  it("maps agent streaming events to the existing UI seam and resumes locally", async () => {
     const created: LocalPiAgentOptions[] = [];
     const prompts: string[] = [];
     const createAgent = vi.fn((options: LocalPiAgentOptions): LocalPiAgent => {

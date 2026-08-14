@@ -12,7 +12,7 @@ import {
 } from "./config.js";
 
 /**
- * Functions for reading and changing the laptop-local Pi agent model. Both
+ * Functions for reading and changing the laptop-local TT agent model. Both
  * the `tt agent ...` commands and the `/model` shell command are thin wrappers
  * over these functions.
  */

@@ -44,7 +44,7 @@ describe("extractPassthroughOptions", () => {
 });
 
 describe("unified command routing", () => {
-  it("configures the local agent and exposes Pi model status without secret flags", async () => {
+  it("configures the local agent and exposes agent model status without secret flags", async () => {
     const configRoot = mkdtempSync(join(tmpdir(), "tt-agent-cli-"));
     process.env.XDG_CONFIG_HOME = configRoot;
     const stdout = new PassThrough();
@@ -388,7 +388,7 @@ describe("unified command routing", () => {
     expect(startShell).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the local Pi client and never calls remote /agent endpoints", async () => {
+  it("uses the local agent client and never calls remote /agent endpoints", async () => {
     const configRoot = mkdtempSync(join(tmpdir(), "tt-agent-local-"));
     process.env.XDG_CONFIG_HOME = configRoot;
     const fetchSpy = vi.spyOn(globalThis, "fetch");
