@@ -18,6 +18,12 @@ import {
   type ShellContext,
   type TargetSource,
 } from "./shell-context.js";
+import {
+  describeAgentModel,
+  listAgentModels,
+  setAgentModel,
+} from "./agent-control.js";
+import type { AgentModelRuntime } from "./agent-model.js";
 
 export type { WorkflowMode } from "./command-catalog.js";
 
@@ -189,7 +195,7 @@ export function routeShellCommand(
   const override = args[0];
   if (override === "cloud" || override === "local") {
     if (args.length === 1) {
-      throw new ShellParseError(`Add a ${override} command, or use \`/mode ${override}\` to switch workflows.`);
+      throw new ShellParseError(`Add a ${override} command, e.g. \`${override} runs list\`.`);
     }
     return { target: override, args: args.slice(1) };
   }
@@ -235,9 +241,6 @@ export type SlashCommandName =
   | "help"
   | "status"
   | "context"
-  | "mode"
-  | "cloud"
-  | "local"
   | "model"
   | "clear"
   | "cd"
@@ -252,9 +255,6 @@ const SLASH_NAMES = new Set([
   "help",
   "status",
   "context",
-  "mode",
-  "cloud",
-  "local",
   "model",
   "clear",
   "cd",
@@ -362,11 +362,12 @@ export interface CreateShellSessionOptions {
   env?: Readonly<NodeJS.ProcessEnv>;
   contextProvider?: ShellContextProvider;
   version?: string;
+  agentModelRuntime?: () => Promise<AgentModelRuntime>;
 }
 
 export interface ShellSessionSnapshot {
   mode: WorkflowMode;
-  modeSource: TargetSource | "session";
+  modeSource: TargetSource;
   cwd: string;
   context: ShellContext;
   version?: string;
@@ -494,9 +495,7 @@ function helpText(mode: WorkflowMode, query?: string, palette = false): string {
 }
 
 function activeModelLabel(snapshot: ShellSessionSnapshot): string {
-  return snapshot.mode === "local"
-    ? snapshot.context.local.activeModelId ?? "base"
-    : snapshot.context.spec?.baseModel ?? "—";
+  return snapshot.context.local.activeModelId ?? "base";
 }
 
 function agentModelLabel(context: ShellContext): string {
@@ -562,8 +561,8 @@ export function resetShellPromptStyle(): string {
 }
 
 export class TunedTensorShellSession {
-  private mode: WorkflowMode;
-  private modeSource: TargetSource | "session";
+  private readonly mode: WorkflowMode = "local";
+  private readonly modeSource: TargetSource = "default-local";
   private cwd: string;
   private context: ShellContext;
 
@@ -574,10 +573,9 @@ export class TunedTensorShellSession {
     private readonly env: Readonly<NodeJS.ProcessEnv>,
     private readonly contextProvider: ShellContextProvider,
     private readonly version: string | undefined,
+    private readonly agentModelRuntime: (() => Promise<AgentModelRuntime>) | undefined,
     initialContext: ShellContext,
   ) {
-    this.mode = initialContext.inferredTarget;
-    this.modeSource = initialContext.targetSource;
     this.cwd = initialContext.cwd;
     this.context = initialContext;
   }
@@ -597,6 +595,7 @@ export class TunedTensorShellSession {
       env,
       contextProvider,
       options.version,
+      options.agentModelRuntime,
       initialContext,
     );
   }
@@ -626,27 +625,82 @@ export class TunedTensorShellSession {
   private async refreshContext(): Promise<void> {
     this.context = await this.contextProvider({ cwd: this.cwd, env: this.env });
     this.cwd = this.context.cwd;
-    if (this.modeSource !== "session" && this.modeSource !== "environment") {
-      this.mode = this.context.inferredTarget;
-      this.modeSource = this.context.targetSource;
-    }
   }
 
   private writeLines(lines: string[]): void {
     this.io.write(`${lines.join("\n")}\n`);
   }
 
-  private modelLines(): string[] {
-    if (this.mode === "local") {
-      return styleDetailLines([
-        detailLine("Active model", this.context.local.activeModelId ?? "base"),
-        detailLine("Change", "/model <id> to activate a verified local model"),
-      ]);
+  private async requireAgentModelRuntime(): Promise<AgentModelRuntime> {
+    if (!this.agentModelRuntime) {
+      throw new ShellParseError("The local agent model runtime is unavailable.");
     }
-    return styleDetailLines([
-      detailLine("Base model", this.context.spec?.baseModel ?? "—"),
-      detailLine("Change", "edit base_model in tunedtensor.json, then run push"),
+    return await this.agentModelRuntime();
+  }
+
+  private renderAgentModel(runtime: AgentModelRuntime, query?: string): string[] {
+    let summary;
+    try {
+      summary = describeAgentModel(runtime, this.env);
+    } catch {
+      summary = undefined;
+    }
+    const label = summary
+      ? `${summary.provider}/${summary.model}${summary.modelName && summary.modelName !== summary.model ? ` (${summary.modelName})` : ""} — thinking ${summary.thinking}, auth ${summary.authenticated ? "configured" : "required"}`
+      : "not configured";
+    const lines = styleDetailLines([
+      detailLine("Agent model", label),
+      detailLine("Change", "/model <provider>/<model>"),
+      detailLine("Search", "/model <query>"),
     ]);
+
+    const all = listAgentModels(runtime);
+    if (all.length === 0) {
+      lines.push("", chalk.dim("  no authenticated models — run `tt agent models --all` for the full catalog"));
+      return lines;
+    }
+
+    if (query) {
+      const matches = listAgentModels(runtime, { query });
+      lines.push("", chalk.bold(`Models matching ${JSON.stringify(query)}`));
+      if (matches.length === 0) {
+        lines.push(chalk.dim("  no matches"));
+      } else {
+        const shown = matches.slice(0, 10);
+        for (const model of shown) {
+          lines.push(this.formatAgentModelChoice(model, summary));
+        }
+        if (matches.length > shown.length) {
+          lines.push(chalk.dim(`  … ${matches.length - shown.length} more — refine the query`));
+        }
+      }
+      return lines;
+    }
+
+    const preferred = summary
+      ? all.filter((model) => model.provider === summary.provider)
+      : [];
+    const rest = summary
+      ? all.filter((model) => model.provider !== summary.provider)
+      : all;
+    const shown = [...preferred, ...rest].slice(0, 8);
+    lines.push("", chalk.bold(summary ? "Suggestions" : "Available models"));
+    for (const model of shown) {
+      lines.push(this.formatAgentModelChoice(model, summary));
+    }
+    if (all.length > shown.length) {
+      lines.push(chalk.dim(`  … ${all.length - shown.length} more — /model <query> to search`));
+    }
+    return lines;
+  }
+
+  private formatAgentModelChoice(
+    model: { provider: string; id: string; name: string },
+    summary: { provider: string; model: string } | undefined,
+  ): string {
+    const active = summary?.provider === model.provider && summary?.model === model.id;
+    const displayName = model.name !== model.id ? `  ${model.name}` : "";
+    return `  ${accent(`${model.provider}/${model.id}`)}${displayName}${active ? chalk.dim(" (active)") : ""}`;
   }
 
   private async handleSlash(command: ParsedSlashCommand): Promise<ShellLineAction> {
@@ -669,46 +723,38 @@ export class TunedTensorShellSession {
           formatShellContext(this.context, this.mode, this.modeSource),
         ));
         return "continue";
-      case "mode": {
-        if (command.args.length === 0) {
-          this.io.write(`Current workflow: ${this.mode}\n`);
-          return "continue";
-        }
-        if (command.args.length !== 1 || !["cloud", "local"].includes(command.args[0]!)) {
-          throw new ShellParseError("Usage: /mode cloud|local");
-        }
-        this.mode = command.args[0] as WorkflowMode;
-        this.modeSource = "session";
-        this.io.write(`${successMark()} Workflow switched to ${this.mode}.\n`);
-        return "continue";
-      }
-      case "cloud":
-      case "local":
-        assertNoArgs(command.name, command.args);
-        this.mode = command.name;
-        this.modeSource = "session";
-        this.io.write(`${successMark()} Workflow switched to ${this.mode}.\n`);
-        return "continue";
       case "model": {
+        const runtime = await this.requireAgentModelRuntime();
         if (command.args.length === 0) {
           await this.refreshContext();
-          this.writeLines(this.modelLines());
+          this.writeLines(this.renderAgentModel(runtime));
           return "continue";
         }
         if (command.args.length !== 1) {
-          throw new ShellParseError("Usage: /model [model-id]");
+          throw new ShellParseError("Usage: /model [<query> | <provider>/<model>]");
         }
-        if (this.mode !== "local") {
+        const target = command.args[0]!;
+        const slash = target.indexOf("/");
+        if (slash <= 0) {
+          await this.refreshContext();
+          this.writeLines(this.renderAgentModel(runtime, target));
+          return "continue";
+        }
+        if (slash === target.length - 1) {
           throw new ShellParseError(
-            "Activating models is a local workflow action. Use /mode local first; cloud specs change base_model in tunedtensor.json.",
+            "Usage: /model <provider>/<model>, e.g. /model anthropic/claude-sonnet-4-5",
           );
         }
-        await this.runner({
-          target: "local",
-          args: ["models", "activate", command.args[0]!],
-          cwd: this.cwd,
-        });
+        const provider = target.slice(0, slash);
+        const model = target.slice(slash + 1);
+        const result = setAgentModel(runtime, this.env, provider, model);
         await this.refreshContext();
+        const note = result.adjustedThinking
+          ? " — thinking set to off for this model"
+          : "";
+        this.io.write(
+          `${successMark()} Agent model: ${result.selection.provider}/${result.selection.model} (thinking ${result.selection.thinking})${note}.\n`,
+        );
         return "continue";
       }
       case "clear":
@@ -820,6 +866,7 @@ export interface InteractiveShellOptions {
   env?: Readonly<NodeJS.ProcessEnv>;
   requireTTY?: boolean;
   version?: string;
+  agentModelRuntime?: () => Promise<AgentModelRuntime>;
 }
 
 function streamIsTTY(stream: NodeJS.ReadableStream | NodeJS.WritableStream): boolean {
@@ -929,6 +976,7 @@ export async function startInteractiveShell(
     cwd: options.cwd,
     env: options.env,
     version: options.version,
+    agentModelRuntime: options.agentModelRuntime,
   });
   const completer = createCommandCompleter(() => session.snapshot().mode);
   readline = createInterface({

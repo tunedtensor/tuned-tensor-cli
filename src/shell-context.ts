@@ -5,8 +5,7 @@ import type { WorkflowMode } from "./command-catalog.js";
 
 export type TargetSource =
   | "environment"
-  | "adjacent-config"
-  | "default-cloud";
+  | "default-local";
 
 export interface ShellSpecContext {
   path: string;
@@ -274,13 +273,10 @@ export async function discoverShellContext(
   if (env.TT_TARGET && !environmentTarget) {
     warnings.push(`Ignoring invalid TT_TARGET=${JSON.stringify(env.TT_TARGET)}; use cloud or local.`);
   }
-  const inferredTarget = environmentTarget
-    ?? (hasAdjacentLocalConfig ? "local" : "cloud");
+  const inferredTarget = environmentTarget ?? "local";
   const targetSource: TargetSource = environmentTarget
     ? "environment"
-    : hasAdjacentLocalConfig
-      ? "adjacent-config"
-      : "default-cloud";
+    : "default-local";
 
   const [activeModelId, latestRun] = await Promise.all([
     readActiveModelId(storeRoot),
@@ -327,8 +323,6 @@ function targetSourceLabel(source: TargetSource): string {
   switch (source) {
     case "environment":
       return "TT_TARGET";
-    case "adjacent-config":
-      return "adjacent local-runner.json";
     default:
       return "default";
   }
@@ -337,18 +331,16 @@ function targetSourceLabel(source: TargetSource): string {
 export function formatShellContext(
   context: ShellContext,
   selectedTarget: WorkflowMode,
-  targetSource: TargetSource | "session" | "command-option",
+  targetSource: TargetSource | "command-option",
 ): string[] {
   const specLabel = context.spec
     ? context.spec.parseError
       ? `${context.spec.path} (invalid JSON)`
       : context.spec.path
     : "not found";
-  const sourceLabel = targetSource === "session"
-    ? "session"
-    : targetSource === "command-option"
-      ? "--target"
-      : targetSourceLabel(targetSource);
+  const sourceLabel = targetSource === "command-option"
+    ? "--target"
+    : targetSourceLabel(targetSource);
   const lines = [
     `Target         ${selectedTarget} (${sourceLabel})`,
     `Project        ${context.projectName}`,

@@ -58,7 +58,7 @@ export interface LocalAgentClientOptions {
 
 function defaultAgent(options: LocalPiAgentOptions): LocalPiAgent {
   if (!options.streamSimple) {
-    throw new Error("The configured Pi model runtime cannot stream this model.");
+    throw new Error("The configured model runtime cannot stream this model.");
   }
   let calls = 0;
   return new Agent({

@@ -33,7 +33,7 @@ function runtime(overrides: Partial<AgentModelRuntime> = {}): AgentModelRuntime 
 }
 
 describe("local agent model resolution", () => {
-  it("selects a configured Pi model without accepting or returning credentials", () => {
+  it("selects a configured model without accepting or returning credentials", () => {
     const result = resolveAgentModel(runtime(), {
       provider: "anthropic",
       model: "claude-sonnet-4-5",
@@ -51,7 +51,7 @@ describe("local agent model resolution", () => {
       provider: "anthropic",
       model: "claude-sonnet-4-5",
       thinking: "medium",
-    })).toThrow(/authenticate.*Pi.*anthropic/i);
+    })).toThrow(/authenticate.*anthropic/i);
   });
 
   it("rejects a thinking level unsupported by the selected model", () => {
@@ -64,7 +64,7 @@ describe("local agent model resolution", () => {
     })).toThrow(/does not support thinking/i);
   });
 
-  it("loads Pi's production provider catalog without credentials or network", async () => {
+  it("loads the production provider catalog without credentials or network", async () => {
     const agentDir = mkdtempSync(join(tmpdir(), "tt-pi-runtime-"));
     process.env.PI_CODING_AGENT_DIR = agentDir;
     try {

@@ -8,8 +8,9 @@
 
 Existing commands such as `tt runs`, `tt models`, and `tt push` remain hosted
 commands. The local workflow lives under `tt local`, so scripts keep their
-current meaning while people can switch between both targets in one
-interactive shell.
+current meaning. In the interactive shell the local workflow is the default;
+prefix a command with `cloud` (for example `cloud runs list`) to run one hosted
+command without changing the default.
 
 ## Install
 
@@ -35,17 +36,17 @@ npm link
 
 ## Conversational terminal
 
-The interactive agent harness and conversation state now run on your laptop
-with Pi. Inference runs through the provider/model you select, which may be a
+The interactive agent harness and conversation state run on your laptop.
+Inference runs through the provider/model you select, which may be a
 local endpoint or a remote provider. Tuned Tensor remains an authenticated
 typed tool provider: `tt auth login` is used only for Tuned Tensor REST calls
 and is never sent to the selected model.
 Tool results needed to answer a request are sent to the model you selected, so
 choose a local or remote provider whose data policy fits your workload.
 
-Pi reuses provider authentication and custom model definitions from
+`tt` reuses provider authentication and custom model definitions from
 `~/.pi/agent/auth.json` and `~/.pi/agent/models.json`. Authenticate a provider
-with Pi's normal login flow; `tt` deliberately has no provider-secret flags.
+through its normal login flow; `tt` deliberately has no provider-secret flags.
 Then inspect and select a provider/model:
 
 ```bash
@@ -69,24 +70,24 @@ If a newer stable release is available it recommends
 checks are ignored.
 
 ```text
-tt cloud support-agent › What happened in my latest training run?
+tt local support-agent › What happened in my latest training run?
 TT  Your latest run completed...
-tt cloud support-agent › runs list
-tt cloud support-agent › Ask whether my dataset is ready to train
+tt local support-agent › runs list
+tt local support-agent › Ask whether my dataset is ready to train
 ```
 
-Ordinary sentences go through the locally orchestrated Pi model session. The
+Ordinary sentences go through the locally orchestrated model session. The
 model can call a
 strict, bounded set of authenticated Tuned Tensor read tools and prepare-only
-mutation tools; it has no shell or general filesystem tool. In `local` mode it
-can prepare one new folder directly beneath the shell's current working
-directory with a validated `tunedtensor.json`. The tool refuses path traversal,
-symlinked workspace roots, existing targets, and unsupported spec fields. It is
-not available to cloud-mode turns. Known CLI commands such as
-`runs list`, `doctor`, and `models list` still execute directly. Prefix a
-command with `:` when you want to make that intent explicit. Commands are
-routed to the mode shown in the prompt; prefix one with `cloud` or `local` to
-override the mode without switching it.
+mutation tools; it has no shell or general filesystem tool. The shell runs the
+local workflow by default, so it can prepare one new folder directly beneath
+the shell's current working directory with a validated `tunedtensor.json`. The
+tool refuses path traversal,
+symlinked workspace roots, existing targets, and unsupported spec fields. Known
+CLI commands such as `runs list`, `doctor`, and `models list` still execute
+directly. Prefix a command with `:` when you want to make that intent
+explicit. Commands run in the local workflow by default; prefix one with
+`cloud` (or `local`) to override the target for that one command.
 
 Agent conversations are durable and local under
 `~/.config/tuned-tensor/agent/threads` (or the XDG config equivalent), with
@@ -119,16 +120,20 @@ ID. If a response or final state write is lost after dispatch, the action is
 retained as `outcome_unknown`, cannot be retried automatically, and directs the
 user to inspect the remote resource. `/reject` never calls a mutation endpoint.
 
-Useful shell controls include `/help`, `/status`, `/context`, `/cloud`,
-`/local`, `/mode`, `/model`, `/cd`, `/clear`, and `/exit`. `/cloud` and
-`/local` switch the workflow in one word (aliases for `/mode cloud|local`).
+Useful shell controls include `/help`, `/status`, `/context`, `/model`, `/cd`,
+`/clear`, and `/exit`. The shell runs the local workflow by default; prefix a
+command with `cloud` (for example `cloud runs list`) to run one hosted command
+without changing the default.
 The shell banner and `/context` surface the assistant's configured provider and
 model (`agent provider/model`) separately from the workflow model, so the
-model answering your prompts is always visible. `/model` retains its workflow
-meaning: it shows the active local serving model or cloud spec base model, and
-`/model <id>` activates a verified local serving model. Configure the assistant
-model explicitly with `tt agent configure`. The shell keeps normal terminal
-scrollback and command history only for the current process.
+model answering your prompts is always visible. `/model` shows and changes the
+laptop-local TT agent model: run it with no arguments for a short list of
+suggestions, search with `/model <query>` (only the closest matches are
+shown), or switch with `/model <provider>/<model>` (for example
+`/model anthropic/claude-sonnet-4-5`). The equivalent non-interactive commands
+are `tt agent models`, `tt agent configure`, and `tt agent status`.
+The shell keeps normal terminal scrollback and command history only for the
+current process.
 
 Explicit commands remain non-interactive, including in CI. `tt --help` shows
 the complete command surface, `tt status` inspects both targets without a
@@ -168,7 +173,7 @@ tt --json pipeline run --file pipeline.json \
 to an omitted predecessor. Local plans execute directly and may omit, reorder,
 or repeat supported components. Cloud and mixed-target plans remain preview-only
 until the bounded hosted dispatcher and artifact handoff are deployed; execution
-fails closed rather than silently running the fixed cloud workflow. The Pi agent
+fails closed rather than silently running the fixed cloud workflow. The TT agent
 may describe, validate, and prepare a plan, but has no direct pipeline-execute
 tool.
 

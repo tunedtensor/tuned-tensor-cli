@@ -11,7 +11,7 @@ import { createPiModelRuntime, type AgentModelRuntime } from "./agent-model.js";
 import type { AgentToolApi } from "./agent-tools.js";
 import type { AgentMutationApi } from "./agent-approval.js";
 import { get, post, put } from "./client.js";
-import { getAgentSelection, getApiKey, getConfigDir } from "./config.js";
+import { getAgentSelection, getApiKey, getConfigDir, getConfigRevision } from "./config.js";
 import { join } from "node:path";
 import { TunedTensorAgentSession } from "./agent.js";
 import { executeLocalCommand } from "./local-runner.js";
@@ -86,6 +86,7 @@ async function createDefaultAgentClient(
   env: NodeJS.ProcessEnv,
   cloud: { apiKey?: string; baseUrl?: string },
   workspaceRoot: string,
+  getModelRuntime: () => Promise<AgentModelRuntime & { streamSimple?: (...args: any[]) => any }>,
 ): Promise<AgentConversationClient> {
   const selection = getAgentSelection(env);
   if (!selection) {
@@ -93,7 +94,7 @@ async function createDefaultAgentClient(
       "The laptop-local agent is not configured. Run `tt agent models --all`, then `tt agent configure --provider <provider> --model <model>`.",
     );
   }
-  const modelRuntime = runtime.modelRuntime ?? await createPiModelRuntime();
+  const modelRuntime = await getModelRuntime();
   const clientOpts = { apiKey: cloud.apiKey, baseUrl: cloud.baseUrl };
   const toolApi = runtime.agentToolApi ?? {
     get: async (path: string, query?: Record<string, string | number | undefined>) => await get(path, query, clientOpts),
@@ -130,18 +131,36 @@ async function createDefaultAgentClient(
   });
 }
 
+function createModelRuntimeGetter(
+  runtime: CliRuntime,
+): () => Promise<AgentModelRuntime & { streamSimple?: (...args: any[]) => any }> {
+  const injected = runtime.modelRuntime;
+  let promise: Promise<AgentModelRuntime & { streamSimple?: (...args: any[]) => any }> | undefined;
+  return async () => {
+    if (injected) return injected;
+    promise ??= createPiModelRuntime();
+    return await promise;
+  };
+}
+
 function createLazyDefaultAgentClient(
   runtime: CliRuntime,
   env: NodeJS.ProcessEnv,
   cloud: { apiKey?: string; baseUrl?: string },
   workspaceRoot: string,
+  getModelRuntime: () => Promise<AgentModelRuntime & { streamSimple?: (...args: any[]) => any }>,
 ): AgentConversationClient {
   let pending: Promise<AgentConversationClient> | undefined;
+  let builtRevision = -1;
   const client = () => {
-    if (!pending) {
+    const revision = getConfigRevision();
+    if (!pending || builtRevision !== revision) {
+      builtRevision = revision;
       // Retry on the next call if creation fails (for example when the user
-      // configures the agent later in the same shell session).
-      const attempt = createDefaultAgentClient(runtime, env, cloud, workspaceRoot);
+      // configures the agent later in the same shell session). Changing the
+      // model with `/model` writes config and bumps the revision, which also
+      // recreates the client here.
+      const attempt = createDefaultAgentClient(runtime, env, cloud, workspaceRoot, getModelRuntime);
       pending = attempt;
       attempt.catch(() => {
         if (pending === attempt) pending = undefined;
@@ -284,13 +303,7 @@ export function createProgram(
   const invokeLocal = runtime.runLocalCommand ?? executeLocalCommand;
   const launchShell = runtime.startShell ?? startInteractiveShell;
   const cwd = runtime.cwd ?? process.cwd();
-  const injectedModelRuntime = runtime.modelRuntime;
-  let modelRuntimePromise: Promise<AgentModelRuntime> | undefined;
-  const getModelRuntime = async () => {
-    if (injectedModelRuntime) return injectedModelRuntime;
-    modelRuntimePromise ??= createPiModelRuntime();
-    return await modelRuntimePromise;
-  };
+  const getModelRuntime = createModelRuntimeGetter(runtime);
 
   const shellRunner = async (
     request: ShellCommandRequest,
@@ -323,7 +336,7 @@ export function createProgram(
       client: runtime.agentClient ?? createLazyDefaultAgentClient(runtime, shellEnvironment, {
         apiKey: root.apiKey ?? shellEnvironment.TUNED_TENSOR_API_KEY,
         baseUrl: root.baseUrl ?? shellEnvironment.TUNED_TENSOR_URL,
-      }, cwd),
+      }, cwd, getModelRuntime),
       output,
       error,
     });
@@ -336,6 +349,7 @@ export function createProgram(
       cwd,
       env: shellEnvironment,
       version,
+      agentModelRuntime: getModelRuntime,
     });
   };
 
@@ -475,7 +489,7 @@ export function createProgram(
 
   program
     .command("shell")
-    .description("Open the interactive cloud/local terminal")
+    .description("Open the conversational terminal (local by default)")
     .action(openShell);
 
   program.addHelpText(
@@ -546,11 +560,12 @@ export async function runCli(
       error.write(`${formatCliUpdateNotice(update)}\n\n`);
     }
     const invokeSelf = runtime.runSelfCommand ?? runSelfCommand;
+    const getModelRuntime = createModelRuntimeGetter(runtime);
     const agent = createShellAgent({
       client: runtime.agentClient ?? createLazyDefaultAgentClient(runtime, env, {
         apiKey: env.TUNED_TENSOR_API_KEY,
         baseUrl: env.TUNED_TENSOR_URL,
-      }, runtime.cwd ?? process.cwd()),
+      }, runtime.cwd ?? process.cwd(), getModelRuntime),
       output,
       error,
     });
@@ -572,6 +587,7 @@ export async function runCli(
       cwd: runtime.cwd ?? process.cwd(),
       env,
       version,
+      agentModelRuntime: getModelRuntime,
     });
     return;
   }

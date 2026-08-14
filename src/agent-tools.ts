@@ -135,7 +135,7 @@ export function boundedToolJson(value: unknown): string {
 
 function result(value: unknown) {
   const text = boundedToolJson(value);
-  // Pi persists tool-result details in the local transcript even though only
+  // tt persists tool-result details in the local transcript even though only
   // content is sent back to the model. Keep both representations bounded so
   // a large API response cannot grow the transcript without limit.
   const details = JSON.parse(text) as unknown;

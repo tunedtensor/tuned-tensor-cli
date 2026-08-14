@@ -362,7 +362,7 @@ describe("TunedTensorAgentSession", () => {
     expect(session.interrupt()).toBe(false);
   });
 
-  it("shows cancellation when Pi resolves normally after abort", async () => {
+  it("shows cancellation when the agent resolves normally after abort", async () => {
     const client = fakeClient();
     let started!: () => void;
     const didStart = new Promise<void>((resolve) => { started = resolve; });
