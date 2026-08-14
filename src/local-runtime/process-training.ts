@@ -24,6 +24,7 @@ export function buildTrainingHyperparameters(
   const hyper = request.hyperparameters;
   return {
     base_model: model.id,
+    model_loader: model.modelLoader,
     ...(options.baseModelRevision ? { base_model_revision: options.baseModelRevision } : {}),
     n_epochs: String(hyper.n_epochs),
     learning_rate: String(hyper.learning_rate ?? model.defaultLearningRate),

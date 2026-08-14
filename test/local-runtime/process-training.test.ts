@@ -35,6 +35,7 @@ test("builds only the certified Qwen LoRA SFT hyperparameters", () => {
     baseModelRevision: "0123456789abcdef",
   }), {
     base_model: "Qwen/Qwen3.5-2B",
+    model_loader: "causal_lm",
     base_model_revision: "0123456789abcdef",
     n_epochs: "3",
     learning_rate: "0.00002",
@@ -65,6 +66,7 @@ test("default Qwen LoRA training parameters stay small", () => {
   const hyperparameters = buildTrainingHyperparameters(request);
   assert.deepEqual(hyperparameters, {
     base_model: "Qwen/Qwen3.5-2B",
+    model_loader: "causal_lm",
     n_epochs: "1",
     learning_rate: "0.00001",
     per_device_train_batch_size: "1",
@@ -93,6 +95,7 @@ test("Nemotron training defaults use bounded LoRA targets and activation checkpo
 
   assert.deepEqual(buildTrainingHyperparameters(request), {
     base_model: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+    model_loader: "causal_lm",
     n_epochs: "1",
     learning_rate: "0.00001",
     per_device_train_batch_size: "1",
@@ -102,6 +105,35 @@ test("Nemotron training defaults use bounded LoRA targets and activation checkpo
     lora_dropout: "0.05",
     max_seq_length: "1024",
     lora_target_modules: "q_proj,k_proj,v_proj,o_proj,in_proj",
+    gradient_checkpointing: "true",
+  });
+});
+
+test("Muse Glimmer training defaults use the image-text-to-text loader and checkpointing", () => {
+  const request = fineTuneRunRequestSchema.parse({
+    run_id: "55555555-5555-4555-8555-555555555555",
+    user_id: "local-user",
+    behavior_spec_id: "66666666-6666-4666-8666-666666666666",
+    run_number: 1,
+    spec_snapshot: {
+      name: "Muse Glimmer worker",
+      base_model: "meta-models/muse-glimmer-30b",
+      examples: [{ input: "hello", output: "greeting" }],
+    },
+  });
+
+  assert.deepEqual(buildTrainingHyperparameters(request), {
+    base_model: "meta-models/Muse-Glimmer-30B",
+    model_loader: "image_text_to_text",
+    n_epochs: "1",
+    learning_rate: "0.00001",
+    per_device_train_batch_size: "1",
+    gradient_accumulation_steps: "8",
+    lora_rank: "16",
+    lora_alpha: "32",
+    lora_dropout: "0.05",
+    max_seq_length: "2048",
+    lora_target_modules: "all-linear",
     gradient_checkpointing: "true",
   });
 });

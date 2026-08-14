@@ -5,8 +5,9 @@
 > Existing projects still work.
 
 DGX Spark is the reference host for local text SFT with LoRA adapters. TT Local
-certifies `Qwen/Qwen3.5-2B` and the larger
-`nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` checkpoint.
+certifies `Qwen/Qwen3.5-2B`, the larger
+`nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` checkpoint, and
+`meta-models/Muse-Glimmer-30B`.
 
 ## Check the host
 
@@ -45,6 +46,24 @@ deployment checkpoint. Its defaults enable activation checkpointing, cap the
 sequence length at 1,024 tokens, and apply LoRA only to shared attention and
 Mamba projections. The base weights require about 66 GB before cache and
 training overhead, so this path is not intended for ordinary consumer GPUs.
+
+For a Muse Glimmer execution worker:
+
+```bash
+mkdir -p ~/tuned-tensor-runs/muse-glimmer-worker
+cd ~/tuned-tensor-runs/muse-glimmer-worker
+tt local init \
+  --name "Muse Glimmer Worker" \
+  --model meta-models/Muse-Glimmer-30B \
+  --profile spark
+```
+
+Muse Glimmer is a vision-language checkpoint. The runtime fine-tunes its text
+tower only: it loads the checkpoint through `AutoModelForImageTextToText` (the
+text tower is not exposed in the causal-LM auto mapping) and leaves the vision
+tower frozen and unused. Defaults enable activation checkpointing and cap the
+sequence length at 2,048 tokens; the base weights are comparable to Nemotron
+and require Spark-class unified memory.
 
 Edit both generated examples in `tunedtensor.json`. For a meaningful run,
 replace them with a larger, representative dataset and a separate validation

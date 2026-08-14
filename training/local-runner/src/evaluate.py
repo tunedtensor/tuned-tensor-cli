@@ -50,18 +50,20 @@ def configure_hugging_face_cache(cache_home: str | None) -> None:
 
 def import_runtime_dependencies() -> None:
     """Import libraries only after Hugging Face cache settings are final."""
-    global torch, PeftModel, AutoModelForCausalLM, AutoTokenizer
+    global torch, PeftModel, AutoModelForCausalLM, AutoModelForImageTextToText, AutoTokenizer
 
     import torch as torch_module
     from peft import PeftModel as peft_model
     from transformers import (
         AutoModelForCausalLM as auto_model_for_causal_lm,
+        AutoModelForImageTextToText as auto_model_for_image_text_to_text,
         AutoTokenizer as auto_tokenizer,
     )
 
     torch = torch_module
     PeftModel = peft_model
     AutoModelForCausalLM = auto_model_for_causal_lm
+    AutoModelForImageTextToText = auto_model_for_image_text_to_text
     AutoTokenizer = auto_tokenizer
 
 
@@ -147,7 +149,11 @@ def _assert_certified_model_source(base_model: str) -> None:
         )
 
 
-def load_text_model(payload: dict[str, Any], adapter_path: str | None):
+def load_text_model(
+    payload: dict[str, Any],
+    adapter_path: str | None,
+    model_loader: str = "causal_lm",
+):
     base_model = str(payload["base_model"])
     model_source = str(payload.get("model_source", base_model))
     assert_certified_base_model(base_model, "Evaluation base model")
@@ -181,7 +187,12 @@ def load_text_model(payload: dict[str, Any], adapter_path: str | None):
     if device == "cuda":
         model_kwargs["device_map"] = {"": torch.cuda.current_device()}
 
-    model = AutoModelForCausalLM.from_pretrained(model_source, **model_kwargs)
+    model_class = (
+        AutoModelForImageTextToText
+        if model_loader == "image_text_to_text"
+        else AutoModelForCausalLM
+    )
+    model = model_class.from_pretrained(model_source, **model_kwargs)
     assert_certified_model_config(model.config, expected_model_id=base_model)
     if adapter_path:
         model = PeftModel.from_pretrained(model, adapter_path)
@@ -245,8 +256,12 @@ def main() -> None:
     payload = load_json(Path(args.input))
     if payload.get("protocol_version") != 2:
         raise ValueError("Unsupported inference protocol; expected protocol_version 2")
-    if payload.get("model_loader") not in (None, "causal_lm"):
-        raise ValueError("The bundled evaluator is text-only and requires model_loader=causal_lm")
+    model_loader = str(payload.get("model_loader") or "causal_lm")
+    if model_loader not in ("causal_lm", "image_text_to_text"):
+        raise ValueError(
+            f"The bundled evaluator does not support model_loader={model_loader!r}; "
+            "expected causal_lm or image_text_to_text"
+        )
     configure_hugging_face_cache(payload.get("model_cache"))
     import_runtime_dependencies()
 
@@ -255,7 +270,7 @@ def main() -> None:
         generation = payload.get("generation", {})
         if not isinstance(generation, dict):
             raise ValueError("generation must be a JSON object")
-        model, tokenizer, _device = load_text_model(payload, adapter_path)
+        model, tokenizer, _device = load_text_model(payload, adapter_path, model_loader)
         results = [
             generate_text_one(
                 model,

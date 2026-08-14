@@ -55,6 +55,20 @@ describe("local spec workspace", () => {
 
     expect(Value.Check(LocalProjectSpecSchema, spec)).toBe(true);
   });
+  it("accepts the certified Muse Glimmer model in local specs", async () => {
+    const spec = {
+      name: "Muse Glimmer Worker",
+      base_model: "meta-models/Muse-Glimmer-30B",
+      system_prompt: "Return one label.",
+      guidelines: ["Return the requested label."],
+      examples: [
+        { input: "good", output: "positive" },
+        { input: "bad", output: "negative" },
+      ],
+    };
+
+    expect(Value.Check(LocalProjectSpecSchema, spec)).toBe(true);
+  });
   it.each(["../escape", "/tmp/escape", "nested/spec", "two words", ".", ".."])(
     "rejects unsafe or ambiguous folder name %s",
     async (directory) => {

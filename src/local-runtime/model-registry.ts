@@ -11,11 +11,24 @@ import { verifyTarGzipArchive } from "./artifacts.js";
 export const NEMOTRON_BF16_REVISION =
   "ce38b6ab8b252b4b8ee7165b4605e93191cafd73";
 
+/** Immutable Hugging Face revision reviewed and certified for Muse Glimmer. */
+export const MUSE_GLIMMER_BF16_REVISION =
+  "a4e59da52a7bc87ae7251dd5545c0dd437c44b68";
+
+/**
+ * How the bundled text-only runtime loads a training model. Causal-LM
+ * checkpoints load through AutoModelForCausalLM; multimodal checkpoints whose
+ * text tower is not registered in the causal-LM auto mapping load through
+ * AutoModelForImageTextToText instead.
+ */
+export type ModelLoader = "causal_lm" | "image_text_to_text";
+
 export interface TrainingModel {
   id: string;
   family: string;
   /** Immutable Hugging Face revision this training path is bound to, if any. */
   defaultRevision?: string;
+  modelLoader: ModelLoader;
   defaultLearningRate: number;
   defaultPerDeviceBatchSize: number;
   defaultGradientAccumulationSteps: number;
@@ -31,6 +44,7 @@ export const TRAINING_MODELS: TrainingModel[] = [
   {
     id: "Qwen/Qwen3.5-2B",
     family: "qwen3_5",
+    modelLoader: "causal_lm",
     defaultLearningRate: 0.00001,
     defaultPerDeviceBatchSize: 1,
     defaultGradientAccumulationSteps: 8,
@@ -45,6 +59,7 @@ export const TRAINING_MODELS: TrainingModel[] = [
     id: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
     family: "nemotron_h",
     defaultRevision: NEMOTRON_BF16_REVISION,
+    modelLoader: "causal_lm",
     defaultLearningRate: 0.00001,
     defaultPerDeviceBatchSize: 1,
     defaultGradientAccumulationSteps: 8,
@@ -56,6 +71,25 @@ export const TRAINING_MODELS: TrainingModel[] = [
     // attention (q/k/v/o) and Mamba input projections instead, keeping the
     // adapter bounded. out_proj/conv1d are rejected by PEFT for Mamba models.
     loraTargetModules: ["q_proj", "k_proj", "v_proj", "o_proj", "in_proj"],
+    gradientCheckpointing: true,
+  },
+  {
+    id: "meta-models/Muse-Glimmer-30B",
+    family: "muse_glimmer",
+    defaultRevision: MUSE_GLIMMER_BF16_REVISION,
+    // Muse Glimmer is a vision-language model whose text tower is not exposed
+    // through the causal-LM auto mapping, so the bundled runtime loads the full
+    // conditional-generation checkpoint (vision tower frozen and unused) via
+    // AutoModelForImageTextToText for text-only SFT.
+    modelLoader: "image_text_to_text",
+    defaultLearningRate: 0.00001,
+    defaultPerDeviceBatchSize: 1,
+    defaultGradientAccumulationSteps: 8,
+    defaultLoraRank: 16,
+    defaultLoraAlpha: 32,
+    defaultLoraDropout: 0.05,
+    defaultMaxSeqLength: 2048,
+    loraTargetModules: "all-linear",
     gradientCheckpointing: true,
   },
 ];
@@ -100,6 +134,11 @@ export function defaultBaseModelRevision(modelId: string): string | undefined {
   return resolveRequestedBaseModelRevision(modelId);
 }
 
+/** Resolve how the bundled text-only runtime must load a training model. */
+export function resolveModelLoader(modelId: string): ModelLoader {
+  return resolveTrainingModel(modelId).modelLoader;
+}
+
 const CERTIFIED_QWEN_TEXT_CONFIG = {
   model_type: "qwen3_5_text",
   hidden_size: 2048,
@@ -108,6 +147,16 @@ const CERTIFIED_QWEN_TEXT_CONFIG = {
   num_key_value_heads: 2,
   intermediate_size: 6144,
   vocab_size: 248320,
+} as const;
+
+const CERTIFIED_MUSE_GLIMMER_TEXT_CONFIG = {
+  model_type: "muse_glimmer_text",
+  hidden_size: 6656,
+  num_hidden_layers: 52,
+  num_attention_heads: 32,
+  num_key_value_heads: 2,
+  intermediate_size: 19968,
+  vocab_size: 202048,
 } as const;
 
 const CERTIFIED_NEMOTRON_CONFIG = {
@@ -123,51 +172,87 @@ const CERTIFIED_NEMOTRON_CONFIG = {
   max_position_embeddings: 262144,
 } as const;
 
-/** Reject a same-family snapshot that is not the certified 2B architecture. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasArchitecture(config: Record<string, unknown>, architecture: string): boolean {
+  const architectures = config.architectures;
+  return Array.isArray(architectures) && architectures.includes(architecture);
+}
+
+/**
+ * Reject a same-family snapshot that is not the certified text tower. Qwen3.5
+ * and Muse Glimmer both expose the text tower through a repo-level config with
+ * a `text_config` sub-object, so they share this check.
+ */
+function assertCertifiedTextTowerConfig(
+  config: Record<string, unknown>,
+  label: string,
+  certifiedModelId: string,
+  architecture: string,
+  certifiedTextConfig: Readonly<Record<string, unknown>>,
+): void {
+  if (!hasArchitecture(config, architecture)) {
+    throw new Error(`${label} is not the certified ${certifiedModelId} architecture.`);
+  }
+  const textConfig = config.text_config;
+  if (!isRecord(textConfig)) {
+    throw new Error(`${label} is not the certified ${certifiedModelId} architecture.`);
+  }
+  for (const [key, expected] of Object.entries(certifiedTextConfig)) {
+    if (textConfig[key] !== expected) {
+      throw new Error(
+        `${label} is not the certified ${certifiedModelId} architecture: `
+        + `text_config.${key} must be ${JSON.stringify(expected)}.`,
+      );
+    }
+  }
+}
+
+/** Reject a same-family snapshot that is not the certified architecture. */
 export function assertCertifiedBaseModelConfig(
   value: unknown,
   label = "base-model config.json",
   expectedModelId?: string,
 ): void {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!isRecord(value)) {
     throw new Error(`${label} must contain a JSON object.`);
   }
-  const config = value as Record<string, unknown>;
-  const architectures = config.architectures;
+  const config = value;
   const expectedFamily = expectedModelId
     ? resolveTrainingModel(expectedModelId).family
     : undefined;
+
   if (config.model_type === "qwen3_5") {
     if (expectedFamily && expectedFamily !== "qwen3_5") {
       throw new Error(`${label} does not match requested base model ${expectedModelId}.`);
     }
-    const textConfig = config.text_config;
-    if (
-      !Array.isArray(architectures)
-      || !architectures.includes("Qwen3_5ForConditionalGeneration")
-      || !textConfig
-      || typeof textConfig !== "object"
-      || Array.isArray(textConfig)
-    ) {
-      throw new Error(
-        `${label} is not the certified Qwen/Qwen3.5-2B architecture.`,
-      );
+    assertCertifiedTextTowerConfig(
+      config,
+      label,
+      "Qwen/Qwen3.5-2B",
+      "Qwen3_5ForConditionalGeneration",
+      CERTIFIED_QWEN_TEXT_CONFIG,
+    );
+    return;
+  }
+  if (config.model_type === "muse_glimmer") {
+    if (expectedFamily && expectedFamily !== "muse_glimmer") {
+      throw new Error(`${label} does not match requested base model ${expectedModelId}.`);
     }
-    const text = textConfig as Record<string, unknown>;
-    for (const [key, expected] of Object.entries(CERTIFIED_QWEN_TEXT_CONFIG)) {
-      if (text[key] !== expected) {
-        throw new Error(
-          `${label} is not the certified Qwen/Qwen3.5-2B architecture: `
-          + `text_config.${key} must be ${JSON.stringify(expected)}.`,
-        );
-      }
-    }
+    assertCertifiedTextTowerConfig(
+      config,
+      label,
+      "meta-models/Muse-Glimmer-30B",
+      "MuseGlimmerForConditionalGeneration",
+      CERTIFIED_MUSE_GLIMMER_TEXT_CONFIG,
+    );
     return;
   }
   if (
     config.model_type === "nemotron_h"
-    && Array.isArray(architectures)
-    && architectures.includes("NemotronHForCausalLM")
+    && hasArchitecture(config, "NemotronHForCausalLM")
   ) {
     if (expectedFamily && expectedFamily !== "nemotron_h") {
       throw new Error(`${label} does not match requested base model ${expectedModelId}.`);

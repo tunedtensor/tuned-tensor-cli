@@ -8,7 +8,7 @@ dependencies = [
   "peft>=0.20.0",
   "safetensors>=0.4.5",
   "torch>=2.11.0",
-  "transformers>=4.57.0",
+  "transformers>=5.15.0",
 ]
 
 [tool.uv.sources]

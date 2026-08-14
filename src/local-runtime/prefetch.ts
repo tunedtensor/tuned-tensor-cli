@@ -89,6 +89,35 @@ const NEMOTRON_BF16_FILE_DIGESTS: Readonly<Record<string, CertifiedFileDigest>> 
   "safety.md": { algorithm: "sha1", digest: "f53bf94a4635862eed5cf3e0bc799b93f81d20ac" },
 };
 
+const MUSE_GLIMMER_FILE_DIGESTS: Readonly<Record<string, CertifiedFileDigest>> = {
+  ".gitattributes": { algorithm: "sha1", digest: "52373fe24473b1aa44333d318f578ae6bf04b49b" },
+  "LICENSE": { algorithm: "sha1", digest: "d645695673349e3947e8e5ae42332d0ac3164cd7" },
+  "README.md": { algorithm: "sha1", digest: "a25f87c1c1fbd88f367a552fd14427baa8cb947e" },
+  "USAGE_POLICY.md": { algorithm: "sha1", digest: "1a9ed6cffc54585daf9cc904c07cb6e436a9444b" },
+  "chat_template.jinja": { algorithm: "sha1", digest: "7507f3c9f38809152732c045df3977848f3916a6" },
+  "config.json": { algorithm: "sha1", digest: "190826dc834c13c86b8dc68e775a888a852d7c34" },
+  "generation_config.json": { algorithm: "sha1", digest: "b69a50a4239f42707d54a479e0143b8ee56c8bcc" },
+  "model.safetensors.index.json": { algorithm: "sha1", digest: "00b257ef0c8bce1b001a6266f6b1f66f4fe16a6b" },
+  "processor_config.json": { algorithm: "sha1", digest: "ec9a07be13ea1dadf7395131871753b13f406c26" },
+  "tokenizer_config.json": { algorithm: "sha1", digest: "fe7f0bb90fb0d0288e3a505974ae0e4baf1d3e61" },
+  "tokenizer.json": { algorithm: "sha256", digest: "c9dbee66967b58f31a7c27f723c3760da3526ccd0427578e8905b0abb0031c4d" },
+  "model-00001-of-00002.safetensors": { algorithm: "sha256", digest: "8eef61530e1283642c77ce2e6721feb5c6f348fa055c00e90f2844a136372694" },
+  "model-00002-of-00002.safetensors": { algorithm: "sha256", digest: "b58cc2144ba1ba1af4420f67f4ca3ced7f09298510b80464cc75018a0be14381" },
+};
+
+function certifiedFileDigests(
+  modelId: string,
+): Readonly<Record<string, CertifiedFileDigest>> | undefined {
+  switch (modelId) {
+    case "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16":
+      return NEMOTRON_BF16_FILE_DIGESTS;
+    case "meta-models/Muse-Glimmer-30B":
+      return MUSE_GLIMMER_FILE_DIGESTS;
+    default:
+      return undefined;
+  }
+}
+
 
 async function certifiedFileDigest(path: string, expected: CertifiedFileDigest): Promise<string> {
   const metadata = await stat(path);
@@ -209,6 +238,10 @@ async function verifyCertifiedLocalSnapshot(
 ): Promise<void> {
   const revision = defaultBaseModelRevision(modelId);
   if (!revision) return;
+  const digests = certifiedFileDigests(modelId);
+  if (!digests) {
+    throw new Error(`No certified file digests are registered for pinned model ${modelId}.`);
+  }
   if (!modelCache) {
     throw new Error(`A certified local snapshot for ${modelId} requires paths.modelCache.`);
   }
@@ -231,12 +264,12 @@ async function verifyCertifiedLocalSnapshot(
     physicalFiles.set(file, target);
   }
   const actualFiles = new Set(snapshotFiles.map((file) => relative(path, file).split("\\").join("/")));
-  const expectedFiles = new Set(Object.keys(NEMOTRON_BF16_FILE_DIGESTS));
+  const expectedFiles = new Set(Object.keys(digests));
   const unexpected = [...actualFiles].filter((name) => !expectedFiles.has(name)).sort();
   if (unexpected.length > 0) {
     throw new Error(`Certified snapshot contains unexpected file: ${join(path, unexpected[0]!)}`);
   }
-  for (const [name, expected] of Object.entries(NEMOTRON_BF16_FILE_DIGESTS)) {
+  for (const [name, expected] of Object.entries(digests)) {
     if (!actualFiles.has(name)) {
       throw new Error(`Certified snapshot file is missing: ${join(path, name)}`);
     }

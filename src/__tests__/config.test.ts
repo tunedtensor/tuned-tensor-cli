@@ -36,6 +36,11 @@ describe("config", () => {
     expect(canonicalizeBaseModel("nvidia/nvidia-nemotron-3.5-lightning-30b-a3b-bf16"))
       .toBe("nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16");
   });
+
+  it("canonicalizes the certified Muse Glimmer base model", () => {
+    expect(canonicalizeBaseModel("meta-models/muse-glimmer-30b"))
+      .toBe("meta-models/Muse-Glimmer-30B");
+  });
   describe("readConfig", () => {
     it("returns empty object when no config file exists", () => {
       expect(configModule.readConfig()).toEqual({});
