@@ -1,22 +1,39 @@
 # Changelog
 
+## [0.12.0-beta.1] - 2026-08-14
+
+### Changed
+
+- The interactive shell now runs the local workflow by default; hosted commands
+  run one-shot via `cloud <command>` (or `tt cloud <command>` outside the
+  shell). Removed the `/mode`, `/cloud`, and `/local` session slash commands
+  added in beta.0.
+- `/model` now controls the TT agent model instead of the fine-tuning base
+  model: it shows a short suggestion list by default, searches with
+  `/model <query>` (closest matches only), and switches with
+  `/model <provider>/<model>`.
+- `tt agent models` now lists models alphabetically.
+- Aligned agent wording with the Tuned Tensor brand across the CLI, docs, and
+  the npm package description.
+
+### Internal
+
+- Centralized agent-model read/update logic in an `agent-control` function
+  layer shared by the shell and the `tt agent ...` commands.
+- The lazy agent client detects selection changes via a config revision counter
+  instead of re-reading the config file on every turn.
+
 ## [0.12.0-beta.0] - 2026-08-14
 
 ### Added
 
 - Surface the conversational agent's model provider and underlying model in the
   shell banner, `/context`, `/status`, and `tt agent status`.
+- Add `/cloud` and `/local` slash aliases to switch workflows in one word
+  (aliases for `/mode cloud|local`).
 
 ### Changed
 
-- The interactive shell now runs the local workflow by default. Hosted commands
-  are one-shot: prefix a command with `cloud` (for example `cloud runs list`).
-  Removed the `/mode`, `/cloud`, and `/local` session slash commands.
-- `/model` now operates on the laptop-local TT agent model instead of the
-  fine-tuning base model: a short suggestion list by default, `/model <query>`
-  to search (closest matches only), and `/model <provider>/<model>` to switch.
-  Agent-model operations are centralized in a function layer shared by the
-  shell and the `tt agent ...` commands.
 - `tt agent status` now reports the resolved provider and model display names
   alongside the configured IDs.
 
