@@ -137,6 +137,11 @@ describe("parseSlashCommand", () => {
     expect(() => parseSlashCommand("/stat")).toThrow(/Did you mean \/status\?/);
     expect(() => parseSlashCommand("/models")).toThrow(/need no slash/);
   });
+
+  it("parses the one-word cloud/local switch aliases", () => {
+    expect(parseSlashCommand("/cloud")).toEqual({ name: "cloud", args: [] });
+    expect(parseSlashCommand("/local")).toEqual({ name: "local", args: [] });
+  });
 });
 
 describe("command completion", () => {
@@ -259,10 +264,12 @@ describe("renderShellBanner", () => {
       version: "0.6.0",
     });
     const rows = banner.trimEnd().split("\n");
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(6);
     expect(rows[0]).toContain("tt");
     expect(banner).toContain("v0.6.0");
     expect(banner).toContain("cloud");
+    expect(banner).toContain("agent");
+    expect(banner).toContain("workflow model");
     expect(banner).toContain("ctrl+c stop/clear");
     expect(banner).toContain("Ask TT anything");
     expect(banner).not.toContain("██");
@@ -363,6 +370,34 @@ describe("TunedTensorShellSession", () => {  it("routes commands, switches modes
     ]);
     expect(stdout.join("")).toContain("Workflow switched to cloud");
     expect(stderr.join("")).toMatch(/Shell operator/);
+  });
+
+  it("switches workflows with the /cloud and /local aliases", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const session = await createShellSession({
+      cwd: "/tmp/cloud-project",
+      env: {},
+      io: {
+        write: (text) => stdout.push(text),
+        writeError: (text) => stderr.push(text),
+        clear: vi.fn(),
+      },
+      runner: async () => ({ exitCode: 0 }),
+      contextProvider: async ({ cwd }) => fakeContext(cwd, "cloud"),
+    });
+
+    expect(session.snapshot().mode).toBe("cloud");
+    await session.handleLine("/local");
+    expect(session.snapshot().mode).toBe("local");
+    expect(stdout.join("")).toContain("Workflow switched to local");
+
+    await session.handleLine("/cloud");
+    expect(session.snapshot().mode).toBe("cloud");
+    expect(stdout.join("")).toContain("Workflow switched to cloud");
+
+    await session.handleLine("/local extra");
+    expect(stderr.join("")).toContain("/local does not accept arguments");
   });
 
   it("sends natural language and agent slash commands to the in-shell agent", async () => {

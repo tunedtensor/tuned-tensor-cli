@@ -236,6 +236,8 @@ export type SlashCommandName =
   | "status"
   | "context"
   | "mode"
+  | "cloud"
+  | "local"
   | "model"
   | "clear"
   | "cd"
@@ -251,6 +253,8 @@ const SLASH_NAMES = new Set([
   "status",
   "context",
   "mode",
+  "cloud",
+  "local",
   "model",
   "clear",
   "cd",
@@ -495,6 +499,12 @@ function activeModelLabel(snapshot: ShellSessionSnapshot): string {
     : snapshot.context.spec?.baseModel ?? "—";
 }
 
+function agentModelLabel(context: ShellContext): string {
+  const agent = context.agent;
+  if (!agent?.provider && !agent?.model) return "not configured";
+  return [agent.provider, agent.model].filter(Boolean).join("/") || "not configured";
+}
+
 export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
   const spec = snapshot.context.spec?.name
     ?? snapshot.context.spec?.path
@@ -505,8 +515,11 @@ export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
   const lines = [
     heading,
     `${accent(snapshot.mode)}${chalk.dim(
-      ` · ${snapshot.context.projectName} · ${spec} · model ${activeModelLabel(snapshot)}`,
+      ` · ${snapshot.context.projectName} · ${spec}`,
     )}`,
+    chalk.dim(
+      `agent ${agentModelLabel(snapshot.context)} · workflow model ${activeModelLabel(snapshot)}`,
+    ),
     chalk.dim("ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete"),
     "",
     chalk.dim("Ask TT anything. Known commands run directly."),
@@ -669,6 +682,13 @@ export class TunedTensorShellSession {
         this.io.write(`${successMark()} Workflow switched to ${this.mode}.\n`);
         return "continue";
       }
+      case "cloud":
+      case "local":
+        assertNoArgs(command.name, command.args);
+        this.mode = command.name;
+        this.modeSource = "session";
+        this.io.write(`${successMark()} Workflow switched to ${this.mode}.\n`);
+        return "continue";
       case "model": {
         if (command.args.length === 0) {
           await this.refreshContext();

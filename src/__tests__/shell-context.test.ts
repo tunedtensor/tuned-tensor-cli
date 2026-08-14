@@ -96,6 +96,54 @@ describe("discoverShellContext", () => {
     expect(JSON.stringify(context)).not.toContain(fullKey);
   });
 
+  it("surfaces the configured agent provider and model", async () => {
+    const root = await temporaryRoot();
+    const home = join(root, "home");
+    const cloudConfigDirectory = join(home, ".config", "tuned-tensor");
+    await mkdir(cloudConfigDirectory, { recursive: true });
+    await writeFile(join(cloudConfigDirectory, "config.json"), JSON.stringify({
+      agent: { provider: "anthropic", model: "claude-sonnet-4-5", thinking: "high" },
+    }));
+
+    const context = await discoverShellContext({
+      cwd: root,
+      env: { HOME: home },
+    });
+
+    expect(context.agent).toEqual({
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      thinking: "high",
+    });
+    expect(formatShellContext(context, "cloud", context.targetSource).join("\n"))
+      .toContain("Agent model    anthropic/claude-sonnet-4-5 (thinking high)");
+  });
+
+  it("prefers agent environment overrides over stored config", async () => {
+    const root = await temporaryRoot();
+    const home = join(root, "home");
+    const cloudConfigDirectory = join(home, ".config", "tuned-tensor");
+    await mkdir(cloudConfigDirectory, { recursive: true });
+    await writeFile(join(cloudConfigDirectory, "config.json"), JSON.stringify({
+      agent: { provider: "anthropic", model: "claude-sonnet-4-5" },
+    }));
+
+    const context = await discoverShellContext({
+      cwd: root,
+      env: {
+        HOME: home,
+        TUNED_TENSOR_AGENT_PROVIDER: "openrouter",
+        TUNED_TENSOR_AGENT_MODEL: "meta-llama/llama-3.3-70b",
+      },
+    });
+
+    expect(context.agent).toEqual({
+      provider: "openrouter",
+      model: "meta-llama/llama-3.3-70b",
+      thinking: undefined,
+    });
+  });
+
   it("uses TT_TARGET when valid and reports an invalid override safely", async () => {
     const root = await temporaryRoot();
     await writeFile(join(root, "local-runner.json"), "{}");

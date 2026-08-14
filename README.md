@@ -119,9 +119,13 @@ ID. If a response or final state write is lost after dispatch, the action is
 retained as `outcome_unknown`, cannot be retried automatically, and directs the
 user to inspect the remote resource. `/reject` never calls a mutation endpoint.
 
-Useful shell controls include `/help`, `/status`, `/context`, `/mode`,
-`/model`, `/cd`, `/clear`, and `/exit`. `/model` retains its workflow meaning:
-it shows the active local serving model or cloud spec base model, and
+Useful shell controls include `/help`, `/status`, `/context`, `/cloud`,
+`/local`, `/mode`, `/model`, `/cd`, `/clear`, and `/exit`. `/cloud` and
+`/local` switch the workflow in one word (aliases for `/mode cloud|local`).
+The shell banner and `/context` surface the assistant's configured provider and
+model (`agent provider/model`) separately from the workflow model, so the
+model answering your prompts is always visible. `/model` retains its workflow
+meaning: it shows the active local serving model or cloud spec base model, and
 `/model <id>` activates a verified local serving model. Configure the assistant
 model explicitly with `tt agent configure`. The shell keeps normal terminal
 scrollback and command history only for the current process.

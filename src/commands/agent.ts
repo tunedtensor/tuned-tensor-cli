@@ -34,17 +34,25 @@ export function registerAgentCommands(parent: Command, options: AgentCommandsOpt
       const runtime = await options.getRuntime();
       const resolved = resolveAgentModelDefinition(runtime, selection);
       const authenticated = runtime.hasConfiguredAuth(selection.provider);
+      const providerName = runtime.getProviders().find(
+        (provider) => provider.id === selection.provider,
+      )?.name;
       const value = {
         execution: "local",
         provider: selection.provider,
+        provider_name: providerName,
         model: selection.model,
+        model_name: resolved.model.name,
         thinking: selection.thinking,
         authenticated,
         supports_thinking: resolved.model.reasoning !== false,
       };
+      const modelLabel = resolved.model.name && resolved.model.name !== selection.model
+        ? `${resolved.model.name} (${selection.provider}/${selection.model})`
+        : `${selection.provider}/${selection.model}`;
       options.output.write(isJsonMode()
         ? `${JSON.stringify(value, null, 2)}\n`
-        : `Local agent: ${value.provider}/${value.model} (thinking: ${value.thinking}, auth: ${authenticated ? "configured" : "required"})\n`);
+        : `Local agent: ${modelLabel} (thinking: ${value.thinking}, auth: ${authenticated ? "configured" : "required"})\n`);
     });
 
   agent.command("models").description("List Pi provider models available to the local agent")

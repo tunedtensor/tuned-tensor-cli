@@ -40,6 +40,12 @@ export interface ShellLocalContext {
   latestRun?: ShellLatestRun;
 }
 
+export interface ShellAgentContext {
+  provider?: string;
+  model?: string;
+  thinking?: string;
+}
+
 export interface ShellContext {
   cwd: string;
   projectName: string;
@@ -48,6 +54,7 @@ export interface ShellContext {
   spec?: ShellSpecContext;
   cloud: ShellCloudContext;
   local: ShellLocalContext;
+  agent?: ShellAgentContext;
   warnings: string[];
 }
 
@@ -111,6 +118,20 @@ function cloudConfigPath(
     ? resolve(env.XDG_CONFIG_HOME)
     : join(homeDirectory, ".config");
   return join(configHome, "tuned-tensor", "config.json");
+}
+
+function agentSelectionFrom(
+  env: Readonly<NodeJS.ProcessEnv>,
+  configAgent: unknown,
+): ShellAgentContext | undefined {
+  const stored = configAgent && typeof configAgent === "object" && !Array.isArray(configAgent)
+    ? configAgent as Record<string, unknown>
+    : {};
+  const provider = env.TUNED_TENSOR_AGENT_PROVIDER?.trim() || stringField(stored, "provider");
+  const model = env.TUNED_TENSOR_AGENT_MODEL?.trim() || stringField(stored, "model");
+  const thinking = env.TUNED_TENSOR_AGENT_THINKING?.trim() || stringField(stored, "thinking");
+  if (!provider && !model && !thinking) return undefined;
+  return { provider, model, thinking };
 }
 
 export function redactApiKey(key: string | undefined): string | undefined {
@@ -247,6 +268,7 @@ export async function discoverShellContext(
   const baseUrl = env.TUNED_TENSOR_URL?.trim()
     || stringField(cloudConfigJson.value, "base_url")
     || "https://tunedtensor.com";
+  const agent = agentSelectionFrom(env, cloudConfigJson.value?.agent);
 
   const environmentTarget = targetFromEnvironment(env);
   if (env.TT_TARGET && !environmentTarget) {
@@ -285,12 +307,20 @@ export async function discoverShellContext(
       activeModelId,
       latestRun,
     },
+    agent,
     warnings,
   };
 }
 
 function valueOrDash(value: string | number | undefined): string {
   return value === undefined || value === "" ? "—" : String(value);
+}
+
+function agentLabel(context: ShellContext): string {
+  const agent = context.agent;
+  if (!agent?.provider && !agent?.model) return "not configured";
+  const id = [agent.provider, agent.model].filter(Boolean).join("/");
+  return agent.thinking ? `${id} (thinking ${agent.thinking})` : id;
 }
 
 function targetSourceLabel(source: TargetSource): string {
@@ -327,6 +357,7 @@ export function formatShellContext(
     `Spec ID        ${valueOrDash(context.spec?.id)}`,
     `Base model     ${valueOrDash(context.spec?.baseModel)}`,
     `Examples       ${valueOrDash(context.spec?.exampleCount)}`,
+    `Agent model    ${agentLabel(context)}`,
     `Cloud endpoint ${context.cloud.baseUrl}`,
     `Cloud auth     ${context.cloud.authenticated ? `yes (${context.cloud.keyPrefix})` : "no"}`,
     `Local config   ${context.local.configPath ?? "not found"}`,
@@ -344,6 +375,7 @@ export function formatShellStatus(
   const lines = [
     `Workflow       ${selectedTarget}`,
     `Spec           ${context.spec?.name ?? (context.spec ? "unnamed" : "not found")}`,
+    `Agent model    ${agentLabel(context)}`,
   ];
   if (selectedTarget === "cloud") {
     lines.push(
