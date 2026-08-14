@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import chalk from "chalk";
 import {
   ShellParseError,
@@ -18,7 +21,7 @@ import {
   type ShellSessionIO,
 } from "../shell.js";
 import { createCommandCompleter } from "../command-catalog.js";
-import type { ShellContext, ShellLocalModel } from "../shell-context.js";
+import type { ShellContext } from "../shell-context.js";
 
 describe("tokenizeShellInput", () => {
   it("parses whitespace, quotes, escapes, empty values, and joined fragments", () => {
@@ -225,11 +228,7 @@ describe("foreground SIGINT handoff", () => {
   });
 });
 
-function fakeContext(
-  cwd: string,
-  target: "cloud" | "local",
-  models: ShellLocalModel[] = [],
-): ShellContext {
+function fakeContext(cwd: string, target: "cloud" | "local"): ShellContext {
   return {
     cwd,
     projectName: cwd.split("/").filter(Boolean).at(-1) ?? cwd,
@@ -247,7 +246,6 @@ function fakeContext(
       artifactRoot: `${cwd}/.tt-local/artifacts`,
       storeRoot: `${cwd}/.tt-local/store`,
       activeModelId: target === "local" ? "model_abc123" : undefined,
-      models,
     },
     warnings: [],
   };
@@ -498,50 +496,53 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("shows and activates models through /model", async () => {
-    const requests: ShellCommandRequest[] = [];
+  it("lists and changes the Pi agent model through /model", async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), "tt-shell-model-"));
+    process.env.XDG_CONFIG_HOME = configRoot;
     const stdout: string[] = [];
+    const stderr: string[] = [];
+    const modelRuntime = {
+      getProviders: () => [{ id: "anthropic", name: "Anthropic" }],
+      getModels: () => [
+        { id: "claude-sonnet-4-5", provider: "anthropic", name: "Claude Sonnet 4.5", reasoning: true },
+        { id: "claude-haiku-4-5", provider: "anthropic", name: "Claude Haiku 4.5", reasoning: false },
+      ],
+      getModel: (provider: string, model: string) => ({
+        id: model,
+        provider,
+        name: model === "claude-sonnet-4-5" ? "Claude Sonnet 4.5" : "Claude Haiku 4.5",
+        reasoning: model !== "claude-haiku-4-5",
+      }),
+      hasConfiguredAuth: () => true,
+    };
     const session = await createShellSession({
       cwd: "/tmp/local-project",
-      env: {},
+      env: { HOME: "/tmp/home" },
       io: {
         write: (text) => stdout.push(text),
-        writeError: vi.fn(),
+        writeError: (text) => stderr.push(text),
         clear: vi.fn(),
       },
-      runner: async (request) => {
-        requests.push(request);
-        return { exitCode: 0 };
-      },
-      contextProvider: async ({ cwd }) => fakeContext(cwd, "local", [
-        {
-          id: "model_abc123",
-          name: "Qwen/Qwen3.5-2B (abc12345)",
-          baseModel: "Qwen/Qwen3.5-2B",
-        },
-        {
-          id: "model_def456",
-          name: "Qwen/Qwen3.5-2B (def45678)",
-          baseModel: "Qwen/Qwen3.5-2B",
-        },
-      ]),
+      runner: async () => ({ exitCode: 0 }),
+      agentModelRuntime: async () => modelRuntime,
+      contextProvider: async ({ cwd }) => fakeContext(cwd, "local"),
     });
 
-    await session.handleLine("/model");
-    expect(stdout.join("")).toContain("Active model");
-    expect(stdout.join("")).toContain("model_abc123");
-    expect(stdout.join("")).toContain("Available models");
-    expect(stdout.join("")).toContain("model_def456");
-    expect(stdout.join("")).toContain("(active)");
+    try {
+      await session.handleLine("/model");
+      expect(stdout.join("")).toContain("Agent model");
+      expect(stdout.join("")).toContain("Available models");
+      expect(stdout.join("")).toContain("anthropic/claude-sonnet-4-5");
 
-    await session.handleLine("/model model_def456");
-    expect(requests).toEqual([
-      {
-        target: "local",
-        args: ["models", "activate", "model_def456"],
-        cwd: "/tmp/local-project",
-      },
-    ]);
-    expect(requests).toHaveLength(1);
+      await session.handleLine("/model anthropic/claude-sonnet-4-5");
+      expect(stdout.join("")).toContain("Agent model: anthropic/claude-sonnet-4-5 (thinking medium).");
+
+      await session.handleLine("/model anthropic/claude-haiku-4-5");
+      expect(stdout.join("")).toContain("Agent model: anthropic/claude-haiku-4-5 (thinking off)");
+      expect(stdout.join("")).toContain("thinking set to off for this model");
+    } finally {
+      delete process.env.XDG_CONFIG_HOME;
+      rmSync(configRoot, { recursive: true, force: true });
+    }
   });
 });

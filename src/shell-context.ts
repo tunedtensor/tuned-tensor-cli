@@ -31,20 +31,12 @@ export interface ShellLatestRun {
   updatedAt?: string;
 }
 
-export interface ShellLocalModel {
-  id: string;
-  name: string;
-  baseModel: string;
-  createdAt?: string;
-}
-
 export interface ShellLocalContext {
   configPath?: string;
   artifactRoot: string;
   storeRoot: string;
   activeModelId?: string;
   latestRun?: ShellLatestRun;
-  models: ShellLocalModel[];
 }
 
 export interface ShellAgentContext {
@@ -173,41 +165,6 @@ async function readActiveModelId(storeRoot: string): Promise<string | undefined>
   return typeof modelId === "string" && modelId ? modelId : undefined;
 }
 
-async function readModels(storeRoot: string): Promise<ShellLocalModel[]> {
-  const modelsRoot = join(storeRoot, "models");
-  let names: string[];
-  try {
-    names = (await readdir(modelsRoot, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name);
-  } catch {
-    return [];
-  }
-
-  const models = await Promise.all(names.map(async (name): Promise<ShellLocalModel | undefined> => {
-    const result = await readJsonObject(join(modelsRoot, name, "model.json"));
-    if (!result.found || result.invalid || !result.value) return undefined;
-    const id = stringField(result.value, "id") ?? name;
-    return {
-      id,
-      name: stringField(result.value, "name") ?? "",
-      baseModel: stringField(result.value, "base_model") ?? "",
-      createdAt: stringField(result.value, "created_at"),
-    };
-  }));
-
-  return models
-    .filter((model): model is ShellLocalModel => Boolean(model))
-    .sort((left, right) => {
-      const leftCreated = left.createdAt ?? "";
-      const rightCreated = right.createdAt ?? "";
-      if (leftCreated !== rightCreated) {
-        return rightCreated.localeCompare(leftCreated);
-      }
-      return right.id.localeCompare(left.id);
-    });
-}
-
 async function readLatestRun(storeRoot: string): Promise<ShellLatestRun | undefined> {
   const runsRoot = join(storeRoot, "runs");
   let names: string[];
@@ -321,10 +278,9 @@ export async function discoverShellContext(
     ? "environment"
     : "default-local";
 
-  const [activeModelId, latestRun, models] = await Promise.all([
+  const [activeModelId, latestRun] = await Promise.all([
     readActiveModelId(storeRoot),
     readLatestRun(storeRoot),
-    readModels(storeRoot),
   ]);
 
   return {
@@ -346,7 +302,6 @@ export async function discoverShellContext(
       storeRoot,
       activeModelId,
       latestRun,
-      models,
     },
     agent,
     warnings,

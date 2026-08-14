@@ -126,10 +126,11 @@ command with `cloud` (for example `cloud runs list`) to run one hosted command
 without changing the default.
 The shell banner and `/context` surface the assistant's configured provider and
 model (`agent provider/model`) separately from the workflow model, so the
-model answering your prompts is always visible. `/model` shows the active
-local serving model and a preview of available local models; `/model <id>`
-activates a verified local serving model. Configure the assistant model
-explicitly with `tt agent configure`.
+model answering your prompts is always visible. `/model` shows and changes the
+laptop-local Pi agent model: run it with no arguments to list authenticated
+provider models, or run `/model <provider>/<model>` (for example
+`/model anthropic/claude-sonnet-4-5`) to switch. The equivalent non-interactive
+commands are `tt agent models`, `tt agent configure`, and `tt agent status`.
 The shell keeps normal terminal scrollback and command history only for the
 current process.
 

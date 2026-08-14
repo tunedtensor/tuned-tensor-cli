@@ -87,7 +87,7 @@ export function getApiKey(opts?: { apiKey?: string }): string | undefined {
 }
 
 export function getAgentSelection(
-  env: NodeJS.ProcessEnv = process.env,
+  env: Readonly<NodeJS.ProcessEnv> = process.env,
 ): AgentSelection | undefined {
   const stored = readConfig().agent;
   const provider = env.TUNED_TENSOR_AGENT_PROVIDER || stored?.provider;

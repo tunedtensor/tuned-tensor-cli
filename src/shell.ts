@@ -18,6 +18,12 @@ import {
   type ShellContext,
   type TargetSource,
 } from "./shell-context.js";
+import {
+  describeAgentModel,
+  listAgentModels,
+  setAgentModel,
+} from "./agent-control.js";
+import type { AgentModelRuntime } from "./agent-model.js";
 
 export type { WorkflowMode } from "./command-catalog.js";
 
@@ -356,6 +362,7 @@ export interface CreateShellSessionOptions {
   env?: Readonly<NodeJS.ProcessEnv>;
   contextProvider?: ShellContextProvider;
   version?: string;
+  agentModelRuntime?: () => Promise<AgentModelRuntime>;
 }
 
 export interface ShellSessionSnapshot {
@@ -568,6 +575,7 @@ export class TunedTensorShellSession {
     private readonly env: Readonly<NodeJS.ProcessEnv>,
     private readonly contextProvider: ShellContextProvider,
     private readonly version: string | undefined,
+    private readonly agentModelRuntime: (() => Promise<AgentModelRuntime>) | undefined,
     initialContext: ShellContext,
   ) {
     this.cwd = initialContext.cwd;
@@ -589,6 +597,7 @@ export class TunedTensorShellSession {
       env,
       contextProvider,
       options.version,
+      options.agentModelRuntime,
       initialContext,
     );
   }
@@ -624,21 +633,36 @@ export class TunedTensorShellSession {
     this.io.write(`${lines.join("\n")}\n`);
   }
 
-  private modelLines(): string[] {
-    const active = this.context.local.activeModelId ?? "base";
+  private async requireAgentModelRuntime(): Promise<AgentModelRuntime> {
+    if (!this.agentModelRuntime) {
+      throw new ShellParseError("The local agent model runtime is unavailable.");
+    }
+    return await this.agentModelRuntime();
+  }
+
+  private renderAgentModel(runtime: AgentModelRuntime): string[] {
+    let summary;
+    try {
+      summary = describeAgentModel(runtime, this.env);
+    } catch {
+      summary = undefined;
+    }
+    const label = summary
+      ? `${summary.provider}/${summary.model}${summary.modelName && summary.modelName !== summary.model ? ` (${summary.modelName})` : ""} — thinking ${summary.thinking}, auth ${summary.authenticated ? "configured" : "required"}`
+      : "not configured";
     const lines = styleDetailLines([
-      detailLine("Active model", active),
-      detailLine("Base model", this.context.spec?.baseModel ?? "—"),
-      detailLine("Change", "/model <id> to activate a verified local model"),
+      detailLine("Agent model", label),
+      detailLine("Change", "/model <provider>/<model>"),
     ]);
     lines.push("", chalk.bold("Available models"));
-    const models = this.context.local.models;
+    const models = listAgentModels(runtime);
     if (models.length === 0) {
-      lines.push(chalk.dim("  none — complete a verified local run to create an activatable model"));
+      lines.push(chalk.dim("  none authenticated — run `tt agent models --all` for the full catalog"));
     } else {
       for (const model of models) {
-        const marker = model.id === active ? chalk.dim(" (active)") : "";
-        lines.push(`  ${accent(model.id)}  ${model.name || model.baseModel || "—"}${marker}`);
+        const active = summary?.provider === model.provider && summary?.model === model.id;
+        const displayName = model.name && model.name !== model.id ? `  ${model.name}` : "";
+        lines.push(`  ${accent(`${model.provider}/${model.id}`)}${displayName}${active ? chalk.dim(" (active)") : ""}`);
       }
     }
     return lines;
@@ -665,20 +689,32 @@ export class TunedTensorShellSession {
         ));
         return "continue";
       case "model": {
+        const runtime = await this.requireAgentModelRuntime();
         if (command.args.length === 0) {
           await this.refreshContext();
-          this.writeLines(this.modelLines());
+          this.writeLines(this.renderAgentModel(runtime));
           return "continue";
         }
         if (command.args.length !== 1) {
-          throw new ShellParseError("Usage: /model [model-id]");
+          throw new ShellParseError("Usage: /model <provider>/<model>");
         }
-        await this.runner({
-          target: "local",
-          args: ["models", "activate", command.args[0]!],
-          cwd: this.cwd,
-        });
+        const target = command.args[0]!;
+        const slash = target.indexOf("/");
+        if (slash <= 0 || slash === target.length - 1) {
+          throw new ShellParseError(
+            "Usage: /model <provider>/<model>, e.g. /model anthropic/claude-sonnet-4-5",
+          );
+        }
+        const provider = target.slice(0, slash);
+        const model = target.slice(slash + 1);
+        const result = setAgentModel(runtime, this.env, provider, model);
         await this.refreshContext();
+        const note = result.adjustedThinking
+          ? " — thinking set to off for this model"
+          : "";
+        this.io.write(
+          `${successMark()} Agent model: ${result.selection.provider}/${result.selection.model} (thinking ${result.selection.thinking})${note}.\n`,
+        );
         return "continue";
       }
       case "clear":
@@ -790,6 +826,7 @@ export interface InteractiveShellOptions {
   env?: Readonly<NodeJS.ProcessEnv>;
   requireTTY?: boolean;
   version?: string;
+  agentModelRuntime?: () => Promise<AgentModelRuntime>;
 }
 
 function streamIsTTY(stream: NodeJS.ReadableStream | NodeJS.WritableStream): boolean {
@@ -899,6 +936,7 @@ export async function startInteractiveShell(
     cwd: options.cwd,
     env: options.env,
     version: options.version,
+    agentModelRuntime: options.agentModelRuntime,
   });
   const completer = createCommandCompleter(() => session.snapshot().mode);
   readline = createInterface({
