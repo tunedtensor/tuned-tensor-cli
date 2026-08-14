@@ -50,27 +50,73 @@ export interface SetAgentModelResult {
   adjustedThinking: boolean;
 }
 
+export interface ListAgentModelsOptions {
+  provider?: string;
+  includeUnauthenticated?: boolean;
+  /** Free-text filter matched against provider/model/name. */
+  query?: string;
+  /** Cap the returned list after relevance/alphabetic ordering. */
+  limit?: number;
+}
+
+function modelKey(model: { provider: string; id: string }): string {
+  return `${model.provider}/${model.id}`;
+}
+
+function modelRelevance(
+  model: AgentModelChoice,
+  query: string,
+): number | undefined {
+  const q = query.trim().toLowerCase();
+  if (!q) return undefined;
+  const fullId = modelKey(model).toLowerCase();
+  const bareId = model.id.toLowerCase();
+  const name = (model.name ?? "").toLowerCase();
+  if (fullId === q || bareId === q) return 0;
+  if (fullId.startsWith(q)) return 1;
+  if (bareId.startsWith(q)) return 2;
+  if (fullId.includes(q)) return 3;
+  if (name.includes(q)) return 4;
+  return undefined;
+}
+
 export function listAgentModels(
   runtime: AgentModelRuntime,
-  options: { provider?: string; includeUnauthenticated?: boolean } = {},
+  options: ListAgentModelsOptions = {},
 ): AgentModelChoice[] {
-  return runtime
+  let models: AgentModelChoice[] = runtime
     .getModels(options.provider)
     .filter((model) =>
       options.includeUnauthenticated || runtime.hasConfiguredAuth(model.provider)
     )
-    .map((model) => ({
+    .map((model): AgentModelChoice => ({
       provider: model.provider,
       id: model.id,
       name: model.name ?? model.id,
       authenticated: runtime.hasConfiguredAuth(model.provider),
       thinking: model.reasoning !== false,
-    }))
-    .sort((left, right) => {
-      const leftKey = `${left.provider}/${left.id}`;
-      const rightKey = `${right.provider}/${right.id}`;
-      return leftKey.localeCompare(rightKey);
-    });
+    }));
+
+  const query = options.query?.trim().toLowerCase();
+  if (query) {
+    const scored: Array<{ model: AgentModelChoice; score: number }> = [];
+    for (const model of models) {
+      const score = modelRelevance(model, query);
+      if (score !== undefined) scored.push({ model, score });
+    }
+    scored.sort((left, right) =>
+      left.score - right.score
+      || modelKey(left.model).localeCompare(modelKey(right.model))
+    );
+    models = scored.map((entry) => entry.model);
+  } else {
+    models.sort((left, right) => modelKey(left).localeCompare(modelKey(right)));
+  }
+
+  if (options.limit !== undefined && options.limit > 0) {
+    models = models.slice(0, options.limit);
+  }
+  return models;
 }
 
 export function describeAgentModel(

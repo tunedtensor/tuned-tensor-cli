@@ -127,10 +127,11 @@ without changing the default.
 The shell banner and `/context` surface the assistant's configured provider and
 model (`agent provider/model`) separately from the workflow model, so the
 model answering your prompts is always visible. `/model` shows and changes the
-laptop-local Pi agent model: run it with no arguments to list authenticated
-provider models, or run `/model <provider>/<model>` (for example
-`/model anthropic/claude-sonnet-4-5`) to switch. The equivalent non-interactive
-commands are `tt agent models`, `tt agent configure`, and `tt agent status`.
+laptop-local Pi agent model: run it with no arguments for a short list of
+suggestions, search with `/model <query>` (only the closest matches are
+shown), or switch with `/model <provider>/<model>` (for example
+`/model anthropic/claude-sonnet-4-5`). The equivalent non-interactive commands
+are `tt agent models`, `tt agent configure`, and `tt agent status`.
 The shell keeps normal terminal scrollback and command history only for the
 current process.
 

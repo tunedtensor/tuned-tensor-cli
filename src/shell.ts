@@ -640,7 +640,7 @@ export class TunedTensorShellSession {
     return await this.agentModelRuntime();
   }
 
-  private renderAgentModel(runtime: AgentModelRuntime): string[] {
+  private renderAgentModel(runtime: AgentModelRuntime, query?: string): string[] {
     let summary;
     try {
       summary = describeAgentModel(runtime, this.env);
@@ -653,19 +653,56 @@ export class TunedTensorShellSession {
     const lines = styleDetailLines([
       detailLine("Agent model", label),
       detailLine("Change", "/model <provider>/<model>"),
+      detailLine("Search", "/model <query>"),
     ]);
-    lines.push("", chalk.bold("Available models"));
-    const models = listAgentModels(runtime);
-    if (models.length === 0) {
-      lines.push(chalk.dim("  none authenticated — run `tt agent models --all` for the full catalog"));
-    } else {
-      for (const model of models) {
-        const active = summary?.provider === model.provider && summary?.model === model.id;
-        const displayName = model.name && model.name !== model.id ? `  ${model.name}` : "";
-        lines.push(`  ${accent(`${model.provider}/${model.id}`)}${displayName}${active ? chalk.dim(" (active)") : ""}`);
+
+    const all = listAgentModels(runtime);
+    if (all.length === 0) {
+      lines.push("", chalk.dim("  no authenticated models — run `tt agent models --all` for the full catalog"));
+      return lines;
+    }
+
+    if (query) {
+      const matches = listAgentModels(runtime, { query });
+      lines.push("", chalk.bold(`Models matching ${JSON.stringify(query)}`));
+      if (matches.length === 0) {
+        lines.push(chalk.dim("  no matches"));
+      } else {
+        const shown = matches.slice(0, 10);
+        for (const model of shown) {
+          lines.push(this.formatAgentModelChoice(model, summary));
+        }
+        if (matches.length > shown.length) {
+          lines.push(chalk.dim(`  … ${matches.length - shown.length} more — refine the query`));
+        }
       }
+      return lines;
+    }
+
+    const preferred = summary
+      ? all.filter((model) => model.provider === summary.provider)
+      : [];
+    const rest = summary
+      ? all.filter((model) => model.provider !== summary.provider)
+      : all;
+    const shown = [...preferred, ...rest].slice(0, 8);
+    lines.push("", chalk.bold(summary ? "Suggestions" : "Available models"));
+    for (const model of shown) {
+      lines.push(this.formatAgentModelChoice(model, summary));
+    }
+    if (all.length > shown.length) {
+      lines.push(chalk.dim(`  … ${all.length - shown.length} more — /model <query> to search`));
     }
     return lines;
+  }
+
+  private formatAgentModelChoice(
+    model: { provider: string; id: string; name?: string },
+    summary: { provider: string; model: string } | undefined,
+  ): string {
+    const active = summary?.provider === model.provider && summary?.model === model.id;
+    const displayName = model.name && model.name !== model.id ? `  ${model.name}` : "";
+    return `  ${accent(`${model.provider}/${model.id}`)}${displayName}${active ? chalk.dim(" (active)") : ""}`;
   }
 
   private async handleSlash(command: ParsedSlashCommand): Promise<ShellLineAction> {
@@ -696,11 +733,16 @@ export class TunedTensorShellSession {
           return "continue";
         }
         if (command.args.length !== 1) {
-          throw new ShellParseError("Usage: /model <provider>/<model>");
+          throw new ShellParseError("Usage: /model [<query> | <provider>/<model>]");
         }
         const target = command.args[0]!;
         const slash = target.indexOf("/");
-        if (slash <= 0 || slash === target.length - 1) {
+        if (slash <= 0) {
+          await this.refreshContext();
+          this.writeLines(this.renderAgentModel(runtime, target));
+          return "continue";
+        }
+        if (slash === target.length - 1) {
           throw new ShellParseError(
             "Usage: /model <provider>/<model>, e.g. /model anthropic/claude-sonnet-4-5",
           );

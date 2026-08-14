@@ -496,7 +496,7 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("lists and changes the Pi agent model through /model", async () => {
+  it("lists, searches, and changes the Pi agent model through /model", async () => {
     const configRoot = mkdtempSync(join(tmpdir(), "tt-shell-model-"));
     process.env.XDG_CONFIG_HOME = configRoot;
     const stdout: string[] = [];
@@ -528,18 +528,29 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
       contextProvider: async ({ cwd }) => fakeContext(cwd, "local"),
     });
 
+    const run = async (line: string): Promise<string> => {
+      stdout.length = 0;
+      await session.handleLine(line);
+      return stdout.join("");
+    };
+
     try {
-      await session.handleLine("/model");
-      expect(stdout.join("")).toContain("Agent model");
-      expect(stdout.join("")).toContain("Available models");
-      expect(stdout.join("")).toContain("anthropic/claude-sonnet-4-5");
+      let output = await run("/model");
+      expect(output).toContain("Agent model");
+      expect(output).toContain("Available models");
+      expect(output).toContain("anthropic/claude-sonnet-4-5");
 
-      await session.handleLine("/model anthropic/claude-sonnet-4-5");
-      expect(stdout.join("")).toContain("Agent model: anthropic/claude-sonnet-4-5 (thinking medium).");
+      output = await run("/model sonnet");
+      expect(output).toContain('Models matching "sonnet"');
+      expect(output).toContain("anthropic/claude-sonnet-4-5");
+      expect(output).not.toContain("anthropic/claude-haiku-4-5");
 
-      await session.handleLine("/model anthropic/claude-haiku-4-5");
-      expect(stdout.join("")).toContain("Agent model: anthropic/claude-haiku-4-5 (thinking off)");
-      expect(stdout.join("")).toContain("thinking set to off for this model");
+      output = await run("/model anthropic/claude-sonnet-4-5");
+      expect(output).toContain("Agent model: anthropic/claude-sonnet-4-5 (thinking medium).");
+
+      output = await run("/model anthropic/claude-haiku-4-5");
+      expect(output).toContain("Agent model: anthropic/claude-haiku-4-5 (thinking off)");
+      expect(output).toContain("thinking set to off for this model");
     } finally {
       delete process.env.XDG_CONFIG_HOME;
       rmSync(configRoot, { recursive: true, force: true });

@@ -12,10 +12,11 @@
 - The interactive shell now runs the local workflow by default. Hosted commands
   are one-shot: prefix a command with `cloud` (for example `cloud runs list`).
   Removed the `/mode`, `/cloud`, and `/local` session slash commands.
-- `/model` now operates on the laptop-local Pi agent model (list authenticated
-  provider models, or switch with `/model <provider>/<model>`) instead of the
-  fine-tuning base model. Agent-model operations are centralized in a function
-  layer shared by the shell and the `tt agent ...` commands.
+- `/model` now operates on the laptop-local Pi agent model instead of the
+  fine-tuning base model: a short suggestion list by default, `/model <query>`
+  to search (closest matches only), and `/model <provider>/<model>` to switch.
+  Agent-model operations are centralized in a function layer shared by the
+  shell and the `tt agent ...` commands.
 - `tt agent status` now reports the resolved provider and model display names
   alongside the configured IDs.
 
