@@ -1,4 +1,7 @@
-import { canonicalizeSpecBaseModel } from "./base-models.js";
+import {
+  canonicalizeHostedSpecBaseModel,
+  canonicalizeSpecBaseModel,
+} from "./base-models.js";
 import type { LocalSpec } from "./eval/types.js";
 
 export const CLOUD_SPEC_KEYS = [
@@ -51,6 +54,7 @@ export interface ProjectSpecProjection {
 function projectSpec(
   raw: Record<string, unknown>,
   supportedKeys: ReadonlySet<string>,
+  canonicalize: <T extends Record<string, unknown>>(body: T) => T,
 ): ProjectSpecProjection {
   const body: Record<string, unknown> = {};
   const droppedKeys: string[] = [];
@@ -64,7 +68,7 @@ function projectSpec(
   }
 
   return {
-    body: canonicalizeSpecBaseModel(body),
+    body: canonicalize(body),
     droppedKeys,
   };
 }
@@ -79,7 +83,7 @@ function projectSpec(
 export function projectCloudSpec(
   raw: Record<string, unknown>,
 ): ProjectSpecProjection {
-  return projectSpec(raw, CLOUD_SPEC_KEY_SET);
+  return projectSpec(raw, CLOUD_SPEC_KEY_SET, canonicalizeHostedSpecBaseModel);
 }
 
 /**
@@ -91,7 +95,7 @@ export function projectCloudSpec(
 export function projectLocalSpec(
   raw: Record<string, unknown>,
 ): ProjectSpecProjection {
-  return projectSpec(raw, LOCAL_SPEC_KEY_SET);
+  return projectSpec(raw, LOCAL_SPEC_KEY_SET, canonicalizeSpecBaseModel);
 }
 
 export function hasLocalOnlySpecFields(
