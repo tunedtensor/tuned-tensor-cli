@@ -16,10 +16,28 @@ is kept as a hidden alias; new scripts should call `tt run`, `tt doctor`,
 
 ## Install
 
+On Linux or macOS:
+
 ```bash
-npm install -g @tuned-tensor/cli
+curl -fsSL https://tunedtensor.com/install.sh | sh
 tt --version
 ```
+
+The installer bootstraps Node.js 22.19+ if needed, installs
+`@tuned-tensor/cli` with npm `--ignore-scripts`, and falls back to
+`~/.local` when the global npm prefix is not writable. Inspect it first
+with `curl -fsSL https://tunedtensor.com/install.sh | less`. Pin a
+dist-tag or version with `TT_VERSION=beta` or `TT_VERSION=0.13.0`.
+
+Or install the package directly:
+
+```bash
+npm install -g --ignore-scripts @tuned-tensor/cli
+tt --version
+```
+
+Uninstall with `npm uninstall -g @tuned-tensor/cli` (add
+`--prefix ~/.local` if the curl installer used that prefix).
 
 Node.js 22.19.0 or newer is required. Local training additionally needs
 [`uv`](https://docs.astral.sh/uv/) and a supported NVIDIA CUDA host; the locked

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- README install now leads with
+  `curl -fsSL https://tunedtensor.com/install.sh | sh`. Direct npm install
+  remains documented.
+
 ## [0.13.0-beta.1] - 2026-08-18
 
 ### Added
