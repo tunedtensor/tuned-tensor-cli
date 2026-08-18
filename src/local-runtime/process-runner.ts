@@ -40,6 +40,7 @@ export function buildBundledPythonCommand(
   const commandArgs = [
     "run",
     "--frozen",
+    "--quiet",
     "--project",
     bundledProject,
     "python",

@@ -1,10 +1,11 @@
 # Architecture
 
-This repository is the maintenance-mode local runtime behind the unified
-`tt local` workflow. The standalone `tt-local` product surface is deprecated;
-see [the deprecation note](../DEPRECATION.md). Its supported runtime boundary
-is text SFT of a registry-certified Transformers causal LM into a LoRA adapter
-on CUDA. Certified checkpoints are `Qwen/Qwen3.5-2B`,
+This repository is the local CUDA runtime behind the unified `tt`
+workflow. The standalone `tt-local` product surface is deprecated.
+Its supported runtime boundary is text SFT of a registry-certified
+Transformers causal LM into a LoRA adapter on CUDA. Certified checkpoints
+are `Qwen/Qwen3.5-2B` (pinned to Hugging Face snapshot
+`15852e8c16360a2fea060d615a32b45270f8a8fc`),
 `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16`, and
 `meta-models/Muse-Glimmer-30B`. Muse Glimmer is a vision-language checkpoint
 whose text tower is loaded through `AutoModelForImageTextToText` (its text

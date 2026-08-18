@@ -8,11 +8,26 @@
 
 ## Cloud sunset
 
-This release unregisters the hosted API commands (`tt auth`, `tt push`,
-`tt balance`, `tt topup`, `tt cloud`, and the rest of the managed tree). The
-modules remain in the repository so they can be restored later. `tt local …`
-is kept as a hidden alias; new scripts should call `tt run`, `tt doctor`,
-`tt runs list`, and so on directly.
+This release unregisters the hosted API commands (`tt auth`, `tt publish`,
+`tt push`, `tt balance`, `tt topup`, `tt cloud`, and the rest of the managed
+tree). The modules remain in the repository so they can be restored later.
+`tt local …` is kept as a hidden alias; new scripts should call `tt run`,
+`tt doctor`, `tt runs list`, and so on directly.
+
+## Migrating from 0.11
+
+`0.13` is the local-only CLI. If you are coming from `0.11.0`:
+
+- Call `tt run`, `tt doctor`, and `tt serve` at the root. `tt local …` still
+  works as a hidden alias.
+- Hosted account commands (`tt auth`, `tt publish`, `tt push`, and the rest)
+  are unregistered.
+- `Qwen/Qwen3.5-2B` is pinned to Hugging Face snapshot
+  `15852e8c16360a2fea060d615a32b45270f8a8fc`. Prefetch, train, eval, and serve
+  reject any other revision.
+- `tt serve active` fails unless an adapter is activated. Activation requires
+  a `generalRegression` suite in `local-runner.json`.
+- `tt info` reports `status: local`.
 
 ## Install
 
@@ -196,7 +211,8 @@ tt models verify local-<run-id>
 tt models serve local-<run-id> --config local-runner.json
 ```
 
-Local currently certifies text SFT with `Qwen/Qwen3.5-2B`,
+Local currently certifies text SFT with `Qwen/Qwen3.5-2B` (pinned to snapshot
+`15852e8c16360a2fea060d615a32b45270f8a8fc`),
 `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16`, and
 `meta-models/Muse-Glimmer-30B`, using LoRA/PEFT and CUDA. The 30B/3B-active
 Nemotron path is intended for DGX Spark-class unified memory, uses activation
@@ -207,7 +223,9 @@ vision tower frozen and unused. Evaluation and serving may use CPU. Training
 artifacts, datasets, and model weights remain on the execution host.
 
 Activation is optional and requires the run to pass a configured
-`generalRegression` gate. Once activated, use
+`generalRegression` gate. Without that suite, `tt models activate` fails
+closed. `tt serve active` also fails closed if nothing is activated — it does
+not silently serve the protected base model. Once activated, use
 `tt serve active --config local-runner.json`.
 
 `tt serve base` does not automatically inject the adjacent project spec.

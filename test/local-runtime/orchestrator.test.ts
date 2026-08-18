@@ -15,6 +15,7 @@ import {
 } from "../../src/local-runtime/orchestrator.js";
 import { defaultArtifactPrefix, resolveRunArtifacts } from "../../src/local-runtime/artifacts.js";
 import { createLocalStore } from "../../src/local-runtime/store.js";
+import { QWEN_3_5_2B_REVISION } from "../../src/local-runtime/model-registry.js";
 
 const behaviorSpecId = "22222222-2222-4222-8222-222222222222";
 
@@ -675,7 +676,6 @@ test("local base-model byte changes invalidate prepared outputs", async () => {
     const request = requestFixture({
       runId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     });
-    request.hyperparameters.base_model_revision = "0123456789abcdef0123456789abcdef01234567";
     const config = configFixture(root, { paths: { baseModel } });
     const firstRun = await runLocalFineTune({ request, config });
     const metadataPath = join(firstRun.artifactDir, "stage-metadata.json");
@@ -683,7 +683,7 @@ test("local base-model byte changes invalidate prepared outputs", async () => {
       base_model_fingerprint: string;
       base_model_revision: string | null;
     };
-    assert.equal(before.base_model_revision, null);
+    assert.equal(before.base_model_revision, QWEN_3_5_2B_REVISION);
 
     await writeFile(join(baseModel, "model.safetensors"), "weights-v2");
     const secondRun = await runLocalFineTune({ request, config });

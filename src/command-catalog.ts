@@ -3,8 +3,6 @@ export type WorkflowMode = "local";
 export type CommandGroup =
   | "Workflow"
   | "Inspect"
-  | "Data"
-  | "Account"
   | "Serving";
 
 export interface CatalogCommand {
@@ -26,6 +24,11 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   { path: "validate", description: "Validate a local fine-tuning project.", group: "Workflow", modes: LOCAL },
   { path: "doctor", description: "Check the local host and run prerequisites.", group: "Workflow", modes: LOCAL },
   { path: "run", description: "Run the local fine-tuning and evaluation workflow.", group: "Workflow", modes: LOCAL },
+  { path: "pipeline init", description: "Write a canonical v1 pipeline recipe.", group: "Workflow", modes: LOCAL },
+  { path: "pipeline validate", description: "Validate a pipeline without executing it.", group: "Workflow", modes: LOCAL },
+  { path: "pipeline plan", description: "Resolve pipeline steps and required artifacts.", group: "Workflow", modes: LOCAL },
+  { path: "pipeline run", description: "Run or dry-run a local pipeline.", group: "Workflow", modes: LOCAL },
+  { path: "shell", description: "Open the conversational terminal.", group: "Workflow", modes: LOCAL },
 
   { path: "runs list", description: "List local runs.", group: "Inspect", modes: LOCAL },
   { path: "runs get", description: "Show a local run.", group: "Inspect", modes: LOCAL },
@@ -45,11 +48,10 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   { path: "serve", description: "Serve a local adapter, active model, or base model.", group: "Serving", modes: LOCAL },
 
   { path: "info", description: "Show local runtime package information.", group: "Inspect", modes: LOCAL },
-
-  { path: "auth login", description: "Store a Tuned Tensor API key.", group: "Account", modes: LOCAL },
-  { path: "auth logout", description: "Remove the stored Tuned Tensor API key.", group: "Account", modes: LOCAL },
-  { path: "auth status", description: "Show Tuned Tensor authentication status.", group: "Account", modes: LOCAL },
-  { path: "publish", description: "Publish local run evidence to the dashboard.", group: "Account", modes: LOCAL },
+  { path: "status", description: "Show local project context.", group: "Inspect", modes: LOCAL },
+  { path: "agent models", description: "List provider models for the laptop-local TT agent.", group: "Inspect", modes: LOCAL },
+  { path: "agent configure", description: "Select the laptop-local TT agent model.", group: "Inspect", modes: LOCAL },
+  { path: "agent status", description: "Show the laptop-local TT agent selection.", group: "Inspect", modes: LOCAL },
 ] as const;
 
 export interface SlashCommand {

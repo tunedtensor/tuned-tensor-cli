@@ -6,6 +6,8 @@ from typing import Any
 CERTIFIED_BASE_MODEL = "Qwen/Qwen3.5-2B"
 NEMOTRON_BASE_MODEL = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
 MUSE_GLIMMER_BASE_MODEL = "meta-models/Muse-Glimmer-30B"
+# Immutable Hugging Face revision reviewed for Qwen 3.5 2B local fine-tuning.
+QWEN_BASE_MODEL_REVISION = "15852e8c16360a2fea060d615a32b45270f8a8fc"
 # Immutable Hugging Face revision reviewed for Nemotron local fine-tuning.
 # Node validates local snapshots against this revision and its certified file
 # digests before invoking Python.
@@ -133,11 +135,11 @@ def assert_certified_base_model(model_id: str, label: str = "base model") -> Non
 def assert_certified_base_model_revision(base_model: str, revision: str | None, label: str = "base model revision") -> None:
     """Require the certified immutable revision for pinned training models.
 
-    Qwen remains unpinned for backward compatibility. Nemotron and Muse
-    Glimmer loads are bound here; local snapshot contents are additionally
-    verified by the Node runtime.
+    Qwen, Nemotron, and Muse Glimmer loads are bound here; local snapshot
+    contents are additionally verified by the Node runtime.
     """
     expected = {
+        CERTIFIED_BASE_MODEL: QWEN_BASE_MODEL_REVISION,
         NEMOTRON_BASE_MODEL: NEMOTRON_BASE_MODEL_REVISION,
         MUSE_GLIMMER_BASE_MODEL: MUSE_GLIMMER_BASE_MODEL_REVISION,
     }.get(base_model)

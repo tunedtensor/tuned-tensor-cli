@@ -31,9 +31,10 @@ describe("local-only CLI surface", () => {
         "pipeline",
         "status",
         "shell",
-        "auth",
-        "publish",
       ]),
+    );
+    expect(names).not.toEqual(
+      expect.arrayContaining(["auth", "publish"]),
     );
   });
 
@@ -42,6 +43,9 @@ describe("local-only CLI surface", () => {
     expect(help).not.toMatch(/\bcloud\b/i);
     expect(help).not.toMatch(/--api-key/);
     expect(help).not.toMatch(/--base-url/);
+    expect(help).not.toMatch(/\btt auth\b/);
+    expect(help).not.toMatch(/\btt publish\b/);
+    expect(help.match(/Commands:/g)?.length).toBe(1);
   });
 
   it("does not expose hosted agent tools on the default client", async () => {

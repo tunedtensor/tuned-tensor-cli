@@ -15,6 +15,7 @@ import {
 } from "../../src/local-runtime/artifacts.js";
 import { fineTuneRunRequestSchema, trainingReportSchema } from "../../src/local-runtime/contracts.js";
 import { createLocalStore } from "../../src/local-runtime/store.js";
+import { QWEN_3_5_2B_REVISION } from "../../src/local-runtime/model-registry.js";
 
 const projectRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const cliPath = join(projectRoot, "src", "local-runtime", "index.ts");
@@ -339,7 +340,7 @@ fs.appendFileSync(${JSON.stringify(callsPath)}, isPrefetch ? "prefetch\\n" : "ot
 if (!isPrefetch) process.exit(23);
 const outputIndex = args.indexOf("--output");
 if (outputIndex === -1 || !args[outputIndex + 1]) process.exit(24);
-const revision = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const revision = "15852e8c16360a2fea060d615a32b45270f8a8fc";
 const hfHome = process.env.HF_HOME;
 const hubCache = process.env.HF_HUB_CACHE;
 if (!hfHome || !hubCache) process.exit(25);
@@ -379,7 +380,7 @@ fs.writeFileSync(args[outputIndex + 1], JSON.stringify({
     ));
     assert.equal(
       persisted.hyperparameters.base_model_revision,
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "15852e8c16360a2fea060d615a32b45270f8a8fc",
     );
   });
 });
@@ -435,7 +436,7 @@ test("stored models are verified before a serving launch plan is produced", asyn
         format: "huggingface-directory",
         framework: "transformers-peft",
         base_model: request.spec_snapshot.base_model,
-        base_model_revision: "revision-a",
+        base_model_revision: QWEN_3_5_2B_REVISION,
         artifact_uri: training.model_artifact_uri!,
         artifact_root: artifacts.trainingModelDir,
         servable: true,
@@ -448,6 +449,17 @@ test("stored models are verified before a serving launch plan is produced", asyn
     const verified = runCli(["models", "verify", modelId], root);
     assert.equal(verified.status, 0, verified.stderr);
     assert.equal(JSON.parse(verified.stdout).ok, true);
+
+    const gotten = runCli(["models", "get", modelId], root);
+    assert.equal(gotten.status, 0, gotten.stderr);
+    const gottenPayload = JSON.parse(gotten.stdout) as {
+      ok: boolean;
+      manifest_path: string;
+      integrity: { checked: number };
+    };
+    assert.equal(gottenPayload.ok, true);
+    assert.ok(gottenPayload.manifest_path.endsWith("artifact-manifest.json"));
+    assert.ok(gottenPayload.integrity.checked > 0);
 
     const verifiedPath = runCli(["models", "verify", artifacts.trainingModelDir], root);
     assert.equal(verifiedPath.status, 0, verifiedPath.stderr);
@@ -466,6 +478,14 @@ test("stored models are verified before a serving launch plan is produced", asyn
     const aliasLaunch = runCli(["models", "serve", modelId, "--print-command"], root);
     assert.equal(aliasLaunch.status, 0, aliasLaunch.stderr);
     assert.equal(JSON.parse(aliasLaunch.stdout).url, launchPlan.url);
+
+    const activeWithoutAdapter = runCli(["serve", "active", "--print-command"], root);
+    assert.equal(activeWithoutAdapter.status, 1);
+    assert.match(activeWithoutAdapter.stderr, /No adapter is active/);
+
+    const activateWithoutGate = runCli(["models", "activate", modelId], root);
+    assert.equal(activateWithoutGate.status, 1);
+    assert.match(activateWithoutGate.stderr, /general-regression suite/);
 
     await writeFile(join(modelStoreRoot, "active-model.json"), `${JSON.stringify({
       schema_version: 1,

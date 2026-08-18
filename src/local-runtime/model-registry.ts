@@ -4,6 +4,13 @@ import { fileURLToPath } from "node:url";
 import { verifyTarGzipArchive } from "./artifacts.js";
 
 /**
+ * Immutable Hugging Face revision reviewed and certified for Qwen/Qwen3.5-2B.
+ * Prefetch, training, evaluation, and serving reject any different revision.
+ */
+export const QWEN_3_5_2B_REVISION =
+  "15852e8c16360a2fea060d615a32b45270f8a8fc";
+
+/**
  * Immutable Hugging Face revision reviewed and certified for Nemotron
  * 3.5 Lightning 30B-A3B-BF16 local fine-tuning. Prefetch, training,
  * evaluation, and serving reject any different revision.
@@ -44,6 +51,7 @@ export const TRAINING_MODELS: TrainingModel[] = [
   {
     id: "Qwen/Qwen3.5-2B",
     family: "qwen3_5",
+    defaultRevision: QWEN_3_5_2B_REVISION,
     modelLoader: "causal_lm",
     defaultLearningRate: 0.00001,
     defaultPerDeviceBatchSize: 1,

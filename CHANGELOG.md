@@ -4,10 +4,38 @@
 
 ### Changed
 
+- Unregistered `tt auth` and `tt publish` again. Modules stay on disk like
+  the other hosted commands; the CLI surface is local-only.
+- `tt info` reports `status: local` instead of `local-runner-preview`.
+- `Qwen/Qwen3.5-2B` is pinned to Hugging Face snapshot
+  `15852e8c16360a2fea060d615a32b45270f8a8fc`, matching Nemotron and Muse.
+- `tt models get` now verifies the stored artifact (manifest and integrity)
+  instead of returning the raw record alone.
+- Root `--help` no longer duplicates the Commands list. The command catalog
+  lists pipeline, agent, status, and shell, and no longer lists auth/publish.
+- Hosted `tt init` next-steps now point at `tt validate` / `tt doctor` /
+  `tt run`.
 - README install now leads with
   `curl -fsSL https://tunedtensor.com/install.sh | sh`. Direct npm install
   remains documented. Version pins use
   `curl … | TT_VERSION=beta sh` so the variable reaches the installer.
+
+### Fixed
+
+- `tt models activate` fails closed with a clear error when the run has no
+  `generalRegression` suite, instead of a missing-file traceback.
+- `tt serve active` fails if no adapter is activated, instead of silently
+  serving the protected base model.
+- Doctor GPU summary uses `nvidia-smi --query-gpu=name,driver_version` so the
+  first line is not a timestamp.
+- Local table IDs keep the `local-` prefix and shorten the UUID:
+  `local-3520da7e`, not `local-35`.
+- Node no longer prints a serve URL before Python has loaded the model.
+  Python still prints `Serving …` after it is ready. `GET /` matches
+  `/health`.
+- `uv run` is invoked with `--quiet` to hide environment chatter.
+- Adapter extraction uses `tarfile.extractall(..., filter="data")` with a
+  TypeError fallback on older Python.
 
 ## [0.13.0-beta.1] - 2026-08-18
 

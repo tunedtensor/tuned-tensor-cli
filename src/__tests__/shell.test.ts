@@ -157,8 +157,9 @@ describe("command completion", () => {
     expect(complete("runs c")[0]).toContain("runs compare");
     expect(complete("/mo")[0]).toEqual(["/model"]);
     expect(complete("cl")[0].join(" ")).not.toMatch(/\bcloud\b/);
-    expect(complete("auth s")[0]).toContain("auth status");
-    expect(complete("publish")[0]).toContain("publish");
+    expect(complete("auth")[0].join(" ")).not.toMatch(/\bauth\b/);
+    expect(complete("publish")[0].join(" ")).not.toMatch(/\bpublish\b/);
+    expect(complete("pipeline")[0]).toContain("pipeline init");
     expect(complete("doctor")[0]).toContain("doctor");
   });
 });

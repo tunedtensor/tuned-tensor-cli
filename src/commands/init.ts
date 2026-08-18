@@ -44,7 +44,7 @@ export function registerInitCommand(parent: Command) {
           printJson({ created: false, path: filePath });
           return;
         }
-        printWarning(`${cmdOpts.file} already exists. Use tt eval to validate it or edit it directly.`);
+        printWarning(`${cmdOpts.file} already exists. Use tt validate to check it or edit it directly.`);
         return;
       }
 
@@ -63,9 +63,9 @@ export function registerInitCommand(parent: Command) {
       printSuccess(`Created ${cmdOpts.file}`);
       console.log("\nNext steps:");
       console.log("  1. Edit the spec: system_prompt, guidelines, examples");
-      console.log("  2. Validate for cloud: tt eval");
-      console.log("  3. Push to cloud:      tt push");
-      console.log("     Or validate locally: tt local validate");
+      console.log("  2. Validate:  tt validate");
+      console.log("  3. Preflight: tt doctor");
+      console.log("  4. Train:     tt run");
     });
 }
 
