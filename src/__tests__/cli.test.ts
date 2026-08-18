@@ -168,10 +168,10 @@ describe("unified command routing", () => {
 
     const names = program.commands.map((command) => command.name());
     expect(names).toEqual(
-      expect.arrayContaining(["runs", "models", "doctor", "init", "shell", "status"]),
+      expect.arrayContaining(["runs", "models", "doctor", "init", "shell", "status", "auth", "publish"]),
     );
     expect(names).not.toEqual(
-      expect.arrayContaining(["auth", "push", "balance", "topup", "cloud", "eval", "specs", "datasets", "label"]),
+      expect.arrayContaining(["push", "balance", "topup", "cloud", "eval", "specs", "datasets", "label"]),
     );
 
     await program.parseAsync(["node", "tt", "runs", "list", "--json"]);

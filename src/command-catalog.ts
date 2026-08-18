@@ -45,6 +45,11 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   { path: "serve", description: "Serve a local adapter, active model, or base model.", group: "Serving", modes: LOCAL },
 
   { path: "info", description: "Show local runtime package information.", group: "Inspect", modes: LOCAL },
+
+  { path: "auth login", description: "Store a Tuned Tensor API key.", group: "Account", modes: LOCAL },
+  { path: "auth logout", description: "Remove the stored Tuned Tensor API key.", group: "Account", modes: LOCAL },
+  { path: "auth status", description: "Show Tuned Tensor authentication status.", group: "Account", modes: LOCAL },
+  { path: "publish", description: "Publish local run evidence to the dashboard.", group: "Account", modes: LOCAL },
 ] as const;
 
 export interface SlashCommand {
