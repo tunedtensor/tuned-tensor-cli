@@ -5,7 +5,8 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { stdin as defaultStdin, stdout as defaultStdout } from "node:process";
 import { post, type ClientOpts } from "../client.js";
-import { getBaseUrl } from "../config.js";
+import { getApiKey, getBaseUrl } from "../config.js";
+import { runReportSchema } from "../local-runtime/contracts.js";
 import {
   createLocalStore,
   defaultLocalHome,
@@ -19,6 +20,8 @@ import {
   isJsonMode,
   shortId,
 } from "../output.js";
+
+const MAX_PUBLISH_BYTES = 2 * 1024 * 1024;
 
 interface PublishResult {
   id: string;
@@ -97,12 +100,19 @@ function pickPublishableRun(
   runId?: string,
 ): LocalRunState {
   if (runId) {
-    const match = runs.find(
-      (run) => run.id === runId || run.id.startsWith(runId),
-    );
-    if (!match) {
+    const exact = runs.find((run) => run.id === runId);
+    const prefixMatches = exact
+      ? [exact]
+      : runs.filter((run) => run.id.startsWith(runId));
+    if (prefixMatches.length === 0) {
       throw new Error(`Run not found: ${runId}`);
     }
+    if (prefixMatches.length > 1) {
+      throw new Error(
+        `Ambiguous run id prefix ${JSON.stringify(runId)}; matches ${prefixMatches.map((run) => shortId(run.id)).join(", ")}. Pass a longer prefix or the full id.`,
+      );
+    }
+    const match = prefixMatches[0]!;
     if (match.status !== "completed" && match.status !== "failed") {
       throw new Error(
         `Run ${shortId(match.id)} is still ${match.status}; only completed or failed runs can be published.`,
@@ -123,6 +133,15 @@ function pickPublishableRun(
   return latest;
 }
 
+function assertPublishPayloadSize(payload: unknown): void {
+  const bytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
+  if (bytes > MAX_PUBLISH_BYTES) {
+    throw new Error(
+      `Publish payload is ${bytes} bytes; maximum is ${MAX_PUBLISH_BYTES} bytes. Reduce eval examples or publish a smaller run.`,
+    );
+  }
+}
+
 export function registerPublishCommand(parent: Command) {
   parent
     .command("publish")
@@ -137,15 +156,22 @@ export function registerPublishCommand(parent: Command) {
         apiKey: cmdOpts.apiKey,
         baseUrl: cmdOpts.baseUrl,
       };
+
+      if (!cmdOpts.dryRun && !getApiKey(opts)) {
+        throw new Error(
+          "No API key found. Run `tt auth login` or set TUNED_TENSOR_API_KEY.",
+        );
+      }
+
       const storeRoot = resolvePublishStoreRoot();
       const store = createLocalStore(storeRoot);
       const runs = await store.listRuns();
       const run = pickPublishableRun(runs, runId);
-      const report = await store.getRunReport(run.id);
+      const rawReport = await store.getRunReport(run.id);
+      const report = runReportSchema.parse(rawReport);
       const specRecord = await store.getSpec(run.behavior_spec_id);
-      const exampleCount = report.candidate?.results?.length
-        ?? report.baseline?.results?.length
-        ?? 0;
+      const exampleCount = report.candidate.results.length
+        || report.baseline.results.length;
 
       const payload = {
         spec: {
@@ -154,6 +180,7 @@ export function registerPublishCommand(parent: Command) {
         },
         report,
       };
+      assertPublishPayloadSize(payload);
 
       if (isJsonMode() && cmdOpts.dryRun) {
         printJson({
