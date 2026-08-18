@@ -383,9 +383,6 @@ export class TunedTensorAgentSession {
     context?: AgentTurnContext,
   ): Promise<void> {
     const action = this.resolvePendingAction(idOrPrefix);
-    if (context?.mode === "cloud" && action.operation === "create_local_spec") {
-      throw new Error("Switch to local mode before approving local spec creation.");
-    }
     action.status = "executing";
     try {
       await this.runStream(async (signal) => {

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Command } from "commander";
-import { canonicalPipeline, createExecutionPlan, PIPELINE_TARGETS, validatePipeline, type Pipeline, type PipelineTarget } from "../pipeline.js";
+import { canonicalPipeline, createExecutionPlan, validatePipeline, type Pipeline } from "../pipeline.js";
 import { isJsonMode, printJson, printSuccess } from "../output.js";
 import { loadLocalRunInput, assertLocalRunInputReady } from "../local-runtime/local-project.js";
 import { loadLocalRunnerConfig, runLocalPipeline, type LocalPipeline } from "../local-runtime/orchestrator.js";
@@ -40,12 +40,10 @@ export function registerPipelineCommands(parent: Command): void {
   pipeline.command("init")
     .description("Write a canonical v1 pipeline recipe")
     .option("-f, --file <path>", "Output file", DEFAULT_PIPELINE_FILE)
-    .option("--target <target>", "Default target: local or cloud", "local")
-    .action((options: { file: string; target: string }) => {
-      if (!(PIPELINE_TARGETS as readonly string[]).includes(options.target)) throw new Error("--target must be local or cloud.");
+    .action((options: { file: string }) => {
       const path = resolve(options.file);
       if (existsSync(path)) throw new Error(`Pipeline file already exists: ${options.file}.`);
-      const recipe = canonicalPipeline(options.target as PipelineTarget);
+      const recipe = canonicalPipeline("local");
       writeFileSync(path, `${JSON.stringify(recipe, null, 2)}\n`);
       if (isJsonMode()) return printJson({ created: true, path, pipeline: recipe });
       printSuccess(`Created ${options.file}`);
@@ -88,7 +86,7 @@ export function registerPipelineCommands(parent: Command): void {
       }
       const remote = plan.steps.find((step) => step.target !== "local");
       if (remote) {
-        throw new Error(`Step "${remote.id}" targets cloud execution. Hosted and mixed pipeline execution is not enabled by this CLI build; use --dry-run.`);
+        throw new Error(`Step "${remote.id}" targets cloud execution. This CLI is local-only; rewrite that step to local or use --dry-run.`);
       }
       const input = await loadLocalRunInput(resolve(options.spec));
       assertLocalRunInputReady(input.request);

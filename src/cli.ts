@@ -10,8 +10,7 @@ import { LocalAgentStore } from "./agent-store.js";
 import { createPiModelRuntime, type AgentModelRuntime } from "./agent-model.js";
 import type { AgentToolApi } from "./agent-tools.js";
 import type { AgentMutationApi } from "./agent-approval.js";
-import { get, post, put } from "./client.js";
-import { getAgentSelection, getApiKey, getConfigDir, getConfigRevision } from "./config.js";
+import { getApiKey, getAgentSelection, getConfigDir, getConfigRevision } from "./config.js";
 import { join } from "node:path";
 import { TunedTensorAgentSession } from "./agent.js";
 import { executeLocalCommand } from "./local-runner.js";
@@ -27,20 +26,33 @@ import {
   formatShellStatus,
 } from "./shell-context.js";
 import { isJsonMode, setJsonMode } from "./output.js";
-import { registerAuthCommands } from "./commands/auth.js";
-import { registerSpecsCommands } from "./commands/specs.js";
-import { registerRunsCommands } from "./commands/runs.js";
-import { registerDatasetsCommands } from "./commands/datasets.js";
-import { registerLabelCommands } from "./commands/label.js";
-import { registerModelsCommands } from "./commands/models.js";
-import { registerBalanceCommands } from "./commands/balance.js";
-import { registerTopupCommands } from "./commands/topup.js";
-import { registerInitCommand } from "./commands/init.js";
-import { registerEvalCommand } from "./commands/eval.js";
-import { registerPushCommand } from "./commands/push.js";
+import { registerLocalCommands } from "./commands/local.js";
 import { registerAgentCommands } from "./commands/agent.js";
 import { registerPipelineCommands } from "./commands/pipeline.js";
 import { checkForCliUpdate, formatCliUpdateNotice } from "./update-check.js";
+export { extractPassthroughOptions } from "./passthrough.js";
+
+const LOCAL_ONLY_MESSAGE = "This build of tt is local-only.";
+
+function rejectLocalOnly(): never {
+  throw new Error(LOCAL_ONLY_MESSAGE);
+}
+
+function createLocalOnlyToolApi(): AgentToolApi {
+  return {
+    get: async () => rejectLocalOnly(),
+    postRead: async () => rejectLocalOnly(),
+    propose: async (action) => action,
+  };
+}
+
+function createLocalOnlyMutationApi(): AgentMutationApi {
+  return {
+    get: async () => rejectLocalOnly(),
+    post: async () => rejectLocalOnly(),
+    put: async () => rejectLocalOnly(),
+  };
+}
 
 export interface SelfCommandOptions {
   cwd?: string;
@@ -84,7 +96,6 @@ export interface CliRuntime {
 async function createDefaultAgentClient(
   runtime: CliRuntime,
   env: NodeJS.ProcessEnv,
-  cloud: { apiKey?: string; baseUrl?: string },
   workspaceRoot: string,
   getModelRuntime: () => Promise<AgentModelRuntime & { streamSimple?: (...args: any[]) => any }>,
 ): Promise<AgentConversationClient> {
@@ -95,25 +106,9 @@ async function createDefaultAgentClient(
     );
   }
   const modelRuntime = await getModelRuntime();
-  const clientOpts = { apiKey: cloud.apiKey, baseUrl: cloud.baseUrl };
-  const toolApi = runtime.agentToolApi ?? {
-    get: async (path: string, query?: Record<string, string | number | undefined>) => await get(path, query, clientOpts),
-    postRead: async (path: string, body: unknown) => await post(path, body, clientOpts),
-    propose: async (action) => action,
-  } satisfies AgentToolApi;
-  const mutationApi = runtime.agentMutationApi ?? {
-    get: async (path: string) => await get(path, undefined, clientOpts),
-    post: async (path: string, body?: unknown, guard?) => await post(path, body, clientOpts, guard ? {
-      "X-Tuned-Tensor-Action-Id": guard.actionId,
-      "X-Tuned-Tensor-Operation": guard.operation,
-    } : undefined),
-    put: async (path: string, body?: unknown, guard?) => await put(path, body, clientOpts, guard ? {
-      "X-Tuned-Tensor-Action-Id": guard.actionId,
-      "X-Tuned-Tensor-Operation": guard.operation,
-      ...(guard.expectedUpdatedAt ? { "X-Tuned-Tensor-Expected-Updated-At": guard.expectedUpdatedAt } : {}),
-    } : undefined),
-  } satisfies AgentMutationApi;
-  const secret = getApiKey(clientOpts);
+  const toolApi = runtime.agentToolApi ?? createLocalOnlyToolApi();
+  const mutationApi = runtime.agentMutationApi ?? createLocalOnlyMutationApi();
+  const secret = getApiKey({ apiKey: env.TUNED_TENSOR_API_KEY });
   const providerSecrets = Object.entries(env)
     .filter(([name, value]) => value && /(?:API_KEY|TOKEN|SECRET)$/i.test(name))
     .map(([, value]) => value!)
@@ -146,7 +141,6 @@ function createModelRuntimeGetter(
 function createLazyDefaultAgentClient(
   runtime: CliRuntime,
   env: NodeJS.ProcessEnv,
-  cloud: { apiKey?: string; baseUrl?: string },
   workspaceRoot: string,
   getModelRuntime: () => Promise<AgentModelRuntime & { streamSimple?: (...args: any[]) => any }>,
 ): AgentConversationClient {
@@ -160,7 +154,7 @@ function createLazyDefaultAgentClient(
       // configures the agent later in the same shell session). Changing the
       // model with `/model` writes config and bumps the revision, which also
       // recreates the client here.
-      const attempt = createDefaultAgentClient(runtime, env, cloud, workspaceRoot, getModelRuntime);
+      const attempt = createDefaultAgentClient(runtime, env, workspaceRoot, getModelRuntime);
       pending = attempt;
       attempt.catch(() => {
         if (pending === attempt) pending = undefined;
@@ -238,59 +232,14 @@ export async function runSelfCommand(
   });
 }
 
-interface PassthroughOptions {
-  args: string[];
-  json: boolean;
-  color: boolean;
-}
-
-/**
- * Pull root presentation flags out of a passthrough namespace.
- *
- * Commander cannot know the option grammar of the separately versioned local
- * package, so `tt local --json runs list` arrives as variadic arguments.
- */
-export function extractPassthroughOptions(
-  args: readonly string[],
-  root: { json?: boolean; color?: boolean },
-): PassthroughOptions {
-  let json = Boolean(root.json);
-  let color = root.color !== false;
-  const forwarded: string[] = [];
-
-  for (const arg of args) {
-    if (arg === "--json") {
-      json = true;
-    } else if (arg === "--no-color") {
-      color = false;
-    } else {
-      forwarded.push(arg);
-    }
-  }
-
-  return { args: forwarded, json, color };
-}
-
 function childEnvironment(
-  root: {
-    apiKey?: string;
-    baseUrl?: string;
-    color?: boolean;
-  },
+  root: { color?: boolean },
   base: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   return {
     ...base,
-    ...(root.apiKey ? { TUNED_TENSOR_API_KEY: root.apiKey } : {}),
-    ...(root.baseUrl ? { TUNED_TENSOR_URL: root.baseUrl } : {}),
     ...(root.color === false ? { FORCE_COLOR: "0" } : {}),
   };
-}
-
-function applyExitCode(result: ShellCommandResult | void): void {
-  if (result?.exitCode !== null && result?.exitCode !== undefined) {
-    process.exitCode = result.exitCode;
-  }
 }
 
 export function createProgram(
@@ -308,15 +257,8 @@ export function createProgram(
   const shellRunner = async (
     request: ShellCommandRequest,
   ): Promise<ShellCommandResult> => {
-    const root = program.opts<{
-      apiKey?: string;
-      baseUrl?: string;
-      color?: boolean;
-    }>();
-    const args = request.target === "local"
-      ? ["local", ...request.args]
-      : request.args;
-    return await invokeSelf(args, {
+    const root = program.opts<{ color?: boolean }>();
+    return await invokeSelf(request.args, {
       cwd: request.cwd,
       env: childEnvironment(root, env),
       entrypoint: runtime.argv?.[1],
@@ -324,19 +266,17 @@ export function createProgram(
   };
 
   const openShell = async (): Promise<void> => {
-    const root = program.opts<{
-      apiKey?: string;
-      baseUrl?: string;
-      color?: boolean;
-    }>();
+    const root = program.opts<{ color?: boolean }>();
     const shellEnvironment = childEnvironment(root, env);
     const output = runtime.stdout ?? process.stdout;
     const error = runtime.stderr ?? process.stderr;
     const agent = createShellAgent({
-      client: runtime.agentClient ?? createLazyDefaultAgentClient(runtime, shellEnvironment, {
-        apiKey: root.apiKey ?? shellEnvironment.TUNED_TENSOR_API_KEY,
-        baseUrl: root.baseUrl ?? shellEnvironment.TUNED_TENSOR_URL,
-      }, cwd, getModelRuntime),
+      client: runtime.agentClient ?? createLazyDefaultAgentClient(
+        runtime,
+        shellEnvironment,
+        cwd,
+        getModelRuntime,
+      ),
       output,
       error,
     });
@@ -355,13 +295,8 @@ export function createProgram(
 
   program
     .name("tt")
-    .description("Tuned Tensor — converse, train, and inspect from one terminal")
+    .description("Tuned Tensor — converse, train, and inspect from one local terminal")
     .version(version)
-    .option("-k, --api-key <key>", "API key (overrides stored key)")
-    .option(
-      "-u, --base-url <url>",
-      "API base URL (default: https://tunedtensor.com)",
-    )
     .option("--json", "Output raw JSON")
     .option("--no-color", "Disable colors")
     .showSuggestionAfterError()
@@ -374,17 +309,14 @@ export function createProgram(
       }
     });
 
-  registerAuthCommands(program);
-  registerSpecsCommands(program);
-  registerRunsCommands(program);
-  registerDatasetsCommands(program);
-  registerLabelCommands(program);
-  registerModelsCommands(program);
-  registerBalanceCommands(program);
-  registerTopupCommands(program);
-  registerInitCommand(program);
-  registerEvalCommand(program);
-  registerPushCommand(program);
+  registerLocalCommands(program, {
+    invokeLocal,
+    cwd,
+    env,
+    stdin: runtime.stdin ?? process.stdin,
+    stdout: runtime.stdout ?? process.stdout,
+    stderr: runtime.stderr ?? process.stderr,
+  });
   registerPipelineCommands(program);
   registerAgentCommands(program, {
     env,
@@ -394,117 +326,42 @@ export function createProgram(
 
   program
     .command("status")
-    .description("Show read-only cloud, local, and project context")
-    .option("--target <target>", "Show cloud or local workflow status")
-    .action(async (commandOptions: { target?: string }) => {
-      const root = program.opts<{
-        apiKey?: string;
-        baseUrl?: string;
-        color?: boolean;
-      }>();
+    .description("Show local and project context")
+    .action(async () => {
+      const root = program.opts<{ color?: boolean }>();
       const context = await discoverShellContext({
         cwd,
         env: childEnvironment(root, env),
       });
-      const target = commandOptions.target ?? context.inferredTarget;
-      if (target !== "cloud" && target !== "local") {
-        throw new Error("--target must be cloud or local.");
-      }
       const output = runtime.stdout ?? process.stdout;
       if (isJsonMode()) {
-        output.write(`${JSON.stringify({
-          target,
-          context,
-        }, null, 2)}\n`);
+        output.write(`${JSON.stringify({ context }, null, 2)}\n`);
         return;
       }
       output.write(`${chalk.bold.hex("#8B5CF6")("Tuned Tensor status")}\n`);
-      output.write(`${formatShellStatus(context, target).join("\n")}\n\n`);
+      output.write(`${formatShellStatus(context).join("\n")}\n\n`);
       output.write(`${chalk.bold("Context")}\n`);
-      output.write(
-        `${formatShellContext(
-          context,
-          target,
-          commandOptions.target ? "command-option" : context.targetSource,
-        ).join("\n")}\n`,
-      );
-    });
-
-  program
-    .command("local")
-    .description("Run the local CUDA training and model workflow")
-    .helpOption(false)
-    .allowUnknownOption()
-    .argument("[args...]", "TT Local command and arguments")
-    .action(async (args: string[]) => {
-      const root = program.opts<{ json?: boolean; color?: boolean }>();
-      const passthrough = extractPassthroughOptions(args, root);
-      if (!passthrough.color) chalk.level = 0;
-      const result = await invokeLocal(
-        passthrough.args.length > 0 ? passthrough.args : ["--help"],
-        {
-          jsonMode: passthrough.json,
-          cwd,
-          env: childEnvironment(
-            { ...root, color: passthrough.color },
-            env,
-          ),
-          stdin: runtime.stdin ?? process.stdin,
-          stdout: runtime.stdout ?? process.stdout,
-          stderr: runtime.stderr ?? process.stderr,
-        },
-      );
-      applyExitCode(result);
-    });
-
-  program
-    .command("cloud")
-    .description("Run a hosted command explicitly")
-    .helpOption(false)
-    .allowUnknownOption()
-    .argument("[args...]", "Hosted tt command and arguments")
-    .action(async (args: string[]) => {
-      const root = program.opts<{
-        apiKey?: string;
-        baseUrl?: string;
-        json?: boolean;
-        color?: boolean;
-      }>();
-      const passthrough = extractPassthroughOptions(args, root);
-      const forwarded = [
-        ...(passthrough.json ? ["--json"] : []),
-        ...(!passthrough.color ? ["--no-color"] : []),
-        ...(passthrough.args.length > 0 ? passthrough.args : ["--help"]),
-      ];
-      const result = await invokeSelf(forwarded, {
-        cwd,
-        env: childEnvironment(
-          { ...root, color: passthrough.color },
-          env,
-        ),
-        entrypoint: runtime.argv?.[1],
-      });
-      applyExitCode(result);
+      output.write(`${formatShellContext(context).join("\n")}\n`);
     });
 
   program
     .command("shell")
-    .description("Open the conversational terminal (local by default)")
+    .description("Open the conversational terminal")
     .action(openShell);
 
   program.addHelpText(
     "after",
     `
-Workflows:
+Commands:
   tt                     Open the conversational terminal (TTY only)
-  tt status              Inspect cloud/local project context
-  tt cloud <command>     Run a hosted command explicitly
-  tt local <command>     Run a local GPU command
+  tt status              Inspect local project context
+  tt doctor              Check the host and run prerequisites
+  tt run                 Fine-tune and evaluate on your GPU
 
 Examples:
+  tt doctor tunedtensor.json
+  tt run tunedtensor.json --dry-run
   tt runs list
-  tt local doctor tunedtensor.json
-  tt local run tunedtensor.json --dry-run
 `,
   );
 
@@ -562,18 +419,18 @@ export async function runCli(
     const invokeSelf = runtime.runSelfCommand ?? runSelfCommand;
     const getModelRuntime = createModelRuntimeGetter(runtime);
     const agent = createShellAgent({
-      client: runtime.agentClient ?? createLazyDefaultAgentClient(runtime, env, {
-        apiKey: env.TUNED_TENSOR_API_KEY,
-        baseUrl: env.TUNED_TENSOR_URL,
-      }, runtime.cwd ?? process.cwd(), getModelRuntime),
+      client: runtime.agentClient ?? createLazyDefaultAgentClient(
+        runtime,
+        env,
+        runtime.cwd ?? process.cwd(),
+        getModelRuntime,
+      ),
       output,
       error,
     });
     await (runtime.startShell ?? startInteractiveShell)({
       runner: async (request) => await invokeSelf(
-        request.target === "local"
-          ? ["local", ...request.args]
-          : request.args,
+        request.args,
         {
           cwd: request.cwd,
           env,

@@ -71,7 +71,7 @@ test("top-level help and version are available without loading project state", a
 
     const help = runCli(["--help"], root);
     assert.equal(help.status, 0);
-    assert.match(help.stdout, /^Usage: tt-local <command> \[options\]/);
+    assert.match(help.stdout, /^Usage: tt <command> \[options\]/);
     assert.match(help.stdout, /-V, --version/);
     assert.match(help.stdout, /serve <model-id\|active\|base>/);
     assert.doesNotMatch(
@@ -96,17 +96,17 @@ test("command and nested-command help never execute work", async () => {
   await withTemporaryProject(async (root) => {
     await writeFile(join(root, ".env"), "TT_LOCAL_HELP_MUST_NOT_LOAD=true\n", "utf8");
     const cases = [
-      { args: ["run", "--help"], usage: "tt-local run" },
-      { args: ["serve", "--help"], usage: "tt-local serve" },
-      { args: ["models", "prefetch", "--help"], usage: "tt-local models prefetch" },
-      { args: ["models", "verify-base", "--help"], usage: "tt-local models verify-base" },
-      { args: ["models", "verify", "--help"], usage: "tt-local models verify" },
-      { args: ["models", "active", "--help"], usage: "tt-local models active" },
-      { args: ["models", "activate", "--help"], usage: "tt-local models activate" },
-      { args: ["models", "rollback", "--help"], usage: "tt-local models rollback" },
-      { args: ["models", "serve", "--help"], usage: "tt-local models serve" },
-      { args: ["runs", "report", "--help"], usage: "tt-local runs report" },
-      { args: ["models", "--help"], usage: "tt-local models <command>" },
+      { args: ["run", "--help"], usage: "tt run" },
+      { args: ["serve", "--help"], usage: "tt serve" },
+      { args: ["models", "prefetch", "--help"], usage: "tt models prefetch" },
+      { args: ["models", "verify-base", "--help"], usage: "tt models verify-base" },
+      { args: ["models", "verify", "--help"], usage: "tt models verify" },
+      { args: ["models", "active", "--help"], usage: "tt models active" },
+      { args: ["models", "activate", "--help"], usage: "tt models activate" },
+      { args: ["models", "rollback", "--help"], usage: "tt models rollback" },
+      { args: ["models", "serve", "--help"], usage: "tt models serve" },
+      { args: ["runs", "report", "--help"], usage: "tt runs report" },
+      { args: ["models", "--help"], usage: "tt models <command>" },
     ];
 
     for (const { args, usage } of cases) {
@@ -168,7 +168,7 @@ test("extra positional arguments and duplicate options are rejected", async () =
   await withTemporaryProject((root) => {
     const extra = runCli(["runs", "get", "run-a", "run-b"], root);
     assert.equal(extra.status, 1);
-    assert.match(extra.stderr, /^Too many arguments\. Usage: tt-local runs get/);
+    assert.match(extra.stderr, /^Too many arguments\. Usage: tt runs get/);
 
     const duplicate = runCli(["validate", "--config", "one.json", "--config=two.json"], root);
     assert.equal(duplicate.status, 1);

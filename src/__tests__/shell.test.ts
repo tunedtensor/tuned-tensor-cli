@@ -79,37 +79,31 @@ describe("tokenizeShellInput", () => {
 });
 
 describe("routeShellCommand", () => {
-  it("routes ordinary input to the selected mode", () => {
-    expect(routeShellCommand("runs list --json", "local")).toEqual({
-      target: "local",
+  it("routes ordinary input without a workflow prefix", () => {
+    expect(routeShellCommand("runs list --json")).toEqual({
       args: ["runs", "list", "--json"],
     });
   });
 
-  it("supports explicit workflow prefixes and a redundant tt prefix", () => {
-    expect(routeShellCommand("cloud runs list", "local")).toEqual({
-      target: "cloud",
-      args: ["runs", "list"],
-    });
-    expect(routeShellCommand("tt local doctor", "cloud")).toEqual({
-      target: "local",
-      args: ["doctor"],
+  it("strips a redundant tt prefix", () => {
+    expect(routeShellCommand("tt local doctor")).toEqual({
+      args: ["local", "doctor"],
     });
   });
 
   it("does not open a nested shell for a bare tt command", () => {
-    expect(() => routeShellCommand("tt", "cloud")).toThrow(/already open/);
+    expect(() => routeShellCommand("tt")).toThrow(/already open/);
   });
 });
 
 describe("isCatalogCommand", () => {
   it("recognizes existing CLI grammar without treating conversation as commands", () => {
-    expect(isCatalogCommand("cloud", ["runs", "list"])).toBe(true);
-    expect(isCatalogCommand("local", ["doctor"])).toBe(true);
-    expect(isCatalogCommand("cloud", ["show", "my", "latest", "run"])).toBe(false);
-    expect(isCatalogCommand("cloud", ["runs", "please"])).toBe(false);
-    expect(isCatalogCommand("cloud", ["status", "of", "my", "run"])).toBe(false);
-    expect(isCatalogCommand("cloud", ["status", "--target", "local"])).toBe(true);
+    expect(isCatalogCommand(["runs", "list"])).toBe(true);
+    expect(isCatalogCommand(["doctor"])).toBe(true);
+    expect(isCatalogCommand(["show", "my", "latest", "run"])).toBe(false);
+    expect(isCatalogCommand(["runs", "please"])).toBe(false);
+    expect(isCatalogCommand(["status", "of", "my", "run"])).toBe(false);
+    expect(isCatalogCommand(["status"])).toBe(true);
   });
 });
 
@@ -146,18 +140,14 @@ describe("parseSlashCommand", () => {
 });
 
 describe("command completion", () => {
-  it("completes mode-aware commands, slash commands, and overrides", () => {
-    let mode: "cloud" | "local" = "local";
-    const complete = createCommandCompleter(() => mode);
+  it("completes local commands and slash commands", () => {
+    const complete = createCommandCompleter();
 
     expect(complete("runs c")[0]).toContain("runs compare");
-    expect(complete("cloud runs e")[0]).toContain("cloud runs estimate");
     expect(complete("/mo")[0]).toEqual(["/model"]);
-    expect(complete("cl")[0]).toContain("cloud ");
-
-    mode = "cloud";
-    expect(complete("auth s")[0]).toContain("auth status");
-    expect(complete("doctor")[0]).not.toContain("doctor");
+    expect(complete("cl")[0].join(" ")).not.toMatch(/\bcloud\b/);
+    expect(complete("auth s")[0].join(" ")).not.toContain("auth status");
+    expect(complete("doctor")[0]).toContain("doctor");
   });
 });
 
@@ -228,24 +218,15 @@ describe("foreground SIGINT handoff", () => {
   });
 });
 
-function fakeContext(cwd: string, target: "cloud" | "local"): ShellContext {
+function fakeContext(cwd: string): ShellContext {
   return {
     cwd,
     projectName: cwd.split("/").filter(Boolean).at(-1) ?? cwd,
-    inferredTarget: target,
-    targetSource: "default-local",
-    cloud: {
-      authenticated: true,
-      keyPrefix: "tt_test…",
-      baseUrl: "https://tunedtensor.com",
-      configPath: "/config.json",
-      configFound: true,
-    },
     local: {
-      configPath: target === "local" ? `${cwd}/local-runner.json` : undefined,
+      configPath: `${cwd}/local-runner.json`,
       artifactRoot: `${cwd}/.tt-local/artifacts`,
       storeRoot: `${cwd}/.tt-local/store`,
-      activeModelId: target === "local" ? "model_abc123" : undefined,
+      activeModelId: "model_abc123",
     },
     warnings: [],
   };
@@ -257,7 +238,7 @@ describe("renderShellBanner", () => {
       mode: "local",
       modeSource: "default-local",
       cwd: "/tmp/local-project",
-      context: fakeContext("/tmp/local-project", "local"),
+      context: fakeContext("/tmp/local-project"),
       version: "0.6.0",
     });
     const rows = banner.trimEnd().split("\n");
@@ -277,7 +258,7 @@ describe("renderShellBanner", () => {
       mode: "local",
       modeSource: "default-local",
       cwd: "/tmp/local-project",
-      context: fakeContext("/tmp/local-project", "local"),
+      context: fakeContext("/tmp/local-project"),
     });
     expect(banner).toContain("tt");
     expect(banner).not.toContain("v0");
@@ -333,7 +314,7 @@ describe("renderShellPrompt", () => {
   });
 });
 
-describe("TunedTensorShellSession", () => {  it("routes to local by default, honors a one-shot cloud prefix, and recovers from parse errors", async () => {
+describe("TunedTensorShellSession", () => {  it("routes commands locally and recovers from parse errors", async () => {
     const requests: ShellCommandRequest[] = [];
     const stdout: string[] = [];
     const stderr: string[] = [];
@@ -350,20 +331,18 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
         requests.push(request);
         return { exitCode: 0 };
       },
-      contextProvider: async ({ cwd }) => fakeContext(cwd, "local"),
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
     });
 
     expect(session.snapshot().mode).toBe("local");
     await session.handleLine("runs list");
-    await session.handleLine("cloud auth status");
     await session.handleLine("/mode cloud");
     await session.handleLine("runs list");
     await session.handleLine("runs list | cat");
 
     expect(requests).toEqual([
-      { target: "local", args: ["runs", "list"], cwd: "/tmp/local-project" },
-      { target: "cloud", args: ["auth", "status"], cwd: "/tmp/local-project" },
-      { target: "local", args: ["runs", "list"], cwd: "/tmp/local-project" },
+      { args: ["runs", "list"], cwd: "/tmp/local-project" },
+      { args: ["runs", "list"], cwd: "/tmp/local-project" },
     ]);
     expect(stderr.join("")).toMatch(/Unknown session command/);
     expect(stderr.join("")).toMatch(/Shell operator/);
@@ -381,7 +360,7 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
         clear: vi.fn(),
       },
       runner: async () => ({ exitCode: 0 }),
-      contextProvider: async ({ cwd }) => fakeContext(cwd, "cloud"),
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
     });
 
     expect(session.snapshot().mode).toBe("local");
@@ -418,7 +397,7 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
       },
       runner: run,
       agent,
-      contextProvider: async ({ cwd }) => fakeContext(cwd, "cloud"),
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
     });
 
     await session.handleLine("What happened in my latest training run?");
@@ -428,7 +407,7 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
     await session.handleLine("status of my latest run");
     await session.handleLine("runs list");
     await session.handleLine("runs list | cat");
-    await session.handleLine(": balance");
+    await session.handleLine(": doctor");
     await session.handleLine("cloud not-a-command");
 
     expect(agent.handleLine.mock.calls.map((call) => call[0])).toEqual([
@@ -437,8 +416,10 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
       "/approve action-123",
       "Compare accuracy > latency & cost; summarize it.",
       "status of my latest run",
+      "cloud not-a-command",
     ]);
     expect(agent.handleLine.mock.calls.map((call) => call[1])).toEqual([
+      { mode: "local", workspaceRoot: "/tmp/cloud-project" },
       { mode: "local", workspaceRoot: "/tmp/cloud-project" },
       { mode: "local", workspaceRoot: "/tmp/cloud-project" },
       { mode: "local", workspaceRoot: "/tmp/cloud-project" },
@@ -447,18 +428,11 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
     ]);
     expect(run.mock.calls.map((call) => call[0])).toEqual([
       {
-        target: "local",
         args: ["runs", "list"],
         cwd: "/tmp/cloud-project",
       },
       {
-        target: "local",
-        args: ["balance"],
-        cwd: "/tmp/cloud-project",
-      },
-      {
-        target: "cloud",
-        args: ["not-a-command"],
+        args: ["doctor"],
         cwd: "/tmp/cloud-project",
       },
     ]);
@@ -478,7 +452,7 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
         clear,
       },
       runner: run,
-      contextProvider: async ({ cwd }) => fakeContext(cwd, "cloud"),
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
     });
 
     await session.handleLine("/help runs");
@@ -489,8 +463,8 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
     expect(await session.handleLine("/exit")).toBe("exit");
 
     const output = stdout.join("");
-    expect(output).toContain("TT local commands matching");
-    expect(output).toContain("Cloud endpoint");
+    expect(output).toContain("TT commands matching");
+    expect(output).not.toContain("Cloud endpoint");
     expect(output).toContain("Host checks");
     expect(clear).toHaveBeenCalledTimes(1);
     expect(run).not.toHaveBeenCalled();
@@ -525,7 +499,7 @@ describe("TunedTensorShellSession", () => {  it("routes to local by default, hon
       },
       runner: async () => ({ exitCode: 0 }),
       agentModelRuntime: async () => modelRuntime,
-      contextProvider: async ({ cwd }) => fakeContext(cwd, "local"),
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
     });
 
     const run = async (line: string): Promise<string> => {

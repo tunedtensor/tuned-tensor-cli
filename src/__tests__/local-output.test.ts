@@ -62,7 +62,7 @@ describe("local output primitives", () => {
           + "State: ~/.tuned-tensor-local and .tt-local/artifacts\n",
       ),
     ).toBe(
-      "Usage: tt local run\nInstall tt local first\n"
+      "Usage: tt run\nInstall tt first\n"
         + "State: ~/.tuned-tensor-local and .tt-local/artifacts\n",
     );
   });
@@ -98,7 +98,7 @@ describe("local output primitives", () => {
       error: {
         status: null,
         code: "LOCAL_CLI_ERROR",
-        message: "tt local: invalid spec",
+        message: "tt: invalid spec",
         exit_code: 2,
         signal: null,
       },
@@ -158,7 +158,7 @@ describe("local output primitives", () => {
 
     expect(JSON.parse(output.value())).toEqual({
       data: {
-        name: "tt local",
+        name: "tt",
         description: "Local CUDA fine-tuning.",
         version: "0.4.0",
         status: "local-runner-preview",
@@ -168,7 +168,7 @@ describe("local output primitives", () => {
       args: ["--help"],
       stdout: "Usage: tt-local <command>\n",
     }))).toEqual({
-      data: { output: "Usage: tt local <command>" },
+      data: { output: "Usage: tt <command>" },
     });
   });
 });

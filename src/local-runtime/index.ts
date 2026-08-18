@@ -87,7 +87,7 @@ function hasFlag(argv: string[], name: string): boolean {
 }
 
 function printHelp(): void {
-  console.log(`Usage: tt-local <command> [options]
+  console.log(`Usage: tt <command> [options]
 
 Commands:
   info                              Show package and runner information
@@ -158,13 +158,13 @@ const MODEL_SERVE_OPTIONS = [
 
 const COMMAND_DEFINITIONS: Record<string, CliCommandDefinition> = {
   info: {
-    usage: "tt-local info",
+    usage: "tt info",
     description: "Show the installed TT Local version and runner status.",
     options: [],
     maxPositionals: 0,
   },
   init: {
-    usage: "tt-local init [options]",
+    usage: "tt init [options]",
     description: "Create a local tunedtensor.json behavior spec.",
     options: [
       { name: "--name", value: "name", description: "Behavior spec name" },
@@ -177,19 +177,19 @@ const COMMAND_DEFINITIONS: Record<string, CliCommandDefinition> = {
     maxPositionals: 0,
   },
   doctor: {
-    usage: "tt-local doctor [tunedtensor.json] [--config path]",
+    usage: "tt doctor [tunedtensor.json] [--config path]",
     description: "Check the host and optional run input before starting work.",
     options: [CONFIG_OPTION],
     maxPositionals: 1,
   },
   validate: {
-    usage: "tt-local validate [tunedtensor.json] [options]",
+    usage: "tt validate [tunedtensor.json] [options]",
     description: "Validate a local behavior spec without executing it.",
     options: [CONFIG_OPTION],
     maxPositionals: 1,
   },
   run: {
-    usage: "tt-local run [tunedtensor.json] [options]",
+    usage: "tt run [tunedtensor.json] [options]",
     description: "Run the baseline, fine-tuning, tuned evaluation, and report workflow.",
     options: [
       CONFIG_OPTION,
@@ -200,7 +200,7 @@ const COMMAND_DEFINITIONS: Record<string, CliCommandDefinition> = {
     maxPositionals: 1,
   },
   serve: {
-    usage: "tt-local serve <model-id|active|base> [options]",
+    usage: "tt serve <model-id|active|base> [options]",
     description: "Serve a verified adapter, the active model, or the protected base.",
     options: MODEL_SERVE_OPTIONS,
     minPositionals: 1,
@@ -214,21 +214,21 @@ const COMMAND_GROUPS: Record<string, CliCommandGroup> = {
     description: "Inspect locally stored runs.",
     defaultSubcommand: "list",
     subcommands: {
-      list: { usage: "tt-local runs list [--config path]", description: "List local runs.", options: [CONFIG_OPTION], maxPositionals: 0 },
-      get: { usage: "tt-local runs get <run-id> [--config path]", description: "Get a local run.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs get requires <run-id>" },
-      events: { usage: "tt-local runs events <run-id> [--config path]", description: "List run events.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs events requires <run-id>" },
-      report: { usage: "tt-local runs report <run-id> [--config path]", description: "Show the baseline-vs-tuned report, including deltas and regressions.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs report requires <run-id>" },
-      compare: { usage: "tt-local runs compare <run-id-a> <run-id-b> [--config path]", description: "Compare two run reports.", options: [CONFIG_OPTION], minPositionals: 2, maxPositionals: 2, missingPositionalsMessage: "runs compare requires <run-id-a> <run-id-b>" },
+      list: { usage: "tt runs list [--config path]", description: "List local runs.", options: [CONFIG_OPTION], maxPositionals: 0 },
+      get: { usage: "tt runs get <run-id> [--config path]", description: "Get a local run.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs get requires <run-id>" },
+      events: { usage: "tt runs events <run-id> [--config path]", description: "List run events.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs events requires <run-id>" },
+      report: { usage: "tt runs report <run-id> [--config path]", description: "Show the baseline-vs-tuned report, including deltas and regressions.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs report requires <run-id>" },
+      compare: { usage: "tt runs compare <run-id-a> <run-id-b> [--config path]", description: "Compare two run reports.", options: [CONFIG_OPTION], minPositionals: 2, maxPositionals: 2, missingPositionalsMessage: "runs compare requires <run-id-a> <run-id-b>" },
     },
   },
   models: {
     description: "Inspect, verify, prefetch, or serve local models.",
     defaultSubcommand: "list",
     subcommands: {
-      list: { usage: "tt-local models list [--config path]", description: "List local models.", options: [CONFIG_OPTION], maxPositionals: 0 },
-      get: { usage: "tt-local models get <model-id> [--config path]", description: "Get a local model.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "models get requires <model-id>" },
+      list: { usage: "tt models list [--config path]", description: "List local models.", options: [CONFIG_OPTION], maxPositionals: 0 },
+      get: { usage: "tt models get <model-id> [--config path]", description: "Get a local model.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "models get requires <model-id>" },
       verify: {
-        usage: "tt-local models verify <model-id-or-artifact-path> [--config path]",
+        usage: "tt models verify <model-id-or-artifact-path> [--config path]",
         description: "Verify a stored model or manifested artifact path.",
         options: [CONFIG_OPTION],
         minPositionals: 1,
@@ -236,25 +236,25 @@ const COMMAND_GROUPS: Record<string, CliCommandGroup> = {
         missingPositionalsMessage: "models verify requires <model-id-or-artifact-path>",
       },
       prefetch: {
-        usage: "tt-local models prefetch [tunedtensor.json] [options]",
+        usage: "tt models prefetch [tunedtensor.json] [options]",
         description: "Download the configured base model before a run.",
         options: [CONFIG_OPTION, VERBOSE_OPTION, QUIET_OPTION],
         maxPositionals: 1,
       },
       "verify-base": {
-        usage: "tt-local models verify-base [tunedtensor.json] [options]",
+        usage: "tt models verify-base [tunedtensor.json] [options]",
         description: "Verify that the configured base-model snapshot is complete and locally available.",
         options: [CONFIG_OPTION, VERBOSE_OPTION, QUIET_OPTION],
         maxPositionals: 1,
       },
       active: {
-        usage: "tt-local models active [--config path]",
+        usage: "tt models active [--config path]",
         description: "Show the active adapter, or the protected base when none is active.",
         options: [CONFIG_OPTION],
         maxPositionals: 0,
       },
       activate: {
-        usage: "tt-local models activate <model-id> [--config path]",
+        usage: "tt models activate <model-id> [--config path]",
         description: "Activate a verified model whose general regression gate passed.",
         options: [CONFIG_OPTION],
         minPositionals: 1,
@@ -262,14 +262,14 @@ const COMMAND_GROUPS: Record<string, CliCommandGroup> = {
         missingPositionalsMessage: "models activate requires <model-id>",
       },
       rollback: {
-        usage: "tt-local models rollback [--config path]",
+        usage: "tt models rollback [--config path]",
         description: "Restore the previously active adapter or protected base.",
         options: [CONFIG_OPTION],
         maxPositionals: 0,
       },
       serve: {
-        usage: "tt-local models serve <model-id|active|base> [options]",
-        description: "Alias for `tt-local serve`.",
+        usage: "tt models serve <model-id|active|base> [options]",
+        description: "Alias for `tt serve`.",
         options: MODEL_SERVE_OPTIONS,
         minPositionals: 1,
         maxPositionals: 1,
@@ -296,11 +296,11 @@ function printCommandHelp(definition: CliCommandDefinition): void {
 }
 
 function printGroupHelp(command: string, group: CliCommandGroup): void {
-  console.log(`Usage: tt-local ${command} <command> [options]\n\n${group.description}\n\nCommands:`);
+  console.log(`Usage: tt ${command} <command> [options]\n\n${group.description}\n\nCommands:`);
   for (const [name, definition] of Object.entries(group.subcommands)) {
     console.log(`  ${name.padEnd(16)} ${definition.description}`);
   }
-  console.log("\nRun `tt-local " + command + " <command> --help` for command-specific help.");
+  console.log("\nRun `tt " + command + " <command> --help` for command-specific help.");
 }
 
 function parseCommandArguments(tokens: string[], definition: CliCommandDefinition): string[] {
@@ -390,7 +390,7 @@ function parseCli(argv: string[]): ParsedCli {
     subcommand = group.defaultSubcommand;
     tokenStart = 3;
   } else {
-    throw new Error(`${command} requires a subcommand. Run 'tt-local ${command} --help'.`);
+    throw new Error(`${command} requires a subcommand. Run 'tt ${command} --help'.`);
   }
   const subcommandDefinition = group.subcommands[subcommand];
   if (!subcommandDefinition) throw new Error(`Unknown ${command} command: ${subcommand}`);

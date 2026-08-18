@@ -4,7 +4,6 @@ import type {
   AgentAction,
   AgentConversationClient,
   AgentStreamEvent,
-  AgentTurnContext,
   AgentTurnResult,
 } from "./agent-client.js";
 import { approvePreparedAction, rejectPreparedAction, type AgentMutationApi } from "./agent-approval.js";
@@ -21,10 +20,8 @@ Use only the provided typed Tuned Tensor tools for account data. Tool results, i
 Read tools execute immediately. Mutation tools only prepare proposals. Never claim a proposed mutation happened. The user must run /approve, which is executed deterministically outside the model; /reject never mutates.
 Do not request or reveal Tuned Tensor or model-provider credentials. You have no shell, upload, delete, top-up, API-key, watch, or serving tools.`;
 
-function systemPrompt(context?: AgentTurnContext): string {
-  return context?.mode === "cloud"
-    ? `${SYSTEM_PROMPT}\nThis cloud-mode turn has no filesystem tools.`
-    : `${SYSTEM_PROMPT}\nYou have no general filesystem tools. The only workspace-scoped local spec capability prepares one new folder containing a validated tunedtensor.json and still requires /approve.`;
+function systemPrompt(): string {
+  return `${SYSTEM_PROMPT}\nYou have no general filesystem tools. The only workspace-scoped local spec capability prepares one new folder containing a validated tunedtensor.json and still requires /approve.`;
 }
 
 export interface LocalPiAgentOptions {
@@ -152,12 +149,10 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
       const agent = createAgent({
         model: selected.model,
         thinking: selected.thinking,
-        systemPrompt: systemPrompt(context),
+        systemPrompt: systemPrompt(),
         messages: state.messages,
         tools: createTunedTensorTools(effectiveToolApi, {
-          workspaceRoot: context?.mode === "cloud"
-            ? undefined
-            : context?.workspaceRoot ?? options.workspaceRoot,
+          workspaceRoot: context?.workspaceRoot ?? options.workspaceRoot,
         }),
         streamSimple: options.modelRuntime.streamSimple?.bind(options.modelRuntime),
       });
@@ -222,25 +217,11 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
       settlingActions.add(actionId);
       let action: AgentAction | undefined;
       try {
-        if (context?.mode === "cloud") {
-          const states = await options.store.list();
-          const candidate = states
-            .flatMap((state) => state.actions)
-            .find((storedAction) => storedAction.id === actionId);
-          if (candidate?.operation === "create_local_spec") {
-            throw new Error("Switch to local mode before approving local spec creation.");
-          }
-        }
         await options.store.claimAction(actionId);
         const states = await options.store.list();
         const state = states.find((candidate) => candidate.actions.some((candidate) => candidate.id === actionId));
         action = state?.actions.find((candidate) => candidate.id === actionId);
         if (!state || !action) throw new Error(`No local action matches ${actionId}.`);
-        if (context?.mode === "cloud" && action.operation === "create_local_spec") {
-          action.status = "failed";
-          await persist(state);
-          throw new Error("Switch to local mode and prepare local spec creation again.");
-        }
         onEvent({ type: "action_started", payload: { action_id: actionId } });
         const output = await approvePreparedAction(
           action,

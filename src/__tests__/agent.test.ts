@@ -148,21 +148,13 @@ describe("TunedTensorAgentSession", () => {
         actions: [action],
       };
     });
-    const { io, stderr } = testIO();
+    const { io } = testIO();
     const session = new TunedTensorAgentSession({ client, io });
     const localContext = { mode: "local" as const, workspaceRoot: "/tmp/workspace" };
 
     await session.handleLine("create a local support spec", localContext);
-    await session.handleLine("/approve", {
-      mode: "cloud",
-      workspaceRoot: "/tmp/workspace",
-    });
-
-    expect(client.approveAction).not.toHaveBeenCalled();
-    expect(session.snapshot().pendingActions).toHaveLength(1);
-    expect(stderr.join(" ")).toMatch(/switch to local mode/i);
-
     await session.handleLine("/approve", localContext);
+
     expect(client.approveAction).toHaveBeenCalledTimes(1);
     expect(session.snapshot().pendingActions).toHaveLength(0);
   });
