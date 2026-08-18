@@ -7,7 +7,6 @@ describe("local-only CLI surface", () => {
     const names = program.commands.map((command) => command.name());
     expect(names).not.toEqual(
       expect.arrayContaining([
-        "auth",
         "push",
         "balance",
         "topup",
@@ -32,6 +31,8 @@ describe("local-only CLI surface", () => {
         "pipeline",
         "status",
         "shell",
+        "auth",
+        "publish",
       ]),
     );
   });

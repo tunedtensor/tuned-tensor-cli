@@ -1,6 +1,6 @@
 import { appendFile, copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { FineTuneRunRequest, RunReport, SpecSnapshot, TrainingReport } from "./contracts.js";
 
@@ -203,6 +203,13 @@ function compareCreatedAt(
 
 function findByIdOrPrefix<T extends { id: string }>(records: T[], id: string): T | undefined {
   return records.find((record) => record.id === id) ?? records.find((record) => record.id.startsWith(id));
+}
+
+function isPathInside(root: string, candidate: string): boolean {
+  const resolvedRoot = resolve(root);
+  const resolvedCandidate = resolve(candidate);
+  return resolvedCandidate === resolvedRoot
+    || resolvedCandidate.startsWith(`${resolvedRoot}${sep}`);
 }
 
 export function createLocalStore(root = defaultLocalHome()): LocalStore {
@@ -628,11 +635,20 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
 
     async getRunReport(id) {
       const state = await getRun(id);
-      if (state.report_path && await exists(state.report_path)) {
-        return readJson<RunReport>(state.report_path);
+      const candidates: string[] = [];
+      if (state.report_path) {
+        const reportPath = resolve(state.report_path);
+        const allowedRoots = [resolvedRoot];
+        if (state.artifact_dir) allowedRoots.push(resolve(state.artifact_dir));
+        if (allowedRoots.some((allowed) => isPathInside(allowed, reportPath))) {
+          candidates.push(reportPath);
+        }
       }
-      const copiedReportPath = runReportPath(state.id);
-      if (await exists(copiedReportPath)) return readJson<RunReport>(copiedReportPath);
+      candidates.push(runReportPath(state.id));
+
+      for (const path of candidates) {
+        if (await exists(path)) return readJson<RunReport>(path);
+      }
       throw new Error(`Run has no report yet: ${id}`);
     },
 

@@ -123,6 +123,19 @@ describe("auth commands", () => {
       expect(config.readConfig()).toEqual({});
     });
 
+    it("preserves agent selection when clearing credentials", async () => {
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      config.writeConfig({
+        api_key: VALID_KEY,
+        agent: { provider: "openai", model: "gpt-5", thinking: "medium" },
+      });
+      const program = buildProgram();
+      await program.parseAsync(["node", "tt", "auth", "logout"]);
+      expect(config.readConfig()).toEqual({
+        agent: { provider: "openai", model: "gpt-5", thinking: "medium" },
+      });
+    });
+
     it("returns one JSON document after clearing credentials", async () => {
       setJsonMode(true);
       const spy = vi.spyOn(console, "log").mockImplementation(() => {});

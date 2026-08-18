@@ -5,7 +5,7 @@ import { Writable } from "node:stream";
 import {
   readConfig,
   updateConfig,
-  clearConfig,
+  writeConfig,
   getApiKey,
   getBaseUrl,
   DEFAULT_BASE_URL,
@@ -110,7 +110,9 @@ export function registerAuthCommands(parent: Command) {
     .command("logout")
     .description("Remove stored credentials")
     .action(() => {
-      clearConfig();
+      const current = readConfig();
+      const { api_key: _removed, ...rest } = current;
+      writeConfig(rest);
       if (isJsonMode()) {
         printJson({ authenticated: false });
         return;
