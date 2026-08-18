@@ -57,7 +57,9 @@ function rows(value: unknown): Record<string, unknown>[] {
 
 function displayId(value: unknown): string {
   const id = text(value);
-  return id ? shortId(id) : "—";
+  if (!id) return "—";
+  if (id.startsWith("local-")) return `local-${shortId(id.slice("local-".length))}`;
+  return shortId(id);
 }
 
 function displayNumber(value: unknown, digits = 4): string | undefined {

@@ -1,11 +1,12 @@
 # DGX Spark
 
 > [!IMPORTANT]
-> `tt-local` is deprecated. Install `@tuned-tensor/cli` and use `tt local`.
-> Existing projects still work.
+> The standalone `tt-local` binary is deprecated. Install `@tuned-tensor/cli`
+> and use `tt`. Existing projects still work; `tt local …` remains a hidden alias.
 
-DGX Spark is the reference host for local text SFT with LoRA adapters. TT Local
-certifies `Qwen/Qwen3.5-2B`, the larger
+DGX Spark is the reference host for local text SFT with LoRA adapters. TT
+certifies `Qwen/Qwen3.5-2B` at snapshot
+`15852e8c16360a2fea060d615a32b45270f8a8fc`, the larger
 `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` checkpoint, and
 `meta-models/Muse-Glimmer-30B`.
 
@@ -27,7 +28,7 @@ for the Hugging Face cache plus run artifacts.
 ```bash
 mkdir -p ~/tuned-tensor-runs/support-adapter
 cd ~/tuned-tensor-runs/support-adapter
-tt local init --name "Support Adapter" --model Qwen/Qwen3.5-2B --profile spark
+tt init --name "Support Adapter" --model Qwen/Qwen3.5-2B --profile spark
 ```
 
 For a Nemotron execution worker:
@@ -35,7 +36,7 @@ For a Nemotron execution worker:
 ```bash
 mkdir -p ~/tuned-tensor-runs/nemotron-worker
 cd ~/tuned-tensor-runs/nemotron-worker
-tt local init \
+tt init \
   --name "Nemotron Worker" \
   --model nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16 \
   --profile spark
@@ -52,7 +53,7 @@ For a Muse Glimmer execution worker:
 ```bash
 mkdir -p ~/tuned-tensor-runs/muse-glimmer-worker
 cd ~/tuned-tensor-runs/muse-glimmer-worker
-tt local init \
+tt init \
   --name "Muse Glimmer Worker" \
   --model meta-models/Muse-Glimmer-30B \
   --profile spark
@@ -97,11 +98,11 @@ source checkout and a custom runner path are neither required nor supported.
 ## Preflight and run
 
 ```bash
-tt local doctor tunedtensor.json
-tt local validate tunedtensor.json
-tt local models prefetch tunedtensor.json
-tt local models verify-base tunedtensor.json
-tt local run tunedtensor.json
+tt doctor tunedtensor.json
+tt validate tunedtensor.json
+tt models prefetch tunedtensor.json
+tt models verify-base tunedtensor.json
+tt run tunedtensor.json
 ```
 
 `doctor` resolves the same bundled project and paths the run will use, imports
@@ -121,14 +122,19 @@ The runner provides these paths to Python:
 ## Verify and serve
 
 ```bash
-tt local runs report <run-id>
-tt local models verify local-<run-id>
-tt local serve local-<run-id> --spec tunedtensor.json --port 8000
+tt runs report <run-id>
+tt models verify local-<run-id>
+tt serve local-<run-id> --spec tunedtensor.json --port 8000
 ```
+
+`tt serve active` fails unless an adapter is activated. Activation requires a
+`generalRegression` suite in `local-runner.json`. Serve a specific adapter
+with `tt serve local-<run-id>` until then.
 
 In another shell:
 
 ```bash
+curl http://127.0.0.1:8000/
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/v1/models
 curl http://127.0.0.1:8000/v1/chat/completions \
@@ -136,8 +142,8 @@ curl http://127.0.0.1:8000/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"Classify: I loved it."}]}'
 ```
 
-If a run fails, start with `tt local runs events <run-id>` and
-`tt local runs get <run-id>`. The run record reports its `artifact_dir`; the
+If a run fails, start with `tt runs events <run-id>` and
+`tt runs get <run-id>`. The run record reports its `artifact_dir`; the
 main subprocess logs there are `training/training.log`,
 `baseline-eval.json.inference.log`, and `candidate-eval.json.inference.log`.
 The adapter is registered as soon as its manifest verifies, even if candidate

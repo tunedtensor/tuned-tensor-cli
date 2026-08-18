@@ -28,8 +28,6 @@ import {
 import { isJsonMode, setJsonMode } from "./output.js";
 import { registerLocalCommands } from "./commands/local.js";
 import { registerAgentCommands } from "./commands/agent.js";
-import { registerAuthCommands } from "./commands/auth.js";
-import { registerPublishCommand } from "./commands/publish.js";
 import { registerPipelineCommands } from "./commands/pipeline.js";
 import { checkForCliUpdate, formatCliUpdateNotice } from "./update-check.js";
 export { extractPassthroughOptions } from "./passthrough.js";
@@ -319,8 +317,6 @@ export function createProgram(
     stdout: runtime.stdout ?? process.stdout,
     stderr: runtime.stderr ?? process.stderr,
   });
-  registerAuthCommands(program);
-  registerPublishCommand(program);
   registerPipelineCommands(program);
   registerAgentCommands(program, {
     env,
@@ -356,19 +352,11 @@ export function createProgram(
   program.addHelpText(
     "after",
     `
-Commands:
-  tt                     Open the conversational terminal (TTY only)
-  tt status              Inspect local project context
-  tt doctor              Check the host and run prerequisites
-  tt run                 Fine-tune and evaluate on your GPU
-  tt auth                Store a dashboard API key
-  tt publish             Upload local run evidence to the dashboard
-
 Examples:
+  tt                     Open the conversational terminal (TTY only)
   tt doctor tunedtensor.json
   tt run tunedtensor.json --dry-run
   tt runs list
-  tt publish --yes
 `,
   );
 

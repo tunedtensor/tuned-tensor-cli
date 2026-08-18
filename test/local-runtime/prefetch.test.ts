@@ -12,6 +12,7 @@ import {
   verifyLocalBaseModel,
   verifyModelPrefetchCacheReport,
 } from "../../src/local-runtime/prefetch.js";
+import { QWEN_3_5_2B_REVISION } from "../../src/local-runtime/model-registry.js";
 import {
   resolveHuggingFaceCacheLayout,
   withHuggingFaceCacheEnvironment,
@@ -19,7 +20,7 @@ import {
 } from "../../src/local-runtime/huggingface-cache.js";
 
 const execFileAsync = promisify(execFile);
-const pinnedRevision = "0123456789abcdef0123456789abcdef01234567";
+const pinnedRevision = QWEN_3_5_2B_REVISION;
 const downloadedRevision = "fedcba9876543210fedcba9876543210fedcba98";
 const nemotronRevision = "ce38b6ab8b252b4b8ee7165b4605e93191cafd73";
 
@@ -51,16 +52,9 @@ const request = fineTuneRunRequestSchema.parse({
   },
 });
 
-test("prefetch payload contains only the certified model, revision, and shared cache", () => {
-  const revised = fineTuneRunRequestSchema.parse({
-    ...request,
-    hyperparameters: {
-      ...request.hyperparameters,
-      base_model_revision: pinnedRevision,
-    },
-  });
+test("prefetch payload defaults Qwen to the reviewed immutable revision", () => {
   assert.deepEqual(buildModelPrefetchPayload(
-    revised,
+    request,
     localRunnerConfigSchema.parse({
       paths: { modelCache: ".cache/huggingface" },
     }),
@@ -69,6 +63,17 @@ test("prefetch payload contains only the certified model, revision, and shared c
     revision: pinnedRevision,
     model_cache: resolve(".cache/huggingface"),
   });
+  const explicit = fineTuneRunRequestSchema.parse({
+    ...request,
+    hyperparameters: {
+      ...request.hyperparameters,
+      base_model_revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    },
+  });
+  assert.throws(
+    () => buildModelPrefetchPayload(explicit, localRunnerConfigSchema.parse({ paths: {} })),
+    /must use certified revision/,
+  );
 });
 
 test("Nemotron prefetch defaults to the reviewed immutable revision", () => {

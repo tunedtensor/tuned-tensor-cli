@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { localRunnerConfigSchema } from "../../src/local-runtime/contracts.js";
+import { QWEN_3_5_2B_REVISION } from "../../src/local-runtime/model-registry.js";
 import {
   buildLocalBaseModelServerLaunch,
   buildLocalModelServerLaunch,
@@ -47,7 +48,6 @@ test("serving launches the bundled text-only Qwen adapter with safe model settin
       maxTokens: 64,
       maxConcurrentRequests: 2,
       baseModelArtifactUri: "file:///tmp/qwen-snapshot",
-      baseModelRevision: "ignored-for-local-snapshot",
     },
   });
 
@@ -59,7 +59,7 @@ test("serving launches the bundled text-only Qwen adapter with safe model settin
   assert.equal(launch.env.TT_MODEL_ARTIFACT, "/tmp/model.tar.gz");
   assert.equal(launch.env.TT_BASE_MODEL, "Qwen/Qwen3.5-2B");
   assert.equal(launch.env.TT_MODEL_SOURCE, "/tmp/qwen-snapshot");
-  assert.equal(launch.env.TT_BASE_MODEL_REVISION, undefined);
+  assert.equal(launch.env.TT_BASE_MODEL_REVISION, QWEN_3_5_2B_REVISION);
   assert.equal(launch.env.TT_MODEL_LOADER, "causal_lm");
   assert.equal(launch.env.TT_TRUST_REMOTE_CODE, "false");
   assert.equal(launch.env.TT_CHAT_TEMPLATE_KWARGS, undefined);
@@ -82,15 +82,12 @@ test("protected-base serving omits the adapter while remaining offline", () => {
         modelCache: "/tmp/huggingface",
       },
     }),
-    options: {
-      baseModelRevision: "0123456789abcdef0123456789abcdef01234567",
-    },
   });
   assert.equal(launch.artifactPath, undefined);
   assert.equal(launch.env.TT_MODEL_ARTIFACT, undefined);
   assert.equal(launch.env.TT_BASE_MODEL, "Qwen/Qwen3.5-2B");
   assert.equal(launch.env.TT_MODEL_SOURCE, "/tmp/qwen-snapshot");
-  assert.equal(launch.env.TT_BASE_MODEL_REVISION, undefined);
+  assert.equal(launch.env.TT_BASE_MODEL_REVISION, QWEN_3_5_2B_REVISION);
   assert.equal(launch.env.HF_HUB_OFFLINE, "1");
   assert.equal(launch.env.TRANSFORMERS_OFFLINE, "1");
   assert.equal(launch.modelName, "base:Qwen/Qwen3.5-2B");

@@ -8,10 +8,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from model_contract import (
+    CERTIFIED_BASE_MODEL,
     MUSE_GLIMMER_BASE_MODEL,
     MUSE_GLIMMER_BASE_MODEL_REVISION,
     NEMOTRON_BASE_MODEL,
     NEMOTRON_BASE_MODEL_REVISION,
+    QWEN_BASE_MODEL_REVISION,
     assert_certified_base_model_revision,
     assert_certified_model_config,
     chat_template_kwargs,
@@ -134,9 +136,12 @@ class ModelContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, NEMOTRON_BASE_MODEL_REVISION):
             assert_certified_base_model_revision(NEMOTRON_BASE_MODEL, "deadbeef" * 5)
 
-    def test_revision_assertion_does_not_pin_the_qwen_model(self) -> None:
-        assert_certified_base_model_revision("Qwen/Qwen3.5-2B", None)
-        assert_certified_base_model_revision("Qwen/Qwen3.5-2B", "any-revision")
+    def test_revision_assertion_pins_the_qwen_model(self) -> None:
+        assert_certified_base_model_revision(CERTIFIED_BASE_MODEL, QWEN_BASE_MODEL_REVISION)
+        with self.assertRaisesRegex(ValueError, "base model revision is required"):
+            assert_certified_base_model_revision(CERTIFIED_BASE_MODEL, None)
+        with self.assertRaisesRegex(ValueError, QWEN_BASE_MODEL_REVISION):
+            assert_certified_base_model_revision(CERTIFIED_BASE_MODEL, "any-revision")
 
     def test_revision_assertion_pins_the_muse_glimmer_model(self) -> None:
         assert_certified_base_model_revision(MUSE_GLIMMER_BASE_MODEL, MUSE_GLIMMER_BASE_MODEL_REVISION)

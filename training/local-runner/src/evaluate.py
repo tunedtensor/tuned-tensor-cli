@@ -93,7 +93,10 @@ def _extract_adapter_archive(path: Path, destination: Path) -> None:
                 raise ValueError(f"Unsafe archive member: {member.name}") from exc
             if member.issym() or member.islnk() or member.isdev():
                 raise ValueError(f"Unsafe archive member type: {member.name}")
-        archive.extractall(destination)
+        try:
+            archive.extractall(destination, filter="data")
+        except TypeError:
+            archive.extractall(destination)
 
 
 def resolve_adapter_path(value: str | None, tmp: Path) -> str | None:

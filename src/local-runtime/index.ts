@@ -48,7 +48,7 @@ export * from "./active-model.js";
 
 export interface LocalRunnerInfo {
   name: "tuned-tensor-local";
-  status: "local-runner-preview";
+  status: "local";
   description: string;
   version: string;
 }
@@ -69,7 +69,7 @@ export const TT_LOCAL_VERSION = packageVersion();
 export function getLocalRunnerInfo(): LocalRunnerInfo {
   return {
     name: "tuned-tensor-local",
-    status: "local-runner-preview",
+    status: "local",
     description: "Local CUDA LoRA fine-tuning with held-out base-versus-tuned evaluation.",
     version: TT_LOCAL_VERSION,
   };
@@ -553,6 +553,19 @@ async function verifyStoredModel(model: LocalModelRecord, config: LocalRunnerCon
 }
 
 async function verifyActivationEvidence(model: LocalModelRecord): Promise<void> {
+  const generalBaseline = join(model.artifact_dir, "general-baseline-eval.json");
+  const generalCandidate = join(model.artifact_dir, "general-candidate-eval.json");
+  const [hasBaseline, hasCandidate] = await Promise.all([
+    stat(generalBaseline).then((metadata) => metadata.isFile(), () => false),
+    stat(generalCandidate).then((metadata) => metadata.isFile(), () => false),
+  ]);
+  if (!hasBaseline || !hasCandidate) {
+    throw new Error(
+      "This model cannot be activated because the run did not include a general-regression suite. "
+      + "Add evaluation.generalRegression to local-runner.json with a held-out dataset, re-run training, then activate. "
+      + "Until then, serve the adapter with `tt serve local-<run-id>`.",
+    );
+  }
   await assertArtifactManifest(join(model.artifact_dir, "artifact-manifest.json"), {
     requiredPaths: [
       "run-report.json",
@@ -739,7 +752,6 @@ async function serveStoredModelFromCli(args: {
     return;
   }
   process.stderr.write(`[tt-local] verified ${verified.integrity.checked} artifact file(s)\n`);
-  process.stderr.write(`[tt-local] model API: ${launch.url}\n`);
   await serveLocalModel(launch);
 }
 
@@ -813,7 +825,6 @@ async function serveBaseModelFromCli(args: {
     });
     return;
   }
-  process.stderr.write(`[tt-local] protected base model API: ${launch.url}\n`);
   await serveLocalModel(launch);
 }
 
@@ -828,7 +839,12 @@ async function serveModelTargetFromCli(args: {
   if (args.target === "active") {
     const store = createLocalStore(args.config.storeRoot);
     const active = await getActiveModel(store);
-    if (!active.model) return serveBaseModelFromCli(args);
+    if (!active.model) {
+      throw new Error(
+        "No adapter is active. `tt serve active` would serve the protected base model. "
+        + "Activate a verified adapter first with `tt models activate <model-id>`, or pass `tt serve base` explicitly.",
+      );
+    }
     return serveStoredModelFromCli({
       argv: args.argv,
       modelId: active.model.id,
@@ -1069,7 +1085,13 @@ async function main(argv: string[]): Promise<void> {
     if (subcommand === "get") {
       const id = cli.positionals[0];
       if (!id) throw new Error("models get requires <model-id>");
-      return printJson(await store.getModel(id));
+      const model = await store.getModel(id);
+      const verified = await verifyStoredModel(model, config);
+      return printJson({
+        ok: true,
+        model,
+        ...verified,
+      });
     }
     if (subcommand === "verify") {
       const id = cli.positionals[0];

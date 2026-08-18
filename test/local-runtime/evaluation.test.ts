@@ -14,6 +14,7 @@ import {
   splitSpecExamples,
   tokenF1,
 } from "../../src/local-runtime/evaluation.js";
+import { QWEN_3_5_2B_REVISION } from "../../src/local-runtime/model-registry.js";
 
 const inheritedPath = process.env.PATH ?? "";
 
@@ -133,7 +134,7 @@ test("Transformers evaluation uses the strict text-only protocol and opaque IDs"
       kind: "candidate",
       modelId: "local-adapter",
       baseModelId: "Qwen/Qwen3.5-2B",
-      baseModelRevision: "0123456789abcdef",
+      baseModelRevision: QWEN_3_5_2B_REVISION,
       adapterPath: `file://${join(root, "adapter")}`,
       examples: [
         { input: "first", output: "one" },
@@ -154,7 +155,7 @@ test("Transformers evaluation uses the strict text-only protocol and opaque IDs"
       await readFile(`${outputPath}.inference-input.json`, "utf8"),
     ) as Record<string, any>;
     assert.equal(payload.protocol_version, INFERENCE_PROTOCOL_VERSION);
-    assert.equal(payload.base_model_revision, "0123456789abcdef");
+    assert.equal(payload.base_model_revision, QWEN_3_5_2B_REVISION);
     assert.equal(payload.model_loader, "causal_lm");
     assert.equal(payload.trust_remote_code, false);
     assert.equal(payload.adapter_path, join(root, "adapter"));
@@ -400,7 +401,7 @@ test("baseline cache reuses a report only for identical stable inputs", async ()
       kind: "baseline" as const,
       modelId: "Qwen/Qwen3.5-2B",
       baseModelId: "Qwen/Qwen3.5-2B",
-      baseModelRevision: "0123456789abcdef",
+      baseModelRevision: QWEN_3_5_2B_REVISION,
       examples: [{ input: "hello", output: "hi" }],
       system: "Answer.",
       config,

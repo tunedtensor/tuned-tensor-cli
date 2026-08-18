@@ -239,9 +239,9 @@ async function verifyCertifiedLocalSnapshot(
   const revision = defaultBaseModelRevision(modelId);
   if (!revision) return;
   const digests = certifiedFileDigests(modelId);
-  if (!digests) {
-    throw new Error(`No certified file digests are registered for pinned model ${modelId}.`);
-  }
+  // Revision pinning and per-file digest manifests are independent. Qwen is
+  // revision-pinned; Nemotron and Muse also ship a certified file list.
+  if (!digests) return;
   if (!modelCache) {
     throw new Error(`A certified local snapshot for ${modelId} requires paths.modelCache.`);
   }

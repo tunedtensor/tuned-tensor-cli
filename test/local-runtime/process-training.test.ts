@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fineTuneRunRequestSchema } from "../../src/local-runtime/contracts.js";
+import { QWEN_3_5_2B_REVISION } from "../../src/local-runtime/model-registry.js";
 import {
   buildTrainingHyperparameters,
   createTrainingProgressForwarder,
@@ -32,11 +33,11 @@ test("builds only the certified Qwen LoRA SFT hyperparameters", () => {
   });
 
   assert.deepEqual(buildTrainingHyperparameters(request, {
-    baseModelRevision: "0123456789abcdef",
+    baseModelRevision: QWEN_3_5_2B_REVISION,
   }), {
     base_model: "Qwen/Qwen3.5-2B",
     model_loader: "causal_lm",
-    base_model_revision: "0123456789abcdef",
+    base_model_revision: QWEN_3_5_2B_REVISION,
     n_epochs: "3",
     learning_rate: "0.00002",
     per_device_train_batch_size: "2",

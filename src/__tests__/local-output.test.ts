@@ -145,7 +145,7 @@ describe("local output primitives", () => {
     const info = [
       "tuned-tensor-local: Local CUDA fine-tuning.",
       "Version: 0.4.0",
-      "Status: local-runner-preview",
+      "Status: local",
       "",
     ].join("\n");
     renderLocalOutput(payload({
@@ -161,7 +161,7 @@ describe("local output primitives", () => {
         name: "tt",
         description: "Local CUDA fine-tuning.",
         version: "0.4.0",
-        status: "local-runner-preview",
+        status: "local",
       },
     });
     expect(localCliTextEnvelope(payload({
@@ -263,6 +263,7 @@ describe("human local rendering", () => {
     const logs = vi.mocked(console.log).mock.calls.flat().join("\n");
     expect(logs).toContain("Support adapter");
     expect(logs).toContain("Qwen/Qwen3.5-2B");
+    expect(logs).toContain("local-5c6a2436");
     expect(logs).toContain("Activated local model");
   });
 

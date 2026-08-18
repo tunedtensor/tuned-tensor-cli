@@ -26,6 +26,7 @@ test("uv bundled local runner paths resolve relative to the package", () => {
   assert.deepEqual(command.commandArgs, [
     "run",
     "--frozen",
+    "--quiet",
     "--project",
     join(repoRoot, "training/local-runner"),
     "python",
@@ -38,6 +39,7 @@ test("uv Python probes use the same locked project", () => {
   assert.deepEqual(command.commandArgs, [
     "run",
     "--frozen",
+    "--quiet",
     "--project",
     join(repoRoot, "training/local-runner"),
     "python",

@@ -114,6 +114,20 @@ function firstLine(value: string): string {
   return value.trim().split(/\r?\n/)[0] ?? "";
 }
 
+function nvidiaSmiSummary(stdout: string): string {
+  const lines = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const queried = lines.find((line) =>
+    !/^(?:mon|tue|wed|thu|fri|sat|sun)\b/i.test(line)
+    && !line.startsWith("+---")
+    && !line.startsWith("|")
+  );
+  if (queried) return queried;
+  return firstLine(stdout) || "nvidia-smi reported a GPU";
+}
+
 function commandText(command: string, args: string[]): string {
   return [command, ...args].map((part) => /\s/.test(part) ? JSON.stringify(part) : part).join(" ");
 }
@@ -301,12 +315,16 @@ export async function runDoctor(config: LocalRunnerConfig, request?: FineTuneRun
 
   const device = config.evaluation.inference.device;
   if (!config.dryRun) {
-    const nvidiaSmi = await runCommand("nvidia-smi", []);
+    const queried = await runCommand("nvidia-smi", [
+      "--query-gpu=name,driver_version",
+      "--format=csv,noheader",
+    ]);
+    const nvidiaSmi = queried.code === 0 ? queried : await runCommand("nvidia-smi", []);
     checks.push({
       name: "nvidia-smi",
       ok: nvidiaSmi.code === 0,
       message: nvidiaSmi.code === 0
-        ? firstLine(nvidiaSmi.stdout)
+        ? nvidiaSmiSummary(nvidiaSmi.stdout)
         : nvidiaSmi.error ?? (firstLine(nvidiaSmi.stderr) || "nvidia-smi not available"),
     });
   } else {

@@ -191,7 +191,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized():
             self.send_json(401, {"error": {"message": "Unauthorized"}})
             return
-        if self.path == "/health":
+        if self.path in {"/", "/health"}:
             self.send_json(200, {"status": "ok", "model": MODEL_NAME, "device": DEVICE})
             return
         if self.path == "/v1/models":
