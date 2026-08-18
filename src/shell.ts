@@ -172,13 +172,11 @@ export function tokenizeShellInput(input: string): string[] {
 }
 
 export interface RoutedShellCommand {
-  target: WorkflowMode;
   args: string[];
 }
 
 export function routeShellCommand(
   input: string,
-  activeMode: WorkflowMode,
 ): RoutedShellCommand | null {
   let args = tokenizeShellInput(input);
   if (args.length === 0) return null;
@@ -191,15 +189,14 @@ export function routeShellCommand(
   if (args[0]?.startsWith("/")) {
     throw new ShellParseError("Slash commands are session commands and cannot be routed to a workflow.");
   }
-
-  const override = args[0];
-  if (override === "cloud" || override === "local") {
-    if (args.length === 1) {
-      throw new ShellParseError(`Add a ${override} command, e.g. \`${override} runs list\`.`);
+  if (args[0] === "local") {
+    args = args.slice(1);
+    if (args.length === 0) {
+      throw new ShellParseError("The TT shell is already local; enter a command such as `runs list`.");
     }
-    return { target: override, args: args.slice(1) };
   }
-  return { target: activeMode, args };
+
+  return { args };
 }
 
 /**
@@ -207,33 +204,25 @@ export function routeShellCommand(
  * preserve the existing shell grammar; everything else can be conversational.
  */
 export function isCatalogCommand(
-  mode: WorkflowMode,
   args: readonly string[],
 ): boolean {
   if (args.length === 0) return false;
+  if (args[0] === "local") {
+    return isCatalogCommand(args.slice(1));
+  }
   if (args[0] === "status") {
     return args.length === 1 || args[1]?.startsWith("-") === true;
   }
   return COMMAND_CATALOG.some((command) => {
-    if (!command.modes.includes(mode)) return false;
     const path = command.path.split(" ");
     return path.every((token, index) => args[index] === token);
   });
 }
 
-function hasCatalogIntent(
-  input: string,
-  activeMode: WorkflowMode,
-): boolean {
+function hasCatalogIntent(input: string): boolean {
   let args = input.trim().split(/\s+/);
   if (args[0] === "tt") args = args.slice(1);
-  const override = args[0];
-  const mode =
-    override === "cloud" || override === "local"
-      ? override
-      : activeMode;
-  if (override === "cloud" || override === "local") args = args.slice(1);
-  return isCatalogCommand(mode, args);
+  return isCatalogCommand(args);
 }
 
 export type SlashCommandName =
@@ -331,7 +320,6 @@ export function parseSlashCommand(input: string): ParsedSlashCommand | null {
 }
 
 export interface ShellCommandRequest {
-  target: WorkflowMode;
   args: string[];
   cwd: string;
 }
@@ -457,8 +445,8 @@ function helpText(mode: WorkflowMode, query?: string, palette = false): string {
   const groups = groupedCatalog(mode, query);
   const lines: string[] = [];
   lines.push(accent.bold(palette
-    ? `Commands for ${mode} — type a command or use cloud/local as a one-shot prefix`
-    : `TT ${mode} commands${query ? ` matching ${JSON.stringify(query)}` : ""}`));
+    ? "Commands — type a command, or prefix with : to make the intent explicit"
+    : `TT commands${query ? ` matching ${JSON.stringify(query)}` : ""}`));
 
   if (groups.size === 0) {
     lines.push(chalk.dim("  No matching commands."));
@@ -714,14 +702,12 @@ export class TunedTensorShellSession {
       case "status":
         assertNoArgs("status", command.args);
         await this.refreshContext();
-        this.writeLines(styleDetailLines(formatShellStatus(this.context, this.mode)));
+        this.writeLines(styleDetailLines(formatShellStatus(this.context)));
         return "continue";
       case "context":
         assertNoArgs("context", command.args);
         await this.refreshContext();
-        this.writeLines(styleDetailLines(
-          formatShellContext(this.context, this.mode, this.modeSource),
-        ));
+        this.writeLines(styleDetailLines(formatShellContext(this.context)));
         return "continue";
       case "model": {
         const runtime = await this.requireAgentModelRuntime();
@@ -815,15 +801,13 @@ export class TunedTensorShellSession {
       if (explicitCommand !== null && !explicitCommand) {
         throw new ShellParseError("Add a TT command after :.");
       }
-      const explicitWorkflowPrefix =
-        /^(?:tt\s+)?(?:cloud|local)(?:\s|$)/.test(trimmed)
-        || /^tt(?:\s|$)/.test(trimmed);
+      const explicitWorkflowPrefix = /^tt(?:\s|$)/.test(trimmed);
 
       if (
         explicitCommand === null
         && !explicitWorkflowPrefix
         && this.agent
-        && !hasCatalogIntent(input, this.mode)
+        && !hasCatalogIntent(input)
       ) {
         await this.agent.handleLine(input, {
           mode: this.mode,
@@ -834,10 +818,9 @@ export class TunedTensorShellSession {
       }
 
       const commandInput = explicitCommand ?? input;
-      const routed = routeShellCommand(commandInput, this.mode);
+      const routed = routeShellCommand(commandInput);
       if (!routed) return "continue";
       await this.runner({
-        target: routed.target,
         args: [...routed.args],
         cwd: this.cwd,
       });

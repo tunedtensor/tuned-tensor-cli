@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.0-beta.0] - 2026-08-18
+
+### Changed
+
+- The CLI is local-only. `tt runs`, `tt models`, `tt init`, `tt doctor`,
+  `tt validate`, `tt run`, and `tt serve` now invoke the local CUDA workflow.
+  Hosted commands (`tt auth`, `tt push`, `tt balance`, `tt topup`, `tt cloud`,
+  and the rest of the managed API tree) are unregistered, not deleted, so they
+  can be restored later.
+- `tt local …` remains as a hidden alias for existing scripts.
+- Root `--api-key` / `--base-url` flags and the `TT_TARGET` override are gone.
+- The interactive shell no longer accepts a `cloud` one-shot prefix.
+
 ## [0.12.0-beta.1] - 2026-08-14
 
 ### Changed

@@ -150,36 +150,33 @@ describe("unified command routing", () => {
     });
   });
 
-  it("keeps hosted commands at the root and offers an explicit cloud alias", async () => {
-    const runSelfCommand = vi.fn(async (
+  it("promotes local commands to the root and hides hosted commands", async () => {
+    const runLocalCommand = vi.fn(async (
       _args: string[],
       _options?: unknown,
     ) => ({
       exitCode: 0,
       signal: null,
+      stdout: "",
+      parsed: undefined,
+      droppedKeys: [],
     }));
     const program = createProgram("test", {
-      runSelfCommand: runSelfCommand as SelfCommandRunner,
+      runLocalCommand: runLocalCommand as never,
     });
     program.exitOverride();
 
-    expect(program.commands.map((command) => command.name())).toEqual(
-      expect.arrayContaining(["runs", "models", "local", "cloud", "shell"]),
+    const names = program.commands.map((command) => command.name());
+    expect(names).toEqual(
+      expect.arrayContaining(["runs", "models", "doctor", "init", "shell", "status"]),
+    );
+    expect(names).not.toEqual(
+      expect.arrayContaining(["auth", "push", "balance", "topup", "cloud", "eval", "specs", "datasets", "label"]),
     );
 
-    await program.parseAsync([
-      "node",
-      "tt",
-      "cloud",
-      "runs",
-      "list",
-      "--json",
-    ]);
-
-    expect(runSelfCommand).toHaveBeenCalledWith(
-      ["--json", "runs", "list"],
-      expect.objectContaining({ cwd: expect.any(String) }),
-    );
+    await program.parseAsync(["node", "tt", "runs", "list", "--json"]);
+    expect(runLocalCommand.mock.calls[0]?.[0]).toEqual(["runs", "list"]);
+    expect(runLocalCommand.mock.calls[0]?.[1]).toMatchObject({ jsonMode: true });
   });
 
   it("isolates shell commands in child tt invocations", async () => {
@@ -194,13 +191,11 @@ describe("unified command routing", () => {
       runner: ShellCommandRunner;
     }) => {
       await options.runner({
-        target: "local",
         args: ["doctor"],
         cwd: "/tmp/tt-project",
       });
       await options.runner({
-        target: "cloud",
-        args: ["auth", "status"],
+        args: ["runs", "list"],
         cwd: "/tmp/tt-project",
       });
     });
@@ -213,38 +208,12 @@ describe("unified command routing", () => {
     await program.parseAsync(["node", "tt", "shell"]);
 
     expect(runSelfCommand.mock.calls.map((call) => call[0])).toEqual([
-      ["local", "doctor"],
-      ["auth", "status"],
+      ["doctor"],
+      ["runs", "list"],
     ]);
   });
 
-  it("applies root cloud overrides to explicit shell context", async () => {
-    const startShell = vi.fn(async () => {});
-    const program = createProgram("test", {
-      env: { HOME: "/tmp/tt-cli-shell-home" },
-      startShell: startShell as never,
-    });
-    program.exitOverride();
-
-    await program.parseAsync([
-      "node",
-      "tt",
-      "--api-key",
-      "tt_test_override",
-      "--base-url",
-      "https://example.test",
-      "shell",
-    ]);
-
-    expect(startShell).toHaveBeenCalledWith(expect.objectContaining({
-      env: expect.objectContaining({
-        TUNED_TENSOR_API_KEY: "tt_test_override",
-        TUNED_TENSOR_URL: "https://example.test",
-      }),
-    }));
-  });
-
-  it("applies root cloud overrides to status discovery", async () => {
+  it("reports local project context from status", async () => {
     const stdout = new PassThrough();
     let output = "";
     stdout.setEncoding("utf8");
@@ -261,49 +230,19 @@ describe("unified command routing", () => {
     await program.parseAsync([
       "node",
       "tt",
-      "--api-key",
-      "tt_test_override",
-      "--base-url",
-      "https://example.test",
       "--json",
       "status",
     ]);
 
     expect(JSON.parse(output)).toMatchObject({
-      target: "local",
       context: {
-        cloud: {
-          authenticated: true,
-          keyPrefix: "tt_test_…",
-          baseUrl: "https://example.test",
+        local: {
+          artifactRoot: expect.any(String),
+          storeRoot: expect.any(String),
         },
       },
     });
-  });
-
-  it("labels an explicit status target as a command option", async () => {
-    const stdout = new PassThrough();
-    let output = "";
-    stdout.setEncoding("utf8");
-    stdout.on("data", (chunk: string) => {
-      output += chunk;
-    });
-    const program = createProgram("test", {
-      cwd: "/tmp",
-      env: { HOME: "/tmp/tt-cli-status-target-home" },
-      stdout,
-    });
-    program.exitOverride();
-
-    await program.parseAsync([
-      "node",
-      "tt",
-      "status",
-      "--target",
-      "local",
-    ]);
-
-    expect(output).toContain("Target         local (--target)");
+    expect(JSON.parse(output).context.cloud).toBeUndefined();
   });
 
   it("checks for updates before starting the bare interactive shell", async () => {
@@ -344,7 +283,7 @@ describe("unified command routing", () => {
     stdout.on("data", (chunk: string) => { output += chunk; });
 
     await runCli("0.10.0", {
-      argv: ["node", "tt", "status", "--target", "local", "--json"],
+      argv: ["node", "tt", "status", "--json"],
       cwd: "/tmp",
       env: { TERM: "xterm-256color", HOME: "/tmp/tt-cli-update-home" },
       stdinIsTTY: true,
@@ -353,7 +292,7 @@ describe("unified command routing", () => {
       checkForUpdate,
     });
 
-    expect(output).toContain('"target": "local"');
+    expect(output).toContain('"storeRoot"');
     expect(checkForUpdate).not.toHaveBeenCalled();
   });
 

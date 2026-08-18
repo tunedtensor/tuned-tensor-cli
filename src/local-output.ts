@@ -455,9 +455,9 @@ export function adaptLocalCliText(value: string): string {
   return value
     .replace(
       /(?<![.@/\w])tuned-tensor-local(?=$|[\s:`\]])/g,
-      "tt local",
+      "tt",
     )
-    .replace(/(?<![.@/\w])tt-local(?=$|[\s:`\]])/g, "tt local");
+    .replace(/(?<![.@/\w])tt-local(?=$|[\s:`\]])/g, "tt");
 }
 
 export function localCliErrorEnvelope(
@@ -469,7 +469,7 @@ export function localCliErrorEnvelope(
   const rawMessage = payload.errorMessage
     ?? (payload.stderr.trim() || undefined)
     ?? lastNonEmptyLine(payload.stdout)
-    ?? `tt local exited with code ${payload.exitCode}.`;
+    ?? `tt exited with code ${payload.exitCode}.`;
   return {
     error: {
       status: null,
@@ -553,7 +553,7 @@ export function renderLocalOutput(
     printError(
       payload.errorMessage
         ? adaptLocalCliText(payload.errorMessage)
-        : `tt local exited with code ${payload.exitCode}.`,
+        : `tt exited with code ${payload.exitCode}.`,
     );
   }
 }

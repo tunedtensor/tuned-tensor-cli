@@ -128,7 +128,7 @@ describe("runLocalCommand", () => {
       args: ["runs", "get", "run-123", "--unknown-local-option=value"],
       cwd: await realpath(root),
     });
-    expect(errors.value()).toContain("tt local progress");
+    expect(errors.value()).toContain("tt progress");
 
     const failed = await runLocalCommand(["info", "--fail"], {
       entrypoint,

@@ -13,7 +13,6 @@ import {
   formatShellContext,
   formatShellStatus,
   redactApiKey,
-  targetFromEnvironment,
 } from "../shell-context.js";
 
 const roots: string[] = [];
@@ -35,11 +34,11 @@ describe("discoverShellContext", () => {
     const root = await temporaryRoot();
     const project = join(root, "support adapter");
     const home = join(root, "home");
-    const cloudConfigDirectory = join(home, ".config", "tuned-tensor");
+    const configDirectory = join(home, ".config", "tuned-tensor");
     const storeRoot = join(project, "state");
     const runId = "11111111-1111-4111-8111-111111111111";
     const fullKey = `tt_${"s".repeat(48)}`;
-    await mkdir(cloudConfigDirectory, { recursive: true });
+    await mkdir(configDirectory, { recursive: true });
     await mkdir(join(storeRoot, "runs", runId), { recursive: true });
     await writeFile(join(project, "tunedtensor.json"), JSON.stringify({
       id: "22222222-2222-4222-8222-222222222222",
@@ -51,7 +50,7 @@ describe("discoverShellContext", () => {
       artifactRoot: "artifacts",
       storeRoot: "state",
     }));
-    await writeFile(join(cloudConfigDirectory, "config.json"), JSON.stringify({
+    await writeFile(join(configDirectory, "config.json"), JSON.stringify({
       api_key: fullKey,
       base_url: "https://api.example.test",
     }));
@@ -70,8 +69,6 @@ describe("discoverShellContext", () => {
       env: { HOME: home },
     });
 
-    expect(context.inferredTarget).toBe("local");
-    expect(context.targetSource).toBe("default-local");
     expect(context.spec).toMatchObject({
       name: "Support Adapter",
       baseModel: "Qwen/Qwen3.5-2B",
@@ -88,20 +85,16 @@ describe("discoverShellContext", () => {
         status: "completed",
       },
     });
-    expect(context.cloud).toMatchObject({
-      authenticated: true,
-      baseUrl: "https://api.example.test",
-      keyPrefix: `${fullKey.slice(0, 8)}…`,
-    });
+    expect(context).not.toHaveProperty("cloud");
     expect(JSON.stringify(context)).not.toContain(fullKey);
   });
 
   it("surfaces the configured agent provider and model", async () => {
     const root = await temporaryRoot();
     const home = join(root, "home");
-    const cloudConfigDirectory = join(home, ".config", "tuned-tensor");
-    await mkdir(cloudConfigDirectory, { recursive: true });
-    await writeFile(join(cloudConfigDirectory, "config.json"), JSON.stringify({
+    const configDirectory = join(home, ".config", "tuned-tensor");
+    await mkdir(configDirectory, { recursive: true });
+    await writeFile(join(configDirectory, "config.json"), JSON.stringify({
       agent: { provider: "anthropic", model: "claude-sonnet-4-5", thinking: "high" },
     }));
 
@@ -115,16 +108,16 @@ describe("discoverShellContext", () => {
       model: "claude-sonnet-4-5",
       thinking: "high",
     });
-    expect(formatShellContext(context, "cloud", context.targetSource).join("\n"))
+    expect(formatShellContext(context).join("\n"))
       .toContain("Agent model    anthropic/claude-sonnet-4-5 (thinking high)");
   });
 
   it("prefers agent environment overrides over stored config", async () => {
     const root = await temporaryRoot();
     const home = join(root, "home");
-    const cloudConfigDirectory = join(home, ".config", "tuned-tensor");
-    await mkdir(cloudConfigDirectory, { recursive: true });
-    await writeFile(join(cloudConfigDirectory, "config.json"), JSON.stringify({
+    const configDirectory = join(home, ".config", "tuned-tensor");
+    await mkdir(configDirectory, { recursive: true });
+    await writeFile(join(configDirectory, "config.json"), JSON.stringify({
       agent: { provider: "anthropic", model: "claude-sonnet-4-5" },
     }));
 
@@ -144,28 +137,7 @@ describe("discoverShellContext", () => {
     });
   });
 
-  it("uses TT_TARGET when valid and reports an invalid override safely", async () => {
-    const root = await temporaryRoot();
-    await writeFile(join(root, "local-runner.json"), "{}");
-
-    const cloud = await discoverShellContext({
-      cwd: root,
-      env: { HOME: join(root, "home"), TT_TARGET: "cloud" },
-    });
-    expect(cloud.inferredTarget).toBe("cloud");
-    expect(cloud.targetSource).toBe("environment");
-
-    const invalid = await discoverShellContext({
-      cwd: root,
-      env: { HOME: join(root, "home"), TT_TARGET: "remote" },
-    });
-    expect(invalid.inferredTarget).toBe("local");
-    expect(invalid.warnings).toContain(
-      'Ignoring invalid TT_TARGET="remote"; use cloud or local.',
-    );
-  });
-
-  it("defaults to local even without an adjacent local config", async () => {
+  it("defaults to the adjacent project directory even without a local config", async () => {
     const root = await temporaryRoot();
     const child = join(root, "child");
     await mkdir(child);
@@ -176,8 +148,6 @@ describe("discoverShellContext", () => {
       env: { HOME: join(root, "home") },
     });
 
-    expect(context.inferredTarget).toBe("local");
-    expect(context.targetSource).toBe("default-local");
     expect(context.local.configPath).toBeUndefined();
   });
 
@@ -192,7 +162,6 @@ describe("discoverShellContext", () => {
       env: { HOME: home },
     });
 
-    expect(context.inferredTarget).toBe("local");
     expect(context.spec).toBeUndefined();
     expect(existsSync(join(project, ".tt-local"))).toBe(false);
     expect(existsSync(home)).toBe(false);
@@ -218,12 +187,10 @@ describe("discoverShellContext", () => {
 });
 
 describe("context helpers", () => {
-  it("redacts keys and parses only supported targets", () => {
+  it("redacts keys without exposing the raw secret", () => {
     expect(redactApiKey("tt_abcdefghijklmnopqrstuvwxyz")).toBe("tt_abcde…");
     expect(redactApiKey("key")).toBe("…");
     expect(redactApiKey(undefined)).toBeUndefined();
-    expect(targetFromEnvironment({ TT_TARGET: " LOCAL " })).toBe("local");
-    expect(targetFromEnvironment({ TT_TARGET: "remote" })).toBeUndefined();
   });
 
   it("formats useful context and status without performing probes", async () => {
@@ -236,13 +203,10 @@ describe("context helpers", () => {
       },
     });
 
-    const contextText = formatShellContext(
-      context,
-      "cloud",
-      context.targetSource,
-    ).join("\n");
-    const statusText = formatShellStatus(context, "local").join("\n");
-    expect(contextText).toContain("Cloud auth     yes (tt_aaaaa…)");
+    const contextText = formatShellContext(context).join("\n");
+    const statusText = formatShellStatus(context).join("\n");
+    expect(contextText).not.toContain("Cloud auth");
+    expect(contextText).not.toContain("Cloud endpoint");
     expect(statusText).toContain("Host checks    not run (use doctor)");
     expect(statusText).not.toContain("nvidia-smi");
   });

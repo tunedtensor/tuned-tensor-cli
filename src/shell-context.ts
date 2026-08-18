@@ -1,11 +1,8 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import type { WorkflowMode } from "./command-catalog.js";
 
-export type TargetSource =
-  | "environment"
-  | "default-local";
+export type TargetSource = "default-local";
 
 export interface ShellSpecContext {
   path: string;
@@ -14,14 +11,6 @@ export interface ShellSpecContext {
   baseModel?: string;
   exampleCount?: number;
   parseError: boolean;
-}
-
-export interface ShellCloudContext {
-  authenticated: boolean;
-  keyPrefix?: string;
-  baseUrl: string;
-  configPath: string;
-  configFound: boolean;
 }
 
 export interface ShellLatestRun {
@@ -48,10 +37,7 @@ export interface ShellAgentContext {
 export interface ShellContext {
   cwd: string;
   projectName: string;
-  inferredTarget: WorkflowMode;
-  targetSource: TargetSource;
   spec?: ShellSpecContext;
-  cloud: ShellCloudContext;
   local: ShellLocalContext;
   agent?: ShellAgentContext;
   warnings: string[];
@@ -109,7 +95,7 @@ function environmentHome(env: Readonly<NodeJS.ProcessEnv>): string {
   return env.HOME ? resolve(env.HOME) : homedir();
 }
 
-function cloudConfigPath(
+function configPath(
   env: Readonly<NodeJS.ProcessEnv>,
   homeDirectory: string,
 ): string {
@@ -140,13 +126,6 @@ export function redactApiKey(key: string | undefined): string | undefined {
     ? 8
     : Math.max(1, Math.floor(key.length / 2));
   return `${key.slice(0, prefixLength)}…`;
-}
-
-export function targetFromEnvironment(
-  env: Readonly<NodeJS.ProcessEnv>,
-): WorkflowMode | undefined {
-  const value = env.TT_TARGET?.trim().toLowerCase();
-  return value === "cloud" || value === "local" ? value : undefined;
 }
 
 async function adjacentFile(path: string): Promise<boolean> {
@@ -256,27 +235,12 @@ export async function discoverShellContext(
       ? expandPath(env.TT_LOCAL_HOME, cwd, homeDirectory)
       : join(homeDirectory, ".tuned-tensor-local");
 
-  const cloudPath = cloudConfigPath(env, homeDirectory);
-  const cloudConfigJson = await readJsonObject(cloudPath);
-  if (cloudConfigJson.invalid) {
-    warnings.push("The Tuned Tensor cloud config could not be parsed.");
+  const storedConfigPath = configPath(env, homeDirectory);
+  const storedConfigJson = await readJsonObject(storedConfigPath);
+  if (storedConfigJson.invalid) {
+    warnings.push("The Tuned Tensor config could not be parsed.");
   }
-  const environmentApiKey = env.TUNED_TENSOR_API_KEY?.trim();
-  const storedApiKey = stringField(cloudConfigJson.value, "api_key");
-  const apiKey = environmentApiKey || storedApiKey;
-  const baseUrl = env.TUNED_TENSOR_URL?.trim()
-    || stringField(cloudConfigJson.value, "base_url")
-    || "https://tunedtensor.com";
-  const agent = agentSelectionFrom(env, cloudConfigJson.value?.agent);
-
-  const environmentTarget = targetFromEnvironment(env);
-  if (env.TT_TARGET && !environmentTarget) {
-    warnings.push(`Ignoring invalid TT_TARGET=${JSON.stringify(env.TT_TARGET)}; use cloud or local.`);
-  }
-  const inferredTarget = environmentTarget ?? "local";
-  const targetSource: TargetSource = environmentTarget
-    ? "environment"
-    : "default-local";
+  const agent = agentSelectionFrom(env, storedConfigJson.value?.agent);
 
   const [activeModelId, latestRun] = await Promise.all([
     readActiveModelId(storeRoot),
@@ -286,16 +250,7 @@ export async function discoverShellContext(
   return {
     cwd,
     projectName: basename(cwd) || cwd,
-    inferredTarget,
-    targetSource,
     spec,
-    cloud: {
-      authenticated: Boolean(apiKey),
-      keyPrefix: redactApiKey(apiKey),
-      baseUrl,
-      configPath: cloudPath,
-      configFound: cloudConfigJson.found,
-    },
     local: {
       configPath: hasAdjacentLocalConfig ? localConfigPath : undefined,
       artifactRoot,
@@ -319,30 +274,13 @@ function agentLabel(context: ShellContext): string {
   return agent.thinking ? `${id} (thinking ${agent.thinking})` : id;
 }
 
-function targetSourceLabel(source: TargetSource): string {
-  switch (source) {
-    case "environment":
-      return "TT_TARGET";
-    default:
-      return "default";
-  }
-}
-
-export function formatShellContext(
-  context: ShellContext,
-  selectedTarget: WorkflowMode,
-  targetSource: TargetSource | "command-option",
-): string[] {
+export function formatShellContext(context: ShellContext): string[] {
   const specLabel = context.spec
     ? context.spec.parseError
       ? `${context.spec.path} (invalid JSON)`
       : context.spec.path
     : "not found";
-  const sourceLabel = targetSource === "command-option"
-    ? "--target"
-    : targetSourceLabel(targetSource);
   const lines = [
-    `Target         ${selectedTarget} (${sourceLabel})`,
     `Project        ${context.projectName}`,
     `Directory      ${context.cwd}`,
     `Spec           ${specLabel}`,
@@ -350,8 +288,6 @@ export function formatShellContext(
     `Base model     ${valueOrDash(context.spec?.baseModel)}`,
     `Examples       ${valueOrDash(context.spec?.exampleCount)}`,
     `Agent model    ${agentLabel(context)}`,
-    `Cloud endpoint ${context.cloud.baseUrl}`,
-    `Cloud auth     ${context.cloud.authenticated ? `yes (${context.cloud.keyPrefix})` : "no"}`,
     `Local config   ${context.local.configPath ?? "not found"}`,
     `Artifact root  ${context.local.artifactRoot}`,
     `Store root     ${context.local.storeRoot}`,
@@ -360,30 +296,15 @@ export function formatShellContext(
   return lines;
 }
 
-export function formatShellStatus(
-  context: ShellContext,
-  selectedTarget: WorkflowMode,
-): string[] {
-  const lines = [
-    `Workflow       ${selectedTarget}`,
+export function formatShellStatus(context: ShellContext): string[] {
+  return [
     `Spec           ${context.spec?.name ?? (context.spec ? "unnamed" : "not found")}`,
     `Agent model    ${agentLabel(context)}`,
+    `Local config   ${context.local.configPath ?? "not found"}`,
+    `Active model   ${context.local.activeModelId ?? "base"}`,
+    `Latest run     ${context.local.latestRun
+      ? `${context.local.latestRun.id} (${context.local.latestRun.status ?? "unknown"})`
+      : "none"}`,
+    "Host checks    not run (use doctor)",
   ];
-  if (selectedTarget === "cloud") {
-    lines.push(
-      `Authentication ${context.cloud.authenticated ? `ready (${context.cloud.keyPrefix})` : "not configured"}`,
-      `Endpoint       ${context.cloud.baseUrl}`,
-      "Remote status  not queried",
-    );
-  } else {
-    lines.push(
-      `Local config   ${context.local.configPath ?? "not found"}`,
-      `Active model   ${context.local.activeModelId ?? "base"}`,
-      `Latest run     ${context.local.latestRun
-        ? `${context.local.latestRun.id} (${context.local.latestRun.status ?? "unknown"})`
-        : "none"}`,
-      "Host checks    not run (use doctor)",
-    );
-  }
-  return lines;
 }

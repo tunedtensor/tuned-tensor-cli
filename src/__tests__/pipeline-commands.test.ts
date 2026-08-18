@@ -18,13 +18,13 @@ describe("pipeline commands", () => {
     try {
       const program = createProgram("test");
       program.exitOverride();
-      await program.parseAsync(["node", "tt", "pipeline", "init", "--target", "cloud", "--file", file]);
-      expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ version: 1, name: "default-cloud" });
+      await program.parseAsync(["node", "tt", "pipeline", "init", "--file", file]);
+      expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({ version: 1, name: "default-local" });
 
       await program.parseAsync(["node", "tt", "--json", "pipeline", "run", "--dry-run", "--file", file]);
       const output = JSON.parse(log.mock.calls.at(-1)?.[0] as string);
       expect(output.dry_run).toBe(true);
-      expect(output.steps[0]).toMatchObject({ id: "baseline", target: "cloud" });
+      expect(output.steps[0]).toMatchObject({ id: "baseline", target: "local" });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -138,6 +138,22 @@ describe("Tuned Tensor agent tools", () => {
     ]);
   });
 
+  it("omits hosted tools in local-only mode", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "tt-agent-local-only-"));
+    try {
+      expect(createTunedTensorTools(fakeApi(), {
+        localOnly: true,
+        workspaceRoot: workspace,
+      }).map((candidate) => candidate.name)).toEqual([
+        "describe_pipeline",
+        "validate_pipeline",
+        "prepare_create_local_spec",
+      ]);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("matches the public run-estimate contract", () => {
     const schema = tool("estimate_run", fakeApi()).parameters;
     expect(Value.Check(schema, {
