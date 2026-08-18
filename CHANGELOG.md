@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.13.0] - 2026-08-18
+
+First stable local-only `tt`. Hosted account commands stay in the tree but
+are unregistered. `tt local …` remains a hidden alias.
+
 ### Changed
 
 - Unregistered `tt auth` and `tt publish` again. Modules stay on disk like

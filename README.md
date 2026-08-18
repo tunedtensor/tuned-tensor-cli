@@ -105,7 +105,7 @@ If a newer stable release is available it recommends
 checks are ignored.
 
 ```text
-tt v0.13.0-beta.1
+tt v0.13.0
 agent anthropic/claude-sonnet-4-5 · workflow model base
 ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
 
