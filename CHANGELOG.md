@@ -6,7 +6,8 @@
 
 - README install now leads with
   `curl -fsSL https://tunedtensor.com/install.sh | sh`. Direct npm install
-  remains documented.
+  remains documented. Version pins use
+  `curl … | TT_VERSION=beta sh` so the variable reaches the installer.
 
 ## [0.13.0-beta.1] - 2026-08-18
 

@@ -27,7 +27,12 @@ The installer bootstraps Node.js 22.19+ if needed, installs
 `@tuned-tensor/cli` with npm `--ignore-scripts`, and falls back to
 `~/.local` when the global npm prefix is not writable. Inspect it first
 with `curl -fsSL https://tunedtensor.com/install.sh | less`. Pin a
-dist-tag or version with `TT_VERSION=beta` or `TT_VERSION=0.13.0`.
+dist-tag or version on `sh`, not `curl`:
+
+```bash
+curl -fsSL https://tunedtensor.com/install.sh | TT_VERSION=beta sh
+curl -fsSL https://tunedtensor.com/install.sh | TT_VERSION=0.13.0 sh
+```
 
 Or install the package directly:
 
