@@ -189,6 +189,12 @@ export function routeShellCommand(
   if (args[0]?.startsWith("/")) {
     throw new ShellParseError("Slash commands are session commands and cannot be routed to a workflow.");
   }
+  if (args[0] === "local") {
+    args = args.slice(1);
+    if (args.length === 0) {
+      throw new ShellParseError("The TT shell is already local; enter a command such as `runs list`.");
+    }
+  }
 
   return { args };
 }
@@ -201,6 +207,9 @@ export function isCatalogCommand(
   args: readonly string[],
 ): boolean {
   if (args.length === 0) return false;
+  if (args[0] === "local") {
+    return isCatalogCommand(args.slice(1));
+  }
   if (args[0] === "status") {
     return args.length === 1 || args[1]?.startsWith("-") === true;
   }

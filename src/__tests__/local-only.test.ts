@@ -43,6 +43,31 @@ describe("local-only CLI surface", () => {
     expect(help).not.toMatch(/--base-url/);
   });
 
+  it("does not expose hosted agent tools on the default client", async () => {
+    const { createTunedTensorTools } = await import("../agent-tools.js");
+    const names = createTunedTensorTools({
+      get: async () => {
+        throw new Error("This build of tt is local-only.");
+      },
+      postRead: async () => {
+        throw new Error("This build of tt is local-only.");
+      },
+      propose: async (action) => action,
+    }, { localOnly: true, workspaceRoot: process.cwd() }).map((tool) => tool.name);
+    expect(names).not.toEqual(expect.arrayContaining([
+      "list_specs",
+      "list_runs",
+      "get_balance",
+      "list_transactions",
+      "prepare_create_spec",
+    ]));
+    expect(names).toEqual(expect.arrayContaining([
+      "describe_pipeline",
+      "validate_pipeline",
+      "prepare_create_local_spec",
+    ]));
+  });
+
   it("routes tt runs list to the local runtime", async () => {
     const runLocalCommand = vi.fn(async (
       _args: string[],

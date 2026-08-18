@@ -50,10 +50,10 @@ describe("local agent conversation client", () => {
             assistantMessageEvent: { type: "text_delta", delta: "Local answer" },
           });
           for (const listener of listeners) await listener({
-            type: "tool_execution_start", toolCallId: "t1", toolName: "list_specs", args: {},
+            type: "tool_execution_start", toolCallId: "t1", toolName: "validate_pipeline", args: {},
           });
           for (const listener of listeners) await listener({
-            type: "tool_execution_end", toolCallId: "t1", toolName: "list_specs",
+            type: "tool_execution_end", toolCallId: "t1", toolName: "validate_pipeline",
             result: { details: {} }, isError: false,
           });
           state.messages.push({ role: "assistant", content: [{ type: "text", text: "Local answer" }] });
@@ -89,10 +89,13 @@ describe("local agent conversation client", () => {
     expect((await client.listThreads())[0]?.id).toBe(thread.id);
     expect((await client.getThread(thread.id)).thread.title).toBe("Inspect specs");
     expect(created[0]?.messages).toEqual([]);
-    expect(created[0]?.tools.map((candidate) => candidate.name)).toContain(
+    expect(created[0]?.tools.map((candidate) => candidate.name)).toEqual([
+      "describe_pipeline",
+      "validate_pipeline",
       "prepare_create_local_spec",
-    );
+    ]);
     expect(created[0]?.systemPrompt).toMatch(/workspace-scoped local spec/i);
+    expect(created[0]?.systemPrompt).toMatch(/no hosted account/i);
     expect(JSON.stringify(created[0])).not.toContain(TT_SECRET);
 
     await client.runTurn(thread.id, "Continue", () => {});

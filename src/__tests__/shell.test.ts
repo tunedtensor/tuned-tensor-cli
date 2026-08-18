@@ -86,8 +86,17 @@ describe("routeShellCommand", () => {
   });
 
   it("strips a redundant tt prefix", () => {
+    expect(routeShellCommand("tt doctor")).toEqual({
+      args: ["doctor"],
+    });
+  });
+
+  it("strips the hidden local alias so the command runs at the top level", () => {
+    expect(routeShellCommand("local runs list")).toEqual({
+      args: ["runs", "list"],
+    });
     expect(routeShellCommand("tt local doctor")).toEqual({
-      args: ["local", "doctor"],
+      args: ["doctor"],
     });
   });
 
@@ -100,6 +109,8 @@ describe("isCatalogCommand", () => {
   it("recognizes existing CLI grammar without treating conversation as commands", () => {
     expect(isCatalogCommand(["runs", "list"])).toBe(true);
     expect(isCatalogCommand(["doctor"])).toBe(true);
+    expect(isCatalogCommand(["local", "runs", "list"])).toBe(true);
+    expect(isCatalogCommand(["local", "doctor"])).toBe(true);
     expect(isCatalogCommand(["show", "my", "latest", "run"])).toBe(false);
     expect(isCatalogCommand(["runs", "please"])).toBe(false);
     expect(isCatalogCommand(["status", "of", "my", "run"])).toBe(false);
@@ -406,6 +417,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     await session.handleLine("Compare accuracy > latency & cost; summarize it.");
     await session.handleLine("status of my latest run");
     await session.handleLine("runs list");
+    await session.handleLine("local runs list");
     await session.handleLine("runs list | cat");
     await session.handleLine(": doctor");
     await session.handleLine("cloud not-a-command");
@@ -427,6 +439,10 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       { mode: "local", workspaceRoot: "/tmp/cloud-project" },
     ]);
     expect(run.mock.calls.map((call) => call[0])).toEqual([
+      {
+        args: ["runs", "list"],
+        cwd: "/tmp/cloud-project",
+      },
       {
         args: ["runs", "list"],
         cwd: "/tmp/cloud-project",
