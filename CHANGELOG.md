@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.13.0-beta.1] - 2026-08-18
+
+### Added
+
+- `tt publish` uploads local run evidence (spec snapshot + run report) to the
+  Tuned Tensor dashboard without starting managed training.
+- Restored `tt auth login|logout|status` so a personal `tt_` API key can be
+  stored for publish. Logout clears only the API key and keeps agent selection.
+
+### Changed
+
+- `tt publish` checks auth and payload size before confirmation, rejects
+  ambiguous run-id prefixes, schema-validates reports, and confines
+  `report_path` reads to the local store or artifact roots.
+
 ## [0.13.0-beta.0] - 2026-08-18
 
 ### Changed
