@@ -316,6 +316,7 @@ test("one-command real runs prefetch and pin an immutable base-model revision", 
       artifactRoot: "artifacts",
       storeRoot: "state",
       dryRun: false,
+      paths: { modelCache: "hf-cache" },
     })}\n`, "utf8");
     await writeFile(specPath, `${JSON.stringify({
       id: "77777777-7777-4777-8777-777777777777",
@@ -348,6 +349,22 @@ const repository = require("node:path").join(hubCache, "models--Qwen--Qwen3.5-2B
 const snapshotPath = require("node:path").join(repository, "snapshots", revision);
 fs.mkdirSync(snapshotPath, { recursive: true });
 fs.mkdirSync(require("node:path").join(repository, "blobs"), { recursive: true });
+fs.writeFileSync(require("node:path").join(snapshotPath, "config.json"), JSON.stringify({
+  architectures: ["Qwen3_5ForConditionalGeneration"],
+  model_type: "qwen3_5",
+  text_config: {
+    model_type: "qwen3_5_text",
+    hidden_size: 2048,
+    num_hidden_layers: 24,
+    num_attention_heads: 8,
+    num_key_value_heads: 2,
+    intermediate_size: 6144,
+    vocab_size: 248320,
+  },
+}));
+fs.writeFileSync(require("node:path").join(snapshotPath, "tokenizer_config.json"), "{}");
+fs.writeFileSync(require("node:path").join(snapshotPath, "tokenizer.json"), "{}");
+fs.writeFileSync(require("node:path").join(snapshotPath, "model.safetensors"), "weights");
 fs.writeFileSync(args[outputIndex + 1], JSON.stringify({
   ok: true,
   base_model: "Qwen/Qwen3.5-2B",
