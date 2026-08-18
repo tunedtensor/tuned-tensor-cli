@@ -253,10 +253,10 @@ describe("renderShellBanner", () => {
       version: "0.6.0",
     });
     const rows = banner.trimEnd().split("\n");
-    expect(rows).toHaveLength(6);
+    expect(rows).toHaveLength(5);
     expect(rows[0]).toContain("tt");
     expect(banner).toContain("v0.6.0");
-    expect(banner).toContain("local");
+    expect(banner).not.toMatch(/no spec/);
     expect(banner).toContain("agent");
     expect(banner).toContain("workflow model");
     expect(banner).toContain("ctrl+c stop/clear");

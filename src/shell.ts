@@ -493,17 +493,11 @@ function agentModelLabel(context: ShellContext): string {
 }
 
 export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
-  const spec = snapshot.context.spec?.name
-    ?? snapshot.context.spec?.path
-    ?? "no spec";
   const heading = snapshot.version
     ? `${accent.bold("tt")} ${chalk.dim(`v${snapshot.version}`)}`
     : accent.bold("tt");
   const lines = [
     heading,
-    `${accent(snapshot.mode)}${chalk.dim(
-      ` · ${snapshot.context.projectName} · ${spec}`,
-    )}`,
     chalk.dim(
       `agent ${agentModelLabel(snapshot.context)} · workflow model ${activeModelLabel(snapshot)}`,
     ),
