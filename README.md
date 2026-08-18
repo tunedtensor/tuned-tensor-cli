@@ -68,7 +68,6 @@ checks are ignored.
 
 ```text
 tt v0.13.0-beta.0
-local · support-agent · tunedtensor.json
 agent anthropic/claude-sonnet-4-5 · workflow model base
 ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
 
