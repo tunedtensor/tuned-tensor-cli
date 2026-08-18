@@ -9,6 +9,7 @@ import {
   type AgentToolApi,
 } from "../agent-tools.js";
 import type { AgentAction } from "../agent-client.js";
+import { projectCloudSpec, projectLocalSpec } from "../project-spec.js";
 
 const SPEC_ID = "251f122f-dd8e-4894-a0ab-99965e976e29";
 
@@ -182,6 +183,22 @@ describe("Tuned Tensor agent tools", () => {
     expect(Value.Check(schema, {
       spec_id: SPEC_ID,
       changes: { eval_cases: [] },
+    })).toBe(false);
+  });
+
+  it("keeps local-only models out of hosted spec boundaries", () => {
+    const museSpec = {
+      name: "Muse local",
+      base_model: "meta-models/Muse-Glimmer-30B",
+      examples: [{ input: "Hello", output: "Hi" }],
+    };
+
+    expect(projectLocalSpec(museSpec).body.base_model)
+      .toBe("meta-models/Muse-Glimmer-30B");
+    expect(() => projectCloudSpec(museSpec))
+      .toThrow(/not supported for hosted training/i);
+    expect(Value.Check(tool("prepare_create_spec", fakeApi()).parameters, {
+      spec: museSpec,
     })).toBe(false);
   });
 

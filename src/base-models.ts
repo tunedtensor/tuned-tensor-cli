@@ -1,18 +1,27 @@
-export const SUPPORTED_BASE_MODELS = [
+export const HOSTED_BASE_MODELS = [
   "google/gemma-4-E2B-it",
   "google/gemma-4-E4B-it",
   "Qwen/Qwen3.5-2B",
   "Qwen/Qwen3-VL-2B-Instruct",
   "Qwen/Qwen3.5-4B",
-  "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
-  "meta-models/Muse-Glimmer-30B",
   "meta-llama/Llama-3.2-3B-Instruct",
   "microsoft/Phi-4-mini-instruct",
   "ibm-granite/granite-3.3-2b-instruct",
   "bigcode/starcoder2-3b",
 ] as const;
 
+export const LOCAL_ONLY_BASE_MODELS = [
+  "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+  "meta-models/Muse-Glimmer-30B",
+] as const;
+
+export const SUPPORTED_BASE_MODELS = [
+  ...HOSTED_BASE_MODELS,
+  ...LOCAL_ONLY_BASE_MODELS,
+] as const;
+
 export type SupportedBaseModel = (typeof SUPPORTED_BASE_MODELS)[number];
+export type HostedBaseModel = (typeof HOSTED_BASE_MODELS)[number];
 
 const BASE_MODEL_ALIASES = new Map<string, SupportedBaseModel>();
 
@@ -77,9 +86,28 @@ export function canonicalizeBaseModel(model: unknown): SupportedBaseModel {
   return canonical;
 }
 
+export function canonicalizeHostedBaseModel(model: unknown): HostedBaseModel {
+  const canonical = canonicalizeBaseModel(model);
+  if (!(HOSTED_BASE_MODELS as readonly string[]).includes(canonical)) {
+    throw new Error(
+      `Base model "${canonical}" is not supported for hosted training. `
+      + `Hosted base models: ${HOSTED_BASE_MODELS.join(", ")}`,
+    );
+  }
+  return canonical as HostedBaseModel;
+}
+
 export function canonicalizeSpecBaseModel<T extends Record<string, unknown>>(body: T): T {
   if ("base_model" in body && body.base_model !== undefined) {
     return { ...body, base_model: canonicalizeBaseModel(body.base_model) };
+  }
+
+  return body;
+}
+
+export function canonicalizeHostedSpecBaseModel<T extends Record<string, unknown>>(body: T): T {
+  if ("base_model" in body && body.base_model !== undefined) {
+    return { ...body, base_model: canonicalizeHostedBaseModel(body.base_model) };
   }
 
   return body;

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Type, type Static, type TSchema } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { AgentAction } from "./agent-client.js";
-import { SUPPORTED_BASE_MODELS } from "./base-models.js";
+import { HOSTED_BASE_MODELS } from "./base-models.js";
 import { canonicalPipeline, createExecutionPlan, validatePipeline } from "./pipeline.js";
 import {
   LocalProjectFolderSchema,
@@ -54,7 +54,7 @@ const RunBody = Type.Object({
   split_ratios: Type.Optional(SplitRatios),
 }, { additionalProperties: false });
 const BaseModel = Type.Union(
-  SUPPORTED_BASE_MODELS.map((model) => Type.Literal(model)),
+  HOSTED_BASE_MODELS.map((model) => Type.Literal(model)),
 );
 const PipelineDocument = Type.Object({
   version: Type.Literal(1),
