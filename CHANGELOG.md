@@ -12,6 +12,8 @@
 - `tt local …` remains as a hidden alias for existing scripts.
 - Root `--api-key` / `--base-url` flags and the `TT_TARGET` override are gone.
 - The interactive shell no longer accepts a `cloud` one-shot prefix.
+- The shell banner no longer prints `local · <project> · <spec>`; that
+  context remains on `/status` and `/context`.
 
 ## [0.12.0-beta.1] - 2026-08-14
 
