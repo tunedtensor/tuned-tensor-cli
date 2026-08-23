@@ -7,6 +7,7 @@ import { test } from "node:test";
 import {
   defaultNanochatLifecycleConfig,
   NANOCHAT_LIFECYCLE_STAGES,
+  nanochatLifecycleConfigSchema,
   runNanochatLifecycle,
   type NanochatSourceIdentity,
 } from "../../src/local-runtime/nanochat-lifecycle.js";
@@ -32,7 +33,12 @@ test("runs the bounded nanochat lifecycle and hashes every stage artifact", asyn
     await mkdir(checkout);
     await writeFile(python, "fake python\n");
     await chmod(python, 0o700);
-    const config = defaultNanochatLifecycleConfig({ checkout, revision, python, artifactRoot });
+    const defaults = defaultNanochatLifecycleConfig({ checkout, revision, python, artifactRoot });
+    assert.equal(defaults.rl.enabled, false);
+    const config = nanochatLifecycleConfigSchema.parse({
+      ...defaults,
+      rl: { ...defaults.rl, enabled: true },
+    });
     const commands: Array<{ stage: string; args: string[] }> = [];
     const audit = await runNanochatLifecycle(config, {
       runId: "11111111-1111-4111-8111-111111111111",
@@ -71,6 +77,15 @@ test("runs the bounded nanochat lifecycle and hashes every stage artifact", asyn
               "evaluation dataset",
             );
           }
+          if (stage === "rl") {
+            await mkdir(join(baseDir, "chatrl_checkpoints", config.pretrain.modelTag), { recursive: true });
+            await writeFile(join(baseDir, "chatrl_checkpoints", config.pretrain.modelTag, "model_000001.pt"), "rl");
+            await mkdir(join(baseDir, "task_data", "openai--gsm8k", "main", "train"), { recursive: true });
+            await writeFile(
+              join(baseDir, "task_data", "openai--gsm8k", "main", "train", "00000.parquet"),
+              "rl dataset",
+            );
+          }
           if (args.logPath) await writeFile(args.logPath, `${stage} completed\n`);
           return { exitCode: 0, stderr: "" };
         },
@@ -85,10 +100,11 @@ test("runs the bounded nanochat lifecycle and hashes every stage artifact", asyn
       "allenai/ai2_arc",
     ]);
     assert.deepEqual(audit.stages.map((stage) => stage.id), [...NANOCHAT_LIFECYCLE_STAGES]);
-    assert.equal(audit.stages.find((stage) => stage.id === "rl")?.status, "skipped");
+    assert.equal(audit.stages.find((stage) => stage.id === "rl")?.status, "completed");
     assert.ok(audit.stages.find((stage) => stage.id === "data")?.outputs.some((file) => file.path.endsWith("shard_00000.parquet")));
     assert.ok(audit.stages.find((stage) => stage.id === "sft")?.outputs.some((file) => file.path.includes("smol-smoltalk")));
     assert.ok(audit.stages.find((stage) => stage.id === "chat_eval")?.outputs.some((file) => file.path.includes("ai2_arc")));
+    assert.ok(audit.stages.find((stage) => stage.id === "rl")?.outputs.some((file) => file.path.includes("gsm8k/main/train")));
     assert.ok(audit.stages.find((stage) => stage.id === "sft")?.outputs.every((file) => file.sha256.length === 64));
     assert.deepEqual(commands.map((command) => command.stage), [
       "nanochat:data",
@@ -98,7 +114,11 @@ test("runs the bounded nanochat lifecycle and hashes every stage artifact", asyn
       "nanochat:base_eval",
       "nanochat:sft",
       "nanochat:chat_eval",
+      "nanochat:rl",
       "nanochat:inference",
+    ]);
+    assert.deepEqual(commands.find((command) => command.stage === "nanochat:inference")?.args.slice(2, 6), [
+      "-i", "rl", "-g", config.pretrain.modelTag,
     ]);
     const stored = JSON.parse(await readFile(join(audit.artifact_root, "lifecycle.json"), "utf8"));
     assert.equal(stored.status, "completed");
@@ -107,7 +127,7 @@ test("runs the bounded nanochat lifecycle and hashes every stage artifact", asyn
     assert.deepEqual(JSON.parse(storedConfig.toString("utf8")), config);
     assert.equal(stored.config_sha256, createHash("sha256").update(storedConfig).digest("hex"));
     const packaged = JSON.parse(await readFile(join(audit.artifact_root, "package.json"), "utf8"));
-    assert.equal(packaged.source, "sft");
+    assert.equal(packaged.source, "rl");
     assert.equal(packaged.source_revision, revision);
   } finally {
     await rm(root, { recursive: true, force: true });

@@ -535,7 +535,10 @@ function stageDefinitions(config: NanochatLifecycleConfig): StageDefinition[] {
         "--save-every=10000000",
         "--run=dummy",
       ],
-      outputPaths: (baseDir) => [join(baseDir, "chatrl_checkpoints", tag)],
+      outputPaths: (baseDir) => [
+        join(baseDir, "chatrl_checkpoints", tag),
+        join(baseDir, "task_data"),
+      ],
     },
     {
       id: "inference",
