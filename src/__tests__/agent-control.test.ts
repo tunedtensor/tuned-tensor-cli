@@ -93,13 +93,12 @@ describe("listAgentProviders", () => {
       hasConfiguredAuth: (provider) => provider === "anthropic",
     });
     expect(listAgentProviders(runtime)).toEqual([
-      { id: "anthropic", name: "Anthropic", authenticated: true },
       { id: "openai", name: "OpenAI", authenticated: false },
       { id: "openrouter", name: "OpenRouter", authenticated: false },
+      { id: "anthropic", name: "Anthropic", authenticated: true },
       { id: "groq", name: "Groq", authenticated: false },
     ]);
     expect(listAgentProviders(runtime, { featuredOnly: true })).toEqual([
-      { id: "anthropic", name: "Anthropic", authenticated: true },
       { id: "openai", name: "OpenAI", authenticated: false },
       { id: "openrouter", name: "OpenRouter", authenticated: false },
     ]);

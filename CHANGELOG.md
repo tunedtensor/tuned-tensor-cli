@@ -14,7 +14,7 @@
 
 - Interactive `tt` is the first onboarding step. The unconfigured shell banner
   and chat hint point at `/model` instead of requiring `tt agent configure`
-  first. `/model` and `/login` show Anthropic, OpenAI, Google, and OpenRouter.
+  first. `/model` and `/login` show OpenAI and OpenRouter.
   `/model` suggests `openai/gpt-5.6-sol` and OpenRouter DeepSeek V4 Flash.
   Other catalog providers remain available as `/model <id>` or `/login <id>`.
   `/model <provider>` lists that provider's models. `tt agent configure`

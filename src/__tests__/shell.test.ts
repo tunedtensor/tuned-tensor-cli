@@ -565,8 +565,9 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       let output = await run("/model");
       expect(output).toContain("Agent model");
       expect(output).toContain("Providers");
-      expect(output).toContain("anthropic");
       expect(output).toContain("openai");
+      expect(output).toContain("openrouter");
+      expect(output).not.toContain("anthropic");
       expect(output).not.toContain("groq");
       expect(output).toContain("Other providers: /login <id> or /model <id>");
       expect(output).toMatch(/openai[\s\S]*auth required/);
@@ -708,6 +709,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       await session.handleLine("/login");
       expect(stdout.join("")).toContain("Providers");
       expect(stdout.join("")).toContain("openai");
+      expect(stdout.join("")).not.toContain("anthropic");
       expect(stdout.join("")).not.toContain("groq");
       expect(stdout.join("")).toContain("Other providers: /login <id>");
       expect(prompts).toEqual(["Provider: ", "OpenAI API key: "]);

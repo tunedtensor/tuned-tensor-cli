@@ -90,17 +90,17 @@ ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
 
 Use /model to choose a provider and model. Workflow commands work now.
 › /model
-› /login anthropic
-› /model anthropic
-› /model anthropic/claude-sonnet-4-5
+› /login openai
+› /model openai
+› /model openai/gpt-5.6-sol
 ```
 
 Use `/login` to save a provider API key. The shell asks which provider, then
 prompts for the key with hidden input and stores it under TT's local agent
 config. `/login <provider>` skips the provider prompt.
 `tt` does not accept provider secrets as flags and does not read
-`~/.pi/agent/`. `/model` and `/login` show Anthropic, OpenAI, Google, and
-OpenRouter. Other catalog providers remain available if you type their id.
+`~/.pi/agent/`. `/model` and `/login` show OpenAI and OpenRouter.
+Other catalog providers remain available if you type their id.
 Unauthenticated entries are marked `auth required`. Local endpoints such as
 Ollama still need a placeholder `apiKey` in `models.json`.
 

@@ -21,9 +21,7 @@ import {
 
 /** Providers shown in `/login` and `/model` so onboarding stays short. */
 export const FEATURED_AGENT_PROVIDERS = [
-  "anthropic",
   "openai",
-  "google",
   "openrouter",
 ] as const;
 
