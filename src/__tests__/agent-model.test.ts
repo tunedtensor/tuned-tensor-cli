@@ -1,18 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   createPiModelRuntime,
+  getAgentModelsPath,
   resolveAgentModel,
   type AgentModelRuntime,
 } from "../agent-model.js";
 
-const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+const originalConfigHome = process.env.XDG_CONFIG_HOME;
+const originalPiAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 afterEach(() => {
-  if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-  else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+  if (originalConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = originalConfigHome;
+  if (originalPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = originalPiAgentDir;
 });
 
 const model = {
@@ -30,6 +34,23 @@ function runtime(overrides: Partial<AgentModelRuntime> = {}): AgentModelRuntime 
     hasConfiguredAuth: vi.fn(() => true),
     ...overrides,
   };
+}
+
+function isolatedConfigHome(): string {
+  const root = mkdtempSync(join(tmpdir(), "tt-agent-runtime-"));
+  process.env.XDG_CONFIG_HOME = root;
+  return root;
+}
+
+function ttModelsPath(xdg: string): string {
+  return join(xdg, "tuned-tensor", "agent", "models.json");
+}
+
+function writeTtModels(xdg: string, contents: string): string {
+  const modelsPath = ttModelsPath(xdg);
+  mkdirSync(dirname(modelsPath), { recursive: true });
+  writeFileSync(modelsPath, contents);
+  return modelsPath;
 }
 
 describe("local agent model resolution", () => {
@@ -65,8 +86,7 @@ describe("local agent model resolution", () => {
   });
 
   it("loads the production provider catalog without credentials or network", async () => {
-    const agentDir = mkdtempSync(join(tmpdir(), "tt-pi-runtime-"));
-    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const xdg = isolatedConfigHome();
     try {
       const fetchSpy = vi.spyOn(globalThis, "fetch");
       const productionRuntime = await createPiModelRuntime();
@@ -74,18 +94,30 @@ describe("local agent model resolution", () => {
       expect(productionRuntime.getModels().length).toBeGreaterThan(0);
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally {
-      rmSync(agentDir, { recursive: true, force: true });
+      rmSync(xdg, { recursive: true, force: true });
+    }
+  });
+
+  it("stores provider files under the TT config dir, not Pi's agent dir", async () => {
+    const xdg = isolatedConfigHome();
+    const piDir = mkdtempSync(join(tmpdir(), "tt-pi-agent-"));
+    process.env.PI_CODING_AGENT_DIR = piDir;
+    try {
+      await createPiModelRuntime();
+      expect(getAgentModelsPath()).toBe(ttModelsPath(xdg));
+      expect(existsSync(ttModelsPath(xdg))).toBe(true);
+      expect(readdirSync(piDir)).toEqual([]);
+    } finally {
+      rmSync(xdg, { recursive: true, force: true });
+      rmSync(piDir, { recursive: true, force: true });
     }
   });
 
   it("adds OpenRouter app attribution headers to models.json", async () => {
-    const agentDir = mkdtempSync(join(tmpdir(), "tt-pi-runtime-"));
-    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const xdg = isolatedConfigHome();
     try {
       await createPiModelRuntime();
-      const modelsJson = JSON.parse(
-        readFileSync(join(agentDir, "models.json"), "utf-8"),
-      );
+      const modelsJson = JSON.parse(readFileSync(ttModelsPath(xdg), "utf-8"));
       expect(modelsJson.providers.openrouter.headers).toEqual({
         "HTTP-Referer": "https://tunedtensor.com",
         "X-OpenRouter-Title": "Tuned Tensor",
@@ -93,16 +125,15 @@ describe("local agent model resolution", () => {
         "X-Title": "Tuned Tensor",
       });
     } finally {
-      rmSync(agentDir, { recursive: true, force: true });
+      rmSync(xdg, { recursive: true, force: true });
     }
   });
 
   it("preserves existing models.json config when adding OpenRouter headers", async () => {
-    const agentDir = mkdtempSync(join(tmpdir(), "tt-pi-runtime-"));
-    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const xdg = isolatedConfigHome();
     try {
-      writeFileSync(
-        join(agentDir, "models.json"),
+      const modelsPath = writeTtModels(
+        xdg,
         JSON.stringify({
           providers: {
             openrouter: {
@@ -119,9 +150,7 @@ describe("local agent model resolution", () => {
         }),
       );
       const runtime = await createPiModelRuntime();
-      const modelsJson = JSON.parse(
-        readFileSync(join(agentDir, "models.json"), "utf-8"),
-      );
+      const modelsJson = JSON.parse(readFileSync(modelsPath, "utf-8"));
       expect(modelsJson.providers.openrouter.headers).toEqual({
         "X-Custom": "keep-me",
         "HTTP-Referer": "https://tunedtensor.com",
@@ -138,21 +167,18 @@ describe("local agent model resolution", () => {
         "http://localhost:11434/v1",
       );
     } finally {
-      rmSync(agentDir, { recursive: true, force: true });
+      rmSync(xdg, { recursive: true, force: true });
     }
   });
 
   it("leaves an unparseable models.json untouched", async () => {
-    const agentDir = mkdtempSync(join(tmpdir(), "tt-pi-runtime-"));
-    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const xdg = isolatedConfigHome();
     try {
-      writeFileSync(join(agentDir, "models.json"), "{ not json");
+      const modelsPath = writeTtModels(xdg, "{ not json");
       await createPiModelRuntime();
-      expect(readFileSync(join(agentDir, "models.json"), "utf-8")).toBe(
-        "{ not json",
-      );
+      expect(readFileSync(modelsPath, "utf-8")).toBe("{ not json");
     } finally {
-      rmSync(agentDir, { recursive: true, force: true });
+      rmSync(xdg, { recursive: true, force: true });
     }
   });
 });

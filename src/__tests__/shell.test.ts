@@ -262,8 +262,25 @@ describe("renderShellBanner", () => {
     expect(banner).toContain("agent");
     expect(banner).toContain("workflow model");
     expect(banner).toContain("ctrl+c stop/clear");
-    expect(banner).toContain("Ask TT anything");
+    expect(banner).toContain("Use /model to choose a provider and model");
+    expect(banner).toContain("Workflow commands work now");
+    expect(banner).not.toContain("Ask TT anything");
     expect(banner).not.toContain("██");
+  });
+
+  it("asks for a prompt once a provider and model are selected", () => {
+    const banner = renderShellBanner({
+      mode: "local",
+      modeSource: "default-local",
+      cwd: "/tmp/local-project",
+      context: {
+        ...fakeContext("/tmp/local-project"),
+        agent: { provider: "anthropic", model: "claude-sonnet-4-5" },
+      },
+      version: "0.6.0",
+    });
+    expect(banner).toContain("Ask TT anything. Known commands run directly.");
+    expect(banner).not.toContain("Use /model to choose");
   });
 
   it("omits the version when none is provided", () => {
@@ -493,19 +510,21 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     process.env.XDG_CONFIG_HOME = configRoot;
     const stdout: string[] = [];
     const stderr: string[] = [];
+    const models = [
+      { id: "claude-sonnet-4-5", provider: "anthropic", name: "Claude Sonnet 4.5", reasoning: true },
+      { id: "claude-haiku-4-5", provider: "anthropic", name: "Claude Haiku 4.5", reasoning: false },
+      { id: "gpt-5.2", provider: "openai", name: "GPT 5.2", reasoning: true },
+    ];
     const modelRuntime = {
-      getProviders: () => [{ id: "anthropic", name: "Anthropic" }],
-      getModels: () => [
-        { id: "claude-sonnet-4-5", provider: "anthropic", name: "Claude Sonnet 4.5", reasoning: true },
-        { id: "claude-haiku-4-5", provider: "anthropic", name: "Claude Haiku 4.5", reasoning: false },
+      getProviders: () => [
+        { id: "anthropic", name: "Anthropic" },
+        { id: "openai", name: "OpenAI" },
       ],
-      getModel: (provider: string, model: string) => ({
-        id: model,
-        provider,
-        name: model === "claude-sonnet-4-5" ? "Claude Sonnet 4.5" : "Claude Haiku 4.5",
-        reasoning: model !== "claude-haiku-4-5",
-      }),
-      hasConfiguredAuth: () => true,
+      getModels: (provider?: string) =>
+        provider ? models.filter((model) => model.provider === provider) : models,
+      getModel: (provider: string, model: string) =>
+        models.find((candidate) => candidate.provider === provider && candidate.id === model),
+      hasConfiguredAuth: (provider: string) => provider === "anthropic",
     };
     const session = await createShellSession({
       cwd: "/tmp/local-project",
@@ -529,8 +548,20 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     try {
       let output = await run("/model");
       expect(output).toContain("Agent model");
+      expect(output).toContain("Providers");
+      expect(output).toContain("anthropic");
+      expect(output).toContain("openai");
+      expect(output).toMatch(/openai[\s\S]*auth required/);
       expect(output).toContain("Available models");
       expect(output).toContain("anthropic/claude-sonnet-4-5");
+      expect(output).toContain("openai/gpt-5.2");
+      expect(output).toMatch(/openai\/gpt-5\.2[\s\S]*auth required/);
+
+      output = await run("/model anthropic");
+      expect(output).toContain("Models from anthropic");
+      expect(output).toContain("anthropic/claude-sonnet-4-5");
+      expect(output).toContain("anthropic/claude-haiku-4-5");
+      expect(output).not.toContain("openai/gpt-5.2");
 
       output = await run("/model sonnet");
       expect(output).toContain('Models matching "sonnet"');

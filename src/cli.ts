@@ -10,8 +10,7 @@ import { LocalAgentStore } from "./agent-store.js";
 import { createPiModelRuntime, type AgentModelRuntime } from "./agent-model.js";
 import type { AgentToolApi } from "./agent-tools.js";
 import type { AgentMutationApi } from "./agent-approval.js";
-import { getApiKey, getAgentSelection, getConfigDir, getConfigRevision } from "./config.js";
-import { join } from "node:path";
+import { getApiKey, getAgentSelection, getAgentConfigDir, getConfigRevision } from "./config.js";
 import { TunedTensorAgentSession } from "./agent.js";
 import { executeLocalCommand } from "./local-runner.js";
 import {
@@ -102,7 +101,7 @@ async function createDefaultAgentClient(
   const selection = getAgentSelection(env);
   if (!selection) {
     throw new Error(
-      "The laptop-local agent is not configured. Run `tt agent models --all`, then `tt agent configure --provider <provider> --model <model>`.",
+      "The laptop-local agent is not configured. Use /model to choose a provider and model, then try again.",
     );
   }
   const modelRuntime = await getModelRuntime();
@@ -114,7 +113,7 @@ async function createDefaultAgentClient(
     .map(([, value]) => value!)
     .filter((value) => value.length >= 8 && value !== secret);
   return createLocalAgentClient({
-    store: runtime.agentStore ?? new LocalAgentStore(join(getConfigDir(), "agent"), {
+    store: runtime.agentStore ?? new LocalAgentStore(getAgentConfigDir(), {
       secretValues: [...(secret ? [secret] : []), ...providerSecrets],
     }),
     workspaceRoot,

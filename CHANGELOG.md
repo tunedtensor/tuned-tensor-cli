@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## [0.13.1-beta.0] - 2026-08-23
+
+### Changed
+
+- Interactive `tt` is the first onboarding step. The unconfigured shell banner
+  and chat hint point at `/model` instead of requiring `tt agent configure`
+  first. `/model` lists providers (including unauthenticated ones, marked
+  `auth required`) and `/model <provider>` lists that provider's models.
+  `tt agent configure` remains the non-interactive path.
+- Provider `auth.json` and `models.json` now live under
+  `~/.config/tuned-tensor/agent/` (or the XDG equivalent). `tt` no longer
+  reads or writes `~/.pi/agent/`.
+
 ## [0.13.0] - 2026-08-18
 
 First stable local-only `tt`. Hosted account commands stay in the tree but

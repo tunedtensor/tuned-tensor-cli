@@ -1,10 +1,7 @@
-import {
-  getAgentDir,
-  ModelRuntime,
-} from "@earendil-works/pi-coding-agent";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { AgentSelection, AgentThinkingLevel } from "./config.js";
+import { getAgentConfigDir, type AgentSelection, type AgentThinkingLevel } from "./config.js";
 
 export interface AgentProviderInfo {
   id: string;
@@ -69,15 +66,27 @@ export function resolveAgentModelDefinition(
   return { model, thinking: selection.thinking };
 }
 
+export function getAgentAuthPath(): string {
+  return join(getAgentConfigDir(), "auth.json");
+}
+
+export function getAgentModelsPath(): string {
+  return join(getAgentConfigDir(), "models.json");
+}
+
 export async function createPiModelRuntime(): Promise<ModelRuntime> {
-  const agentDir = getAgentDir();
-  const modelsPath = join(agentDir, "models.json");
+  const agentDir = getAgentConfigDir();
+  ensurePrivateDir(agentDir);
+  const modelsPath = getAgentModelsPath();
+  const authPath = getAgentAuthPath();
   ensureOpenRouterAppHeaders(modelsPath);
-  return await ModelRuntime.create({
-    authPath: join(agentDir, "auth.json"),
+  const runtime = await ModelRuntime.create({
+    authPath,
     modelsPath,
     allowModelNetwork: false,
   });
+  if (existsSync(authPath)) chmodSync(authPath, 0o600);
+  return runtime;
 }
 
 /**
@@ -93,6 +102,17 @@ const OPENROUTER_APP_HEADERS: Record<string, string> = {
   "X-OpenRouter-Categories": "cli-agent",
   "X-Title": "Tuned Tensor",
 };
+
+function ensurePrivateDir(dir: string): void {
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+}
+
+function writePrivateJson(path: string, value: unknown): void {
+  ensurePrivateDir(dirname(path));
+  writeFileSync(path, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
+  chmodSync(path, 0o600);
+}
 
 function ensureOpenRouterAppHeaders(modelsPath: string): void {
   let config: Record<string, unknown> = {};
@@ -126,6 +146,5 @@ function ensureOpenRouterAppHeaders(modelsPath: string): void {
   Object.assign(headers, OPENROUTER_APP_HEADERS);
 
   if (JSON.stringify(config) === before) return;
-  mkdirSync(dirname(modelsPath), { recursive: true });
-  writeFileSync(modelsPath, JSON.stringify(config, null, 2) + "\n");
+  writePrivateJson(modelsPath, config);
 }

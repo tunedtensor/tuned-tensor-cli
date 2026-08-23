@@ -41,6 +41,11 @@ export function getConfigDir(): string {
   return join(base, CONFIG_DIR_NAME);
 }
 
+/** Provider auth, custom models, and local conversation state. */
+export function getAgentConfigDir(): string {
+  return join(getConfigDir(), "agent");
+}
+
 function getConfigPath(): string {
   return join(getConfigDir(), CONFIG_FILE_NAME);
 }

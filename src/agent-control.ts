@@ -17,6 +17,12 @@ import {
  * over these functions.
  */
 
+export interface AgentProviderChoice {
+  id: string;
+  name: string;
+  authenticated: boolean;
+}
+
 export interface AgentModelChoice {
   provider: string;
   id: string;
@@ -78,6 +84,28 @@ function modelRelevance(
   if (fullId.includes(q)) return 3;
   if (name.includes(q)) return 4;
   return undefined;
+}
+
+export function listAgentProviders(
+  runtime: AgentModelRuntime,
+): AgentProviderChoice[] {
+  return runtime
+    .getProviders()
+    .map((provider): AgentProviderChoice => ({
+      id: provider.id,
+      name: provider.name ?? provider.id,
+      authenticated: runtime.hasConfiguredAuth(provider.id),
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+export function findAgentProvider(
+  runtime: AgentModelRuntime,
+  id: string,
+): AgentProviderChoice | undefined {
+  const needle = id.trim().toLowerCase();
+  if (!needle) return undefined;
+  return listAgentProviders(runtime).find((provider) => provider.id.toLowerCase() === needle);
 }
 
 export function listAgentModels(

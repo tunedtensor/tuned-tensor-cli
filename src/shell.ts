@@ -20,8 +20,13 @@ import {
 } from "./shell-context.js";
 import {
   describeAgentModel,
+  findAgentProvider,
   listAgentModels,
+  listAgentProviders,
   setAgentModel,
+  type AgentModelChoice,
+  type AgentModelSummary,
+  type AgentProviderChoice,
 } from "./agent-control.js";
 import type { AgentModelRuntime } from "./agent-model.js";
 
@@ -496,6 +501,9 @@ export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
   const heading = snapshot.version
     ? `${accent.bold("tt")} ${chalk.dim(`v${snapshot.version}`)}`
     : accent.bold("tt");
+  const configured = Boolean(
+    snapshot.context.agent?.provider && snapshot.context.agent?.model,
+  );
   const lines = [
     heading,
     chalk.dim(
@@ -503,7 +511,11 @@ export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
     ),
     chalk.dim("ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete"),
     "",
-    chalk.dim("Ask TT anything. Known commands run directly."),
+    chalk.dim(
+      configured
+        ? "Ask TT anything. Known commands run directly."
+        : "Use /model to choose a provider and model. Workflow commands work now.",
+    ),
   ];
   return `${lines.join("\n")}\n\n`;
 }
@@ -633,32 +645,45 @@ export class TunedTensorShellSession {
     const lines = styleDetailLines([
       detailLine("Agent model", label),
       detailLine("Change", "/model <provider>/<model>"),
+      detailLine("List", "/model <provider>"),
       detailLine("Search", "/model <query>"),
     ]);
 
-    const all = listAgentModels(runtime);
-    if (all.length === 0) {
-      lines.push("", chalk.dim("  no authenticated models — run `tt agent models --all` for the full catalog"));
-      return lines;
-    }
-
-    if (query) {
-      const matches = listAgentModels(runtime, { query });
-      lines.push("", chalk.bold(`Models matching ${JSON.stringify(query)}`));
+    const catalog = { includeUnauthenticated: true } as const;
+    const provider = query ? findAgentProvider(runtime, query) : undefined;
+    if (provider) {
+      const matches = listAgentModels(runtime, { ...catalog, provider: provider.id });
+      lines.push("", chalk.bold(`Models from ${provider.id}`));
+      this.appendAgentModelChoices(lines, matches, summary, 20);
       if (matches.length === 0) {
-        lines.push(chalk.dim("  no matches"));
-      } else {
-        const shown = matches.slice(0, 10);
-        for (const model of shown) {
-          lines.push(this.formatAgentModelChoice(model, summary));
-        }
-        if (matches.length > shown.length) {
-          lines.push(chalk.dim(`  … ${matches.length - shown.length} more — refine the query`));
-        }
+        lines.push(chalk.dim("  no models"));
       }
       return lines;
     }
 
+    if (query) {
+      const matches = listAgentModels(runtime, { ...catalog, query });
+      lines.push("", chalk.bold(`Models matching ${JSON.stringify(query)}`));
+      this.appendAgentModelChoices(lines, matches, summary, 10);
+      if (matches.length === 0) {
+        lines.push(chalk.dim("  no matches"));
+      } else if (matches.length > 10) {
+        lines.push(chalk.dim(`  … ${matches.length - 10} more — refine the query`));
+      }
+      return lines;
+    }
+
+    const providers = listAgentProviders(runtime);
+    lines.push("", chalk.bold("Providers"));
+    if (providers.length === 0) {
+      lines.push(chalk.dim("  no providers in the catalog"));
+    } else {
+      for (const choice of providers) {
+        lines.push(this.formatAgentProviderChoice(choice));
+      }
+    }
+
+    const all = listAgentModels(runtime, catalog);
     const preferred = summary
       ? all.filter((model) => model.provider === summary.provider)
       : [];
@@ -667,22 +692,41 @@ export class TunedTensorShellSession {
       : all;
     const shown = [...preferred, ...rest].slice(0, 8);
     lines.push("", chalk.bold(summary ? "Suggestions" : "Available models"));
-    for (const model of shown) {
-      lines.push(this.formatAgentModelChoice(model, summary));
-    }
-    if (all.length > shown.length) {
-      lines.push(chalk.dim(`  … ${all.length - shown.length} more — /model <query> to search`));
+    this.appendAgentModelChoices(lines, shown, summary);
+    if (all.length === 0) {
+      lines.push(chalk.dim("  no models in the catalog"));
+    } else if (all.length > shown.length) {
+      lines.push(chalk.dim(`  … ${all.length - shown.length} more — /model <provider> to list, /model <query> to search`));
     }
     return lines;
   }
 
+  private appendAgentModelChoices(
+    lines: string[],
+    models: readonly AgentModelChoice[],
+    summary: AgentModelSummary | undefined,
+    limit?: number,
+  ): void {
+    const shown = limit ? models.slice(0, limit) : models;
+    for (const model of shown) {
+      lines.push(this.formatAgentModelChoice(model, summary));
+    }
+  }
+
+  private formatAgentProviderChoice(provider: AgentProviderChoice): string {
+    const displayName = provider.name !== provider.id ? `  ${provider.name}` : "";
+    const auth = provider.authenticated ? "" : chalk.dim("  auth required");
+    return `  ${accent(provider.id)}${displayName}${auth}`;
+  }
+
   private formatAgentModelChoice(
-    model: { provider: string; id: string; name: string },
+    model: AgentModelChoice,
     summary: { provider: string; model: string } | undefined,
   ): string {
     const active = summary?.provider === model.provider && summary?.model === model.id;
     const displayName = model.name !== model.id ? `  ${model.name}` : "";
-    return `  ${accent(`${model.provider}/${model.id}`)}${displayName}${active ? chalk.dim(" (active)") : ""}`;
+    const auth = model.authenticated ? "" : chalk.dim("  auth required");
+    return `  ${accent(`${model.provider}/${model.id}`)}${displayName}${active ? chalk.dim(" (active)") : ""}${auth}`;
   }
 
   private async handleSlash(command: ParsedSlashCommand): Promise<ShellLineAction> {
@@ -711,7 +755,7 @@ export class TunedTensorShellSession {
           return "continue";
         }
         if (command.args.length !== 1) {
-          throw new ShellParseError("Usage: /model [<query> | <provider>/<model>]");
+          throw new ShellParseError("Usage: /model [<query> | <provider> | <provider>/<model>]");
         }
         const target = command.args[0]!;
         const slash = target.indexOf("/");

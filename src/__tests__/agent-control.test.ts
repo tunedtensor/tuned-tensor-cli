@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   describeAgentModel,
+  findAgentProvider,
   listAgentModels,
+  listAgentProviders,
   setAgentModel,
 } from "../agent-control.js";
 import type { AgentModelRuntime } from "../agent-model.js";
@@ -79,6 +81,21 @@ describe("listAgentModels", () => {
 
     const all = listAgentModels(runtime, { includeUnauthenticated: true });
     expect(all.some((model) => model.provider === "openrouter")).toBe(true);
+  });
+});
+
+describe("listAgentProviders", () => {
+  it("lists providers with auth state and matches an exact provider id", () => {
+    const runtime = makeRuntime({
+      hasConfiguredAuth: (provider) => provider === "anthropic",
+    });
+    expect(listAgentProviders(runtime)).toEqual([
+      { id: "anthropic", name: "Anthropic", authenticated: true },
+      { id: "openai", name: "OpenAI", authenticated: false },
+      { id: "openrouter", name: "OpenRouter", authenticated: false },
+    ]);
+    expect(findAgentProvider(runtime, "Anthropic")?.id).toBe("anthropic");
+    expect(findAgentProvider(runtime, "sonnet")).toBeUndefined();
   });
 });
 
