@@ -88,6 +88,8 @@ describe("local agent model resolution", () => {
       );
       expect(modelsJson.providers.openrouter.headers).toEqual({
         "HTTP-Referer": "https://tunedtensor.com",
+        "X-OpenRouter-Title": "Tuned Tensor",
+        "X-OpenRouter-Categories": "cli-agent",
         "X-Title": "Tuned Tensor",
       });
     } finally {
@@ -103,20 +105,35 @@ describe("local agent model resolution", () => {
         join(agentDir, "models.json"),
         JSON.stringify({
           providers: {
-            openrouter: { headers: { "X-Custom": "keep-me" } },
+            openrouter: {
+              headers: {
+                "X-Custom": "keep-me",
+                "http-referer": "https://user.example",
+                "x-OpenRouter-title": "User title",
+                "X-OPENROUTER-CATEGORIES": "general-chat",
+                "x-title": "Legacy user title",
+              },
+            },
             ollama: { baseUrl: "http://localhost:11434/v1" },
           },
         }),
       );
-      await createPiModelRuntime();
+      const runtime = await createPiModelRuntime();
       const modelsJson = JSON.parse(
         readFileSync(join(agentDir, "models.json"), "utf-8"),
       );
       expect(modelsJson.providers.openrouter.headers).toEqual({
         "X-Custom": "keep-me",
         "HTTP-Referer": "https://tunedtensor.com",
+        "X-OpenRouter-Title": "Tuned Tensor",
+        "X-OpenRouter-Categories": "cli-agent",
         "X-Title": "Tuned Tensor",
       });
+      const openRouterModel = runtime.getModels("openrouter")[0];
+      expect(openRouterModel).toBeDefined();
+      await runtime.setRuntimeApiKey("openrouter", "synthetic-test-key");
+      const auth = await runtime.getAuth(openRouterModel!);
+      expect(auth?.auth.headers).toEqual(modelsJson.providers.openrouter.headers);
       expect(modelsJson.providers.ollama.baseUrl).toBe(
         "http://localhost:11434/v1",
       );
