@@ -720,7 +720,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       stdout.length = 0;
       stderr.length = 0;
       await session.handleLine("/login missing");
-      expect(stderr.join("")).toMatch(/Unknown provider "missing"/);
+      expect(stderr.join("")).toMatch(/Unknown provider "missing".*\/login <id> or \/model <id>/);
 
       stdout.length = 0;
       stderr.length = 0;

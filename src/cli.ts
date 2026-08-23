@@ -7,7 +7,7 @@ import {
 } from "./agent-client.js";
 import { createLocalAgentClient, type LocalPiAgent, type LocalPiAgentOptions } from "./local-agent-client.js";
 import { LocalAgentStore } from "./agent-store.js";
-import { createPiModelRuntime, type AgentModelRuntime } from "./agent-model.js";
+import { createPiModelRuntime, readStoredProviderSecrets, type AgentModelRuntime } from "./agent-model.js";
 import type { AgentToolApi } from "./agent-tools.js";
 import type { AgentMutationApi } from "./agent-approval.js";
 import { getApiKey, getAgentSelection, getAgentConfigDir, getConfigRevision } from "./config.js";
@@ -115,6 +115,7 @@ async function createDefaultAgentClient(
   return createLocalAgentClient({
     store: runtime.agentStore ?? new LocalAgentStore(getAgentConfigDir(), {
       secretValues: [...(secret ? [secret] : []), ...providerSecrets],
+      secretValueProvider: readStoredProviderSecrets,
     }),
     workspaceRoot,
     selection,

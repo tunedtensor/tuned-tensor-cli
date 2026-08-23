@@ -3,6 +3,7 @@ import {
   getAgentAuthPath,
   resolveAgentModel,
   resolveAgentModelDefinition,
+  unknownAgentProviderMessage,
   type AgentModelRuntime,
 } from "./agent-model.js";
 import {
@@ -238,7 +239,7 @@ export async function loginAgentProvider(
 ): Promise<{ provider: string }> {
   const choice = findAgentProvider(runtime, provider);
   if (!choice) {
-    throw new Error(`Unknown provider "${provider}". Use /model to list providers.`);
+    throw new Error(unknownAgentProviderMessage(provider));
   }
   const key = apiKey.trim();
   if (!key) {

@@ -99,4 +99,37 @@ describe("local agent store", () => {
     for (const id of actionIds) await store.claimAction(id);
     expect(readdirSync(join(root, "action-claims"))).toHaveLength(2);
   });
+
+  it("re-reads provider secrets on each persist so later login keys are redacted", async () => {
+    const stored = ["sk-login-old-secret"];
+    const store = new LocalAgentStore(root, {
+      secretValueProvider: () => stored,
+    });
+    const thread = {
+      id: THREAD_ID,
+      title: "Inspect runs",
+      status: "active" as const,
+      last_message_at: "2026-08-09T10:00:00.000Z",
+      created_at: "2026-08-09T10:00:00.000Z",
+      updated_at: "2026-08-09T10:00:00.000Z",
+    };
+    await store.save({
+      thread,
+      messages: [{ role: "user", content: "old sk-login-old-secret new sk-login-new-secret" }],
+      actions: [],
+    });
+    const file = join(root, "threads", `${THREAD_ID}.json`);
+    expect(readFileSync(file, "utf8")).not.toContain("sk-login-old-secret");
+    expect(readFileSync(file, "utf8")).toContain("sk-login-new-secret");
+
+    stored.push("sk-login-new-secret");
+    await store.save({
+      thread,
+      messages: [{ role: "user", content: "old sk-login-old-secret new sk-login-new-secret" }],
+      actions: [],
+    });
+    expect(readFileSync(file, "utf8")).not.toContain("sk-login-old-secret");
+    expect(readFileSync(file, "utf8")).not.toContain("sk-login-new-secret");
+    expect(readFileSync(file, "utf8")).toContain("[REDACTED]");
+  });
 });

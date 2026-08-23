@@ -18,6 +18,26 @@ export async function promptHiddenInput(
   return await promptInput(message, true, input, output);
 }
 
+/**
+ * Pause() does not detach stdin keypress handlers. A nested readline on the
+ * same TTY otherwise receives each key twice (op → oopp).
+ */
+export async function withDetachedKeypress<T>(
+  input: NodeJS.EventEmitter,
+  run: () => Promise<T>,
+): Promise<T> {
+  const listeners = [...input.listeners("keypress")];
+  input.removeAllListeners("keypress");
+  try {
+    return await run();
+  } finally {
+    input.removeAllListeners("keypress");
+    for (const listener of listeners) {
+      input.on("keypress", listener);
+    }
+  }
+}
+
 async function promptInput(
   message: string,
   hidden: boolean,
@@ -31,35 +51,37 @@ async function promptInput(
     throw new Error("Provider login needs an interactive tt session.");
   }
 
-  if (!hidden) {
-    const rl = createInterface({ input, output, terminal: true });
+  return await withDetachedKeypress(input, async () => {
+    if (!hidden) {
+      const rl = createInterface({ input, output, terminal: true });
+      try {
+        return await rl.question(message);
+      } finally {
+        rl.close();
+      }
+    }
+
+    let muted = false;
+    const maskedOutput = new Writable({
+      write(chunk, _encoding, callback) {
+        if (!muted) output.write(chunk);
+        callback();
+      },
+    });
+    const rl = createInterface({
+      input,
+      output: maskedOutput,
+      terminal: true,
+    });
+
     try {
-      return await rl.question(message);
+      const pending = rl.question(message);
+      muted = true;
+      return await pending;
     } finally {
+      muted = false;
+      output.write("\n");
       rl.close();
     }
-  }
-
-  let muted = false;
-  const maskedOutput = new Writable({
-    write(chunk, _encoding, callback) {
-      if (!muted) output.write(chunk);
-      callback();
-    },
   });
-  const rl = createInterface({
-    input,
-    output: maskedOutput,
-    terminal: true,
-  });
-
-  try {
-    const pending = rl.question(message);
-    muted = true;
-    return await pending;
-  } finally {
-    muted = false;
-    output.write("\n");
-    rl.close();
-  }
 }

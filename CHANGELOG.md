@@ -21,11 +21,17 @@
   remains the non-interactive path.
 - Provider `auth.json` and `models.json` now live under
   `~/.config/tuned-tensor/agent/` (or the XDG equivalent). `tt` no longer
-  reads or writes `~/.pi/agent/`. Missing-auth errors point at `/login`
-  instead of environment variables or hand-editing that file.
+  reads or writes `~/.pi/agent/`. Missing-auth errors tell you to open the
+  `tt` shell and run `/login` instead of pointing at environment variables
+  or hand-editing that file. Unknown-provider errors point at
+  `/login <id>` or `/model <id>`.
 
 ### Fixed
 
+- `/login` no longer doubles typed characters on the provider and API key
+  prompts (the shell readline was still listening while a nested prompt ran).
+- Thread persistence redacts API keys and OAuth tokens stored by `/login`,
+  including keys saved later in the same `tt` session.
 - `/model <provider>` notes when the catalog is truncated.
 - README no longer says local endpoints such as Ollama can be selected
   without a key.

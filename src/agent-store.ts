@@ -28,6 +28,8 @@ export interface StoredAgentThread {
 
 export interface LocalAgentStoreOptions {
   secretValues?: readonly string[];
+  /** Re-read on each persist so /login keys saved later are still redacted. */
+  secretValueProvider?: () => readonly string[];
   maxThreadBytes?: number;
   maxMessages?: number;
   maxActions?: number;
@@ -63,6 +65,7 @@ export class LocalAgentStore {
   private readonly threadsDir: string;
   private readonly claimsDir: string;
   private readonly secrets: readonly string[];
+  private readonly secretValueProvider: (() => readonly string[]) | undefined;
   private readonly maxThreadBytes: number;
   private readonly maxMessages: number;
   private readonly maxActions: number;
@@ -76,6 +79,7 @@ export class LocalAgentStore {
     this.threadsDir = join(rootDir, "threads");
     this.claimsDir = join(rootDir, "action-claims");
     this.secrets = options.secretValues?.filter(Boolean) ?? [];
+    this.secretValueProvider = options.secretValueProvider;
     this.maxThreadBytes = options.maxThreadBytes ?? DEFAULT_MAX_THREAD_BYTES;
     this.maxMessages = options.maxMessages ?? DEFAULT_MAX_MESSAGES;
     this.maxActions = options.maxActions ?? DEFAULT_MAX_ACTIONS;
@@ -84,7 +88,13 @@ export class LocalAgentStore {
   }
 
   redact<T>(value: T): T {
-    return scrub(value, this.secrets) as T;
+    let extra: readonly string[] = [];
+    try {
+      extra = this.secretValueProvider?.() ?? [];
+    } catch {
+      extra = [];
+    }
+    return scrub(value, [...this.secrets, ...extra]) as T;
   }
 
   private async ensureDirectories(): Promise<void> {

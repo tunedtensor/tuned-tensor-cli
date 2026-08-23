@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import {
   createPiModelRuntime,
   getAgentModelsPath,
+  readStoredProviderSecrets,
   resolveAgentModel,
   type AgentModelRuntime,
 } from "../agent-model.js";
@@ -73,7 +74,7 @@ describe("local agent model resolution", () => {
       provider: "anthropic",
       model: "claude-sonnet-4-5",
       thinking: "medium",
-    })).toThrow(/not authenticated.*\/login anthropic/i);
+    })).toThrow(/not authenticated.*Open the tt shell and run \/login anthropic/i);
   });
 
   it("rejects a thinking level unsupported by the selected model", () => {
@@ -185,6 +186,40 @@ describe("local agent model resolution", () => {
       const modelsPath = writeTtModels(xdg, "{ not json");
       await createPiModelRuntime();
       expect(readFileSync(modelsPath, "utf-8")).toBe("{ not json");
+    } finally {
+      rmSync(xdg, { recursive: true, force: true });
+    }
+  });
+
+  it("reads API keys and OAuth tokens from auth.json for thread redaction", () => {
+    const xdg = isolatedConfigHome();
+    try {
+      const authPath = join(xdg, "tuned-tensor", "agent", "auth.json");
+      mkdirSync(dirname(authPath), { recursive: true });
+      writeFileSync(authPath, JSON.stringify({
+        openai: { type: "api_key", key: "sk-login-openai-key" },
+        openrouter: { type: "oauth", access: "or-access-token-value", refresh: "or-refresh-token-value", expires: 1 },
+        groq: { type: "api_key", key: "short" },
+        broken: "not-an-object",
+      }));
+      expect(readStoredProviderSecrets()).toEqual([
+        "sk-login-openai-key",
+        "or-access-token-value",
+        "or-refresh-token-value",
+      ]);
+    } finally {
+      rmSync(xdg, { recursive: true, force: true });
+    }
+  });
+
+  it("returns no stored secrets when auth.json is missing or unreadable", () => {
+    const xdg = isolatedConfigHome();
+    try {
+      expect(readStoredProviderSecrets()).toEqual([]);
+      const authPath = join(xdg, "tuned-tensor", "agent", "auth.json");
+      mkdirSync(dirname(authPath), { recursive: true });
+      writeFileSync(authPath, "{ not json");
+      expect(readStoredProviderSecrets()).toEqual([]);
     } finally {
       rmSync(xdg, { recursive: true, force: true });
     }

@@ -161,7 +161,7 @@ describe("loginAgentProvider", () => {
   it("rejects an unknown provider, empty key, or runtime that cannot store credentials", async () => {
     const runtime = makeRuntime();
     await expect(loginAgentProvider(runtime, "missing", "sk-test"))
-      .rejects.toThrow(/unknown provider "missing"/i);
+      .rejects.toThrow(/unknown provider "missing".*\/login <id> or \/model <id>/i);
     await expect(loginAgentProvider(runtime, "anthropic", "   "))
       .rejects.toThrow(/cannot be empty/i);
     await expect(loginAgentProvider(runtime, "anthropic", "sk-test"))

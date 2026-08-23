@@ -30,7 +30,7 @@ import {
   type AgentModelSummary,
   type AgentProviderChoice,
 } from "./agent-control.js";
-import type { AgentModelRuntime } from "./agent-model.js";
+import { unknownAgentProviderMessage, type AgentModelRuntime } from "./agent-model.js";
 import { promptHiddenInput, promptVisibleInput } from "./secret-prompt.js";
 
 export type { WorkflowMode } from "./command-catalog.js";
@@ -817,9 +817,7 @@ export class TunedTensorShellSession {
         }
         const provider = findAgentProvider(runtime, providerId);
         if (!provider) {
-          throw new ShellParseError(
-            `Unknown provider "${providerId}". Use /model to list providers.`,
-          );
+          throw new ShellParseError(unknownAgentProviderMessage(providerId));
         }
         if (!this.io.promptSecret) {
           throw new ShellParseError("Provider login needs an interactive tt session.");
@@ -1041,6 +1039,8 @@ export async function startInteractiveShell(
       output: NodeJS.WritableStream,
     ) => Promise<string>,
   ): Promise<string> => {
+    // pause() is not enough: the nested prompt must also detach stdin
+    // keypress listeners or each key is applied twice (op → oopp).
     readline?.pause();
     const restoreRawMode = terminalInput.isRaw === true
       && typeof terminalInput.setRawMode === "function";

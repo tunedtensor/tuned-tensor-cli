@@ -24,7 +24,47 @@ export interface AgentModelRuntime {
 }
 
 export function missingProviderAuthMessage(provider: string): string {
-  return `Provider "${provider}" is not authenticated. Use /login ${provider} to save a key, then try again.`;
+  return `Provider "${provider}" is not authenticated. Open the tt shell and run /login ${provider} to save a key, then try again.`;
+}
+
+export function unknownAgentProviderMessage(provider: string): string {
+  return `Unknown provider "${provider}". Use /login <id> or /model <id>.`;
+}
+
+const MIN_REDACTED_SECRET_LENGTH = 8;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function pushSecret(secrets: string[], value: unknown): void {
+  if (typeof value !== "string") return;
+  const secret = value.trim();
+  if (secret.length < MIN_REDACTED_SECRET_LENGTH) return;
+  if (!secrets.includes(secret)) secrets.push(secret);
+}
+
+/** API keys and OAuth tokens from TT's agent auth file, for thread redaction. */
+export function readStoredProviderSecrets(authPath = getAgentAuthPath()): string[] {
+  if (!existsSync(authPath)) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(authPath, "utf-8"));
+  } catch {
+    return [];
+  }
+  if (!isRecord(parsed)) return [];
+  const secrets: string[] = [];
+  for (const credential of Object.values(parsed)) {
+    if (!isRecord(credential)) continue;
+    if (credential.type === "api_key") {
+      pushSecret(secrets, credential.key);
+    } else if (credential.type === "oauth") {
+      pushSecret(secrets, credential.access);
+      pushSecret(secrets, credential.refresh);
+    }
+  }
+  return secrets;
 }
 
 export interface ResolvedAgentModel {
