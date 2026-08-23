@@ -129,6 +129,36 @@ describe("pipeline commands", () => {
     }
   });
 
+  it("rejects a leftover foundation pipeline file when --spec is adapter", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tt-pipeline-"));
+    const spec = join(dir, "tunedtensor.json");
+    const pipeline = join(dir, "tunedtensor.pipeline.json");
+    writeFileSync(
+      spec,
+      JSON.stringify({
+        name: "adapter-spec",
+        base_model: "Qwen/Qwen3.5-2B",
+        system_prompt: "Answer questions.",
+        guidelines: [],
+        constraints: [],
+        examples: [
+          { input: "hello", output: "world" },
+          { input: "thanks", output: "you are welcome" },
+        ],
+      }),
+    );
+    const program = createProgram("test");
+    program.exitOverride();
+    try {
+      await program.parseAsync(["node", "tt", "pipeline", "init", "--engine", "foundation", "--file", pipeline]);
+      await expect(
+        program.parseAsync(["node", "tt", "pipeline", "validate", "--spec", spec, "--file", pipeline]),
+      ).rejects.toThrow(/is a foundation recipe/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects run requests without --dry-run in this side-effect-free slice", async () => {
     const program = createProgram("test");
     program.exitOverride();

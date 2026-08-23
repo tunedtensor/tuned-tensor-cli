@@ -44,6 +44,14 @@ function pipelineFromSpec(input: Extract<LocalRunInput, { kind: "foundation-spec
   return pipelineFromFoundationHyperparameters(input.spec.name, input.spec.foundation);
 }
 
+function isParsedFoundationPipeline(document: unknown): boolean {
+  try {
+    return isFoundationPipeline(parsePipeline(document));
+  } catch {
+    return false;
+  }
+}
+
 async function resolvePipelineDocument(options: { file: string; spec?: string }): Promise<unknown> {
   const filePath = resolve(options.file);
   const fileExists = existsSync(filePath);
@@ -53,7 +61,7 @@ async function resolvePipelineDocument(options: { file: string; spec?: string })
   if (specInput?.kind === "foundation-spec") {
     if (fileExists) {
       const document = loadPipelineFile(options.file);
-      if (isFoundationPipeline(parsePipeline(document))) return document;
+      if (isParsedFoundationPipeline(document)) return document;
       throw new Error(
         `Pipeline file ${options.file} is an adapter recipe, but ${options.spec} is a foundation spec. Use a foundation pipeline, omit --file, or pass an adapter spec.`,
       );
@@ -61,7 +69,15 @@ async function resolvePipelineDocument(options: { file: string; spec?: string })
     return pipelineFromSpec(specInput);
   }
 
-  if (fileExists) return loadPipelineFile(options.file);
+  if (fileExists) {
+    const document = loadPipelineFile(options.file);
+    if (specInput && isParsedFoundationPipeline(document)) {
+      throw new Error(
+        `Pipeline file ${options.file} is a foundation recipe, but ${options.spec} is an adapter spec. Use a foundation spec, omit --file, or pass an adapter pipeline.`,
+      );
+    }
+    return document;
+  }
   if (specPath && !existsSync(specPath)) await loadLocalRunInput(specPath);
   throw new Error(
     `Pipeline file not found: ${options.file}. Run \`tt pipeline init\` or pass a foundation --spec.`,
