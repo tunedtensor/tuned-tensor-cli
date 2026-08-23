@@ -6,9 +6,9 @@
 
 ### Added
 
-- `/login <provider>` prompts for a provider API key in the shell (input is
-  hidden) and stores it in TT's local agent auth file. `/login` with no
-  argument uses the currently selected provider.
+- `/login` asks for a provider, then prompts for that provider's API key
+  (input is hidden) and stores it in TT's local agent auth file.
+  `/login <provider>` skips the provider prompt.
 
 ### Changed
 

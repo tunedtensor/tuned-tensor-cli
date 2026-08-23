@@ -95,8 +95,9 @@ Use /model to choose a provider and model. Workflow commands work now.
 › /model anthropic/claude-sonnet-4-5
 ```
 
-Use `/login <provider>` to save a provider API key. The shell prompts for the
-key with hidden input and stores it under TT's local agent config.
+Use `/login` to save a provider API key. The shell asks which provider, then
+prompts for the key with hidden input and stores it under TT's local agent
+config. `/login <provider>` skips the provider prompt.
 `tt` does not accept provider secrets as flags and does not read
 `~/.pi/agent/`. `/model` lists providers even when auth is still missing and
 marks those entries `auth required`. Local endpoints such as Ollama still
@@ -153,8 +154,8 @@ laptop-local TT agent model: run it with no arguments to list providers and a
 short model sample, `/model <provider>` to list that provider's models, search
 with `/model <query>` (only the closest matches are shown), or switch with
 `/model <provider>/<model>` (for example `/model anthropic/claude-sonnet-4-5`).
-`/login <provider>` saves that provider's API key. With no argument it uses
-the currently selected provider.
+`/login` asks which provider to authenticate, then prompts for that provider's
+API key with hidden input. `/login <provider>` skips the provider prompt.
 The equivalent non-interactive commands are `tt agent models`,
 `tt agent configure`, and `tt agent status`.
 `tt agent configure --thinking` accepts `off`, `minimal`, `low`, `medium`,

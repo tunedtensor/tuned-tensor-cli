@@ -64,7 +64,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { path: "/status", description: "Show lightweight workflow status." },
   { path: "/context", description: "Show the current project context." },
   { path: "/model", description: "Show or change the TT agent provider and model." },
-  { path: "/login", description: "Save a provider API key for the TT agent." },
+  { path: "/login", description: "Save a provider API key; asks which provider if omitted." },
   { path: "/cd", description: "Change the shell's working directory." },
   { path: "/clear", description: "Clear the terminal." },
   { path: "/exit", description: "Exit the TT shell." },

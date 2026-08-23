@@ -30,7 +30,7 @@ import {
   type AgentProviderChoice,
 } from "./agent-control.js";
 import type { AgentModelRuntime } from "./agent-model.js";
-import { promptHiddenInput } from "./secret-prompt.js";
+import { promptHiddenInput, promptVisibleInput } from "./secret-prompt.js";
 
 export type { WorkflowMode } from "./command-catalog.js";
 
@@ -345,6 +345,7 @@ export interface ShellSessionIO {
   write(text: string): void;
   writeError(text: string): void;
   clear(): void;
+  promptLine?(message: string): Promise<string>;
   promptSecret?(message: string): Promise<string>;
 }
 
@@ -798,13 +799,24 @@ export class TunedTensorShellSession {
         if (command.args.length > 1) {
           throw new ShellParseError("Usage: /login [<provider>]");
         }
-        const requested = command.args[0]?.trim();
-        const fallback = requested
-          ? undefined
-          : describeAgentModel(runtime, this.env)?.provider;
-        const providerId = requested || fallback;
+        let providerId = command.args[0]?.trim();
         if (!providerId) {
-          throw new ShellParseError("Usage: /login <provider>");
+          const providers = listAgentProviders(runtime);
+          if (providers.length === 0) {
+            throw new ShellParseError("No providers in the catalog.");
+          }
+          this.writeLines([
+            "",
+            chalk.bold("Providers"),
+            ...providers.map((choice) => this.formatAgentProviderChoice(choice)),
+          ]);
+          if (!this.io.promptLine) {
+            throw new ShellParseError("Usage: /login <provider>");
+          }
+          providerId = (await this.io.promptLine("Provider: ")).trim();
+          if (!providerId) {
+            throw new ShellParseError("Usage: /login <provider>");
+          }
         }
         const provider = findAgentProvider(runtime, providerId);
         if (!provider) {
@@ -1024,19 +1036,32 @@ export async function startInteractiveShell(
 
   let readline: Interface | undefined;
   const terminalInput = input as RawModeInput;
+  const withPrompt = async (
+    message: string,
+    prompt: (
+      message: string,
+      input: NodeJS.ReadableStream,
+      output: NodeJS.WritableStream,
+    ) => Promise<string>,
+  ): Promise<string> => {
+    readline?.pause();
+    const restoreRawMode = terminalInput.isRaw === true
+      && typeof terminalInput.setRawMode === "function";
+    if (restoreRawMode) terminalInput.setRawMode!(false);
+    try {
+      return await prompt(message, input, output);
+    } finally {
+      if (restoreRawMode) terminalInput.setRawMode!(true);
+      readline?.resume();
+    }
+  };
   const io: ShellSessionIO = {
     ...streamIO(output, error),
+    async promptLine(message) {
+      return await withPrompt(message, promptVisibleInput);
+    },
     async promptSecret(message) {
-      readline?.pause();
-      const restoreRawMode = terminalInput.isRaw === true
-        && typeof terminalInput.setRawMode === "function";
-      if (restoreRawMode) terminalInput.setRawMode!(false);
-      try {
-        return await promptHiddenInput(message, input, output);
-      } finally {
-        if (restoreRawMode) terminalInput.setRawMode!(true);
-        readline?.resume();
-      }
+      return await withPrompt(message, promptHiddenInput);
     },
   };
   const foregroundRunner: ShellCommandRunner = (request) =>

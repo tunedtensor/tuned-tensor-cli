@@ -644,6 +644,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       { id: "claude-sonnet-4-5", provider: "anthropic", name: "Claude Sonnet 4.5", reasoning: true },
       { id: "gpt-5.2", provider: "openai", name: "GPT 5.2", reasoning: true },
     ];
+    const prompts: string[] = [];
     const session = await createShellSession({
       cwd: "/tmp/local-project",
       env: { HOME: "/tmp/home" },
@@ -651,7 +652,14 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
         write: (text) => stdout.push(text),
         writeError: (text) => stderr.push(text),
         clear: vi.fn(),
-        promptSecret: async () => "  sk-test-openai  ",
+        promptLine: async (message) => {
+          prompts.push(message);
+          return "openai";
+        },
+        promptSecret: async (message) => {
+          prompts.push(message);
+          return "  sk-test-openai  ";
+        },
       },
       runner: async () => ({ exitCode: 0 }),
       agentModelRuntime: async () => ({
@@ -675,8 +683,14 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     try {
       stdout.length = 0;
       stderr.length = 0;
+      prompts.length = 0;
       await session.handleLine("/login");
-      expect(stderr.join("")).toMatch(/Usage: \/login <provider>/);
+      expect(stdout.join("")).toContain("Providers");
+      expect(stdout.join("")).toContain("openai");
+      expect(prompts).toEqual(["Provider: ", "OpenAI API key: "]);
+      expect(stderr.join("")).toBe("");
+      expect(keys).toEqual([{ provider: "openai", apiKey: "sk-test-openai" }]);
+      expect(stdout.join("")).toContain("Saved openai credentials");
 
       stdout.length = 0;
       stderr.length = 0;
@@ -685,9 +699,14 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
 
       stdout.length = 0;
       stderr.length = 0;
-      await session.handleLine("/login openai");
-      expect(stdout.join("")).toContain("Saved openai credentials");
-      expect(keys).toEqual([{ provider: "openai", apiKey: "sk-test-openai" }]);
+      prompts.length = 0;
+      await session.handleLine("/login anthropic");
+      expect(prompts).toEqual(["Anthropic API key: "]);
+      expect(stdout.join("")).toContain("Saved anthropic credentials");
+      expect(keys).toEqual([
+        { provider: "openai", apiKey: "sk-test-openai" },
+        { provider: "anthropic", apiKey: "sk-test-openai" },
+      ]);
       expect(stderr.join("")).toBe("");
 
       stdout.length = 0;
@@ -696,9 +715,10 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
 
       stdout.length = 0;
       stderr.length = 0;
+      prompts.length = 0;
       await session.handleLine("/login");
-      expect(stdout.join("")).toContain("Saved openai credentials");
-      expect(keys).toHaveLength(2);
+      expect(prompts[0]).toBe("Provider: ");
+      expect(prompts).not.toContain("OpenRouter API key: ");
     } finally {
       delete process.env.XDG_CONFIG_HOME;
       rmSync(configRoot, { recursive: true, force: true });
