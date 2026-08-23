@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canonicalPipeline,
   createExecutionPlan,
+  pipelineFromFoundationHyperparameters,
   validatePipeline,
   type Pipeline,
 } from "../pipeline.js";
@@ -76,5 +77,45 @@ describe("composable pipeline contract", () => {
         { id: "train_b", uses: "train" },
       ],
     })).toContainEqual(expect.stringMatching(/at most one train/i));
+  });
+
+  it("builds a foundation DAG from spec hyperparameters and keeps --only/--skip dependency-safe", () => {
+    const recipe = pipelineFromFoundationHyperparameters("tiny-gpt", {
+      vocab_size: 256,
+      max_chars: 20_000,
+      depth: 2,
+      pretrain_steps: 4,
+      finetune_steps: 3,
+      rl_steps: 0,
+      batch_size: 2,
+      sequence_length: 64,
+      nproc_per_node: 1,
+    });
+    expect(validatePipeline(recipe)).toEqual([]);
+    expect(recipe.runtime).toEqual({ engine: "foundation" });
+    expect(createExecutionPlan(recipe).steps.map((step) => step.id)).toEqual([
+      "tokenize",
+      "pretrain",
+      "bpb",
+      "sft",
+      "chat",
+      "infer",
+    ]);
+    expect(() => createExecutionPlan(recipe, { only: ["sft"] })).toThrow(/dependency/i);
+    expect(
+      createExecutionPlan(
+        pipelineFromFoundationHyperparameters("tiny-gpt-rl", {
+          vocab_size: 256,
+          max_chars: 20_000,
+          depth: 2,
+          pretrain_steps: 2,
+          finetune_steps: 2,
+          rl_steps: 1,
+          batch_size: 2,
+          sequence_length: 64,
+          nproc_per_node: 1,
+        }),
+      ).steps.map((step) => step.id),
+    ).toContain("rl");
   });
 });

@@ -26,6 +26,30 @@ export const specSnapshotSchema = z.object({
   base_model: z.string().transform((value) => canonicalizeTrainingModel(value)),
 }).strict();
 
+export const foundationHyperparametersSchema = z.object({
+  vocab_size: z.number().int().min(64).max(65_536).default(256),
+  max_chars: z.number().int().min(1_000).max(2_000_000_000).default(20_000),
+  depth: z.number().int().min(1).max(64).default(2),
+  pretrain_steps: z.number().int().min(1).max(10_000_000).default(2),
+  finetune_steps: z.number().int().min(1).max(10_000_000).default(2),
+  rl_steps: z.number().int().min(0).max(10_000_000).default(0),
+  batch_size: z.number().int().min(1).max(1024).default(2),
+  sequence_length: z.number().int().min(16).max(8192).default(64),
+  nproc_per_node: z.number().int().min(1).max(16).default(1),
+}).strict();
+
+export const localFoundationSpecFileSchema = z.object({
+  engine: z.literal("foundation"),
+  id: z.string().uuid().optional(),
+  name: z.string().min(1),
+  description: z.string().default(""),
+  system_prompt: z.string().default(""),
+  guidelines: z.array(z.string()).default([]),
+  examples: z.array(behaviorSpecExampleSchema).min(2),
+  constraints: z.array(z.string()).default([]),
+  foundation: foundationHyperparametersSchema,
+}).strict();
+
 export const datasetPrebuiltSchema = z.object({
   training: z.string().min(1),
   validation: z.string().min(1).optional(),
@@ -73,11 +97,17 @@ export const fineTuneRunRequestSchema = z.object({
   }
 });
 
-export const localBehaviorSpecFileSchema = specSnapshotSchema.extend({
+export const localAdapterSpecFileSchema = specSnapshotSchema.extend({
+  engine: z.literal("adapter").optional(),
   id: z.string().uuid().optional(),
   hyperparameters: fineTuneHyperparametersSchema.optional(),
   dataset_prebuilt: datasetPrebuiltSchema.optional(),
 }).strict();
+
+export const localBehaviorSpecFileSchema = z.union([
+  localFoundationSpecFileSchema,
+  localAdapterSpecFileSchema,
+]);
 
 export const evalExampleResultSchema = z.object({
   prompt: z.string(),
@@ -274,7 +304,16 @@ export type BehaviorSpecExample = z.infer<typeof behaviorSpecExampleSchema>;
 export type SpecSnapshot = z.infer<typeof specSnapshotSchema>;
 export type FineTuneHyperparameters = z.infer<typeof fineTuneHyperparametersSchema>;
 export type FineTuneRunRequest = z.infer<typeof fineTuneRunRequestSchema>;
+export type FoundationHyperparameters = z.infer<typeof foundationHyperparametersSchema>;
+export type LocalAdapterSpecFile = z.infer<typeof localAdapterSpecFileSchema>;
+export type LocalFoundationSpecFile = z.infer<typeof localFoundationSpecFileSchema>;
 export type LocalBehaviorSpecFile = z.infer<typeof localBehaviorSpecFileSchema>;
+
+export function isFoundationSpecFile(
+  spec: LocalBehaviorSpecFile,
+): spec is LocalFoundationSpecFile {
+  return spec.engine === "foundation";
+}
 export type EvalExampleResult = z.infer<typeof evalExampleResultSchema>;
 export type EvalSplit = z.infer<typeof evalSplitSchema>;
 export type EvalReport = z.infer<typeof evalReportSchema>;

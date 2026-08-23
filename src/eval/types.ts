@@ -2,12 +2,14 @@ export interface LocalSpec {
   id?: string;
   name: string;
   description?: string;
-  base_model: string;
+  engine?: "adapter" | "foundation";
+  base_model?: string;
   system_prompt: string;
   guidelines: string[];
   constraints: string[];
   examples: Example[];
   eval_cases?: EvalCase[];
+  foundation?: Record<string, unknown>;
 }
 
 export interface Example {

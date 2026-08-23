@@ -46,6 +46,23 @@ describe("validateSpec", () => {
     expect(guideCheck?.passed).toBe(false);
   });
 
+  it("accepts a foundation spec without a base model", () => {
+    const result = validateSpec({
+      engine: "foundation",
+      name: "Tiny GPT",
+      system_prompt: "You are a helpful assistant.",
+      guidelines: ["Answer directly."],
+      constraints: [],
+      examples: [
+        { input: "Hello", output: "Hi there." },
+        { input: "Thanks", output: "You're welcome." },
+      ],
+      foundation: { depth: 2, pretrain_steps: 2 },
+    });
+    expect(result.valid).toBe(true);
+    expect(result.checks.find((c) => c.name === "Has base model")).toBeUndefined();
+  });
+
   it("detects constraint violations in examples", () => {
     const spec: LocalSpec = {
       ...validSpec,

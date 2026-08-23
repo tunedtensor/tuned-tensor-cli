@@ -180,3 +180,25 @@ test("dataset paths resolve relative to the spec and file URIs stay absolute", (
     "file:///shared/validation.jsonl",
   );
 });
+
+test("init and load treat a foundation spec as its own engine", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-foundation-"));
+  try {
+    const specPath = join(root, "tunedtensor.json");
+    const spec = await initLocalSpecFile({
+      outputPath: specPath,
+      name: "Tiny GPT",
+      engine: "foundation",
+    });
+    assert.equal(spec.engine, "foundation");
+    assert.equal("base_model" in spec, false);
+    assert.throws(
+      () => runRequestFromLocalSpec(spec),
+      /pipeline run/,
+    );
+    const input = await loadLocalRunInput(specPath);
+    assert.equal(input.kind, "foundation-spec");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

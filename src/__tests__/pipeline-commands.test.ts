@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createProgram } from "../cli.js";
@@ -25,6 +25,56 @@ describe("pipeline commands", () => {
       const output = JSON.parse(log.mock.calls.at(-1)?.[0] as string);
       expect(output.dry_run).toBe(true);
       expect(output.steps[0]).toMatchObject({ id: "baseline", target: "local" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("initializes a foundation recipe and dry-runs a spec-generated DAG", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tt-pipeline-"));
+    const file = join(dir, "pipeline.json");
+    const spec = join(dir, "tunedtensor.json");
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const program = createProgram("test");
+      program.exitOverride();
+      await program.parseAsync(["node", "tt", "pipeline", "init", "--engine", "foundation", "--file", file]);
+      expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject({
+        version: 1,
+        runtime: { engine: "foundation" },
+      });
+
+      writeFileSync(spec, JSON.stringify({
+        engine: "foundation",
+        name: "Tiny GPT",
+        system_prompt: "You are a helpful assistant.",
+        guidelines: ["Answer directly."],
+        constraints: [],
+        examples: [
+          { input: "Hello", output: "Hi there." },
+          { input: "Thanks", output: "You're welcome." },
+        ],
+        foundation: {
+          depth: 2,
+          pretrain_steps: 2,
+          finetune_steps: 2,
+          rl_steps: 0,
+          vocab_size: 256,
+          max_chars: 20_000,
+          sequence_length: 64,
+          batch_size: 2,
+          nproc_per_node: 1,
+        },
+      }));
+
+      await program.parseAsync([
+        "node", "tt", "--json", "pipeline", "run", "--dry-run",
+        "--file", join(dir, "generated.pipeline.json"),
+        "--spec", spec,
+      ]);
+      const output = JSON.parse(log.mock.calls.at(-1)?.[0] as string);
+      expect(output.dry_run).toBe(true);
+      expect(output.steps[0]).toMatchObject({ id: "tokenize", uses: "tokenize", target: "local" });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

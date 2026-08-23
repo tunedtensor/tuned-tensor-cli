@@ -1,12 +1,25 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Command } from "commander";
-import { canonicalPipeline, createExecutionPlan, validatePipeline, type Pipeline } from "../pipeline.js";
+import {
+  canonicalFoundationPipeline,
+  canonicalPipeline,
+  createExecutionPlan,
+  pipelineFromFoundationHyperparameters,
+  validatePipeline,
+  type Pipeline,
+} from "../pipeline.js";
 import { isJsonMode, printJson, printSuccess } from "../output.js";
-import { loadLocalRunInput, assertLocalRunInputReady } from "../local-runtime/local-project.js";
+import {
+  assertFoundationSpecReady,
+  assertLocalRunInputReady,
+  loadLocalRunInput,
+  type LocalRunInput,
+} from "../local-runtime/local-project.js";
 import { loadLocalRunnerConfig, runLocalPipeline, type LocalPipeline } from "../local-runtime/orchestrator.js";
 
 const DEFAULT_PIPELINE_FILE = "tunedtensor.pipeline.json";
+const DEFAULT_SPEC_FILE = "tunedtensor.json";
 
 function parseList(value?: string): string[] | undefined {
   if (!value) return undefined;
@@ -15,7 +28,7 @@ function parseList(value?: string): string[] | undefined {
   return ids;
 }
 
-function loadPipeline(path: string): unknown {
+function loadPipelineFile(path: string): unknown {
   const resolved = resolve(path);
   if (!existsSync(resolved)) throw new Error(`Pipeline file not found: ${path}. Run \`tt pipeline init\` to create one.`);
   try {
@@ -23,6 +36,22 @@ function loadPipeline(path: string): unknown {
   } catch (error) {
     throw new Error(`Pipeline file must be JSON: ${(error as Error).message}`);
   }
+}
+
+function pipelineFromSpec(input: Extract<LocalRunInput, { kind: "foundation-spec" }>): Pipeline {
+  return pipelineFromFoundationHyperparameters(input.spec.name, input.spec.foundation);
+}
+
+async function resolvePipelineDocument(options: { file: string; spec?: string }): Promise<unknown> {
+  const filePath = resolve(options.file);
+  if (existsSync(filePath)) return loadPipelineFile(options.file);
+  if (options.spec) {
+    const input = await loadLocalRunInput(resolve(options.spec));
+    if (input.kind === "foundation-spec") return pipelineFromSpec(input);
+  }
+  throw new Error(
+    `Pipeline file not found: ${options.file}. Run \`tt pipeline init\` or pass a foundation --spec.`,
+  );
 }
 
 function outputPlan(plan: unknown): void {
@@ -40,10 +69,32 @@ export function registerPipelineCommands(parent: Command): void {
   pipeline.command("init")
     .description("Write a canonical v1 pipeline recipe")
     .option("-f, --file <path>", "Output file", DEFAULT_PIPELINE_FILE)
-    .action((options: { file: string }) => {
+    .option("--engine <engine>", "adapter (default) or foundation")
+    .option("--spec <path>", "Foundation spec whose hyperparameters stamp the DAG")
+    .action(async (options: { file: string; engine?: string; spec?: string }) => {
+      const engine = options.engine ?? "adapter";
+      if (engine !== "adapter" && engine !== "foundation") {
+        throw new Error(`--engine must be adapter or foundation, got: ${engine}`);
+      }
+      if (engine !== "foundation" && options.spec) {
+        throw new Error("--spec is only valid with --engine foundation.");
+      }
       const path = resolve(options.file);
       if (existsSync(path)) throw new Error(`Pipeline file already exists: ${options.file}.`);
-      const recipe = canonicalPipeline("local");
+      let recipe: Pipeline;
+      if (engine === "foundation") {
+        if (options.spec) {
+          const input = await loadLocalRunInput(resolve(options.spec));
+          if (input.kind !== "foundation-spec") {
+            throw new Error("--spec must be a foundation tunedtensor.json.");
+          }
+          recipe = pipelineFromSpec(input);
+        } else {
+          recipe = canonicalFoundationPipeline();
+        }
+      } else {
+        recipe = canonicalPipeline("local");
+      }
       writeFileSync(path, `${JSON.stringify(recipe, null, 2)}\n`);
       if (isJsonMode()) return printJson({ created: true, path, pipeline: recipe });
       printSuccess(`Created ${options.file}`);
@@ -52,8 +103,9 @@ export function registerPipelineCommands(parent: Command): void {
   pipeline.command("validate")
     .description("Validate a pipeline without any execution or transfer")
     .option("-f, --file <path>", "Pipeline file", DEFAULT_PIPELINE_FILE)
-    .action((options: { file: string }) => {
-      const errors = validatePipeline(loadPipeline(options.file));
+    .option("--spec <path>", "Foundation spec used when the pipeline file is absent")
+    .action(async (options: { file: string; spec?: string }) => {
+      const errors = validatePipeline(await resolvePipelineDocument(options));
       const result = { valid: errors.length === 0, errors };
       if (isJsonMode()) return printJson(result);
       if (errors.length) throw new Error(`Invalid pipeline:\n- ${errors.join("\n- ")}`);
@@ -63,22 +115,24 @@ export function registerPipelineCommands(parent: Command): void {
   pipeline.command("plan")
     .description("Resolve step targets and required artifact transfers")
     .option("-f, --file <path>", "Pipeline file", DEFAULT_PIPELINE_FILE)
+    .option("--spec <path>", "Foundation spec used when the pipeline file is absent")
     .option("--only <ids>", "Comma-separated step IDs to include")
     .option("--skip <ids>", "Comma-separated step IDs to omit")
-    .action((options: { file: string; only?: string; skip?: string }) => {
-      outputPlan(createExecutionPlan(loadPipeline(options.file) as Pipeline, { only: parseList(options.only), skip: parseList(options.skip) }));
+    .action(async (options: { file: string; spec?: string; only?: string; skip?: string }) => {
+      outputPlan(createExecutionPlan(await resolvePipelineDocument(options) as Pipeline, { only: parseList(options.only), skip: parseList(options.skip) }));
     });
 
   pipeline.command("run")
     .description("Run an ordered local pipeline, or safely preview any pipeline")
     .option("--dry-run", "Resolve and display only; never execute, transfer, or reserve credits")
     .option("-f, --file <path>", "Pipeline file", DEFAULT_PIPELINE_FILE)
-    .option("--spec <path>", "Local behavior spec", "tunedtensor.json")
+    .option("--spec <path>", "Local behavior spec", DEFAULT_SPEC_FILE)
     .option("--config <path>", "Local runtime config")
     .option("--only <ids>", "Comma-separated step IDs to include")
     .option("--skip <ids>", "Comma-separated step IDs to omit")
     .action(async (options: { file: string; spec: string; config?: string; dryRun?: boolean; only?: string; skip?: string }) => {
-      const plan = createExecutionPlan(loadPipeline(options.file) as Pipeline, { only: parseList(options.only), skip: parseList(options.skip) });
+      const document = await resolvePipelineDocument(options);
+      const plan = createExecutionPlan(document as Pipeline, { only: parseList(options.only), skip: parseList(options.skip) });
       if (options.dryRun) {
         if (isJsonMode()) return printJson({ dry_run: true, ...plan });
         console.log("Dry run only — no execution, artifact transfer, or credit reservation will occur.");
@@ -89,6 +143,12 @@ export function registerPipelineCommands(parent: Command): void {
         throw new Error(`Step "${remote.id}" targets cloud execution. This CLI is local-only; rewrite that step to local or use --dry-run.`);
       }
       const input = await loadLocalRunInput(resolve(options.spec));
+      if (input.kind === "foundation-spec") {
+        assertFoundationSpecReady(input.spec);
+        throw new Error(
+          "Foundation pipeline execution is not wired yet. `tt pipeline plan` and `--dry-run` already honor this spec.",
+        );
+      }
       assertLocalRunInputReady(input.request);
       const config = await loadLocalRunnerConfig(options.config ? resolve(options.config) : undefined);
       const localPipeline: LocalPipeline = {
