@@ -520,11 +520,13 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       { id: "claude-sonnet-4-5", provider: "anthropic", name: "Claude Sonnet 4.5", reasoning: true },
       { id: "claude-haiku-4-5", provider: "anthropic", name: "Claude Haiku 4.5", reasoning: false },
       { id: "gpt-5.2", provider: "openai", name: "GPT 5.2", reasoning: true },
+      { id: "llama-3.3-70b", provider: "groq", name: "Llama 3.3 70B", reasoning: false },
     ];
     const modelRuntime = {
       getProviders: () => [
         { id: "anthropic", name: "Anthropic" },
         { id: "openai", name: "OpenAI" },
+        { id: "groq", name: "Groq" },
       ],
       getModels: (provider?: string) =>
         provider ? models.filter((model) => model.provider === provider) : models,
@@ -557,13 +559,20 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       expect(output).toContain("Providers");
       expect(output).toContain("anthropic");
       expect(output).toContain("openai");
+      expect(output).not.toContain("groq");
+      expect(output).toContain("Other providers: /login <id> or /model <id>");
       expect(output).toMatch(/openai[\s\S]*auth required/);
       expect(output).toContain("Use /login <provider> to save a key.");
       expect(output).toContain("/login <provider>");
       expect(output).toContain("Available models");
       expect(output).toContain("anthropic/claude-sonnet-4-5");
       expect(output).toContain("openai/gpt-5.2");
+      expect(output).not.toContain("groq/llama-3.3-70b");
       expect(output).toMatch(/openai\/gpt-5\.2[\s\S]*auth required/);
+
+      output = await run("/model groq");
+      expect(output).toContain("Models from groq");
+      expect(output).toContain("groq/llama-3.3-70b");
 
       output = await run("/model anthropic");
       expect(output).toContain("Models from anthropic");
@@ -666,6 +675,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
         getProviders: () => [
           { id: "anthropic", name: "Anthropic" },
           { id: "openai", name: "OpenAI" },
+          { id: "groq", name: "Groq" },
         ],
         getModels: (provider?: string) =>
           provider ? models.filter((model) => model.provider === provider) : models,
@@ -687,6 +697,8 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       await session.handleLine("/login");
       expect(stdout.join("")).toContain("Providers");
       expect(stdout.join("")).toContain("openai");
+      expect(stdout.join("")).not.toContain("groq");
+      expect(stdout.join("")).toContain("Other providers: /login <id>");
       expect(prompts).toEqual(["Provider: ", "OpenAI API key: "]);
       expect(stderr.join("")).toBe("");
       expect(keys).toEqual([{ provider: "openai", apiKey: "sk-test-openai" }]);

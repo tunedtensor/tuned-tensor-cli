@@ -14,9 +14,10 @@
 
 - Interactive `tt` is the first onboarding step. The unconfigured shell banner
   and chat hint point at `/model` instead of requiring `tt agent configure`
-  first. `/model` lists providers (including unauthenticated ones, marked
-  `auth required`) and `/model <provider>` lists that provider's models.
-  `tt agent configure` remains the non-interactive path.
+  first. `/model` and `/login` show Anthropic, OpenAI, Google, and OpenRouter.
+  Other catalog providers remain available as `/model <id>` or `/login <id>`.
+  `/model <provider>` lists that provider's models. `tt agent configure`
+  remains the non-interactive path.
 - Provider `auth.json` and `models.json` now live under
   `~/.config/tuned-tensor/agent/` (or the XDG equivalent). `tt` no longer
   reads or writes `~/.pi/agent/`. Missing-auth errors point at `/login`

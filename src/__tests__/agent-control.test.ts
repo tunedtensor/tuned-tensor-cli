@@ -25,6 +25,7 @@ function makeRuntime(overrides: Partial<AgentModelRuntime> = {}): AgentModelRunt
       { id: "anthropic", name: "Anthropic" },
       { id: "openai", name: "OpenAI" },
       { id: "openrouter", name: "OpenRouter" },
+      { id: "groq", name: "Groq" },
     ],
     getModels: () => models,
     getModel: (provider, model) =>
@@ -94,8 +95,15 @@ describe("listAgentProviders", () => {
       { id: "anthropic", name: "Anthropic", authenticated: true },
       { id: "openai", name: "OpenAI", authenticated: false },
       { id: "openrouter", name: "OpenRouter", authenticated: false },
+      { id: "groq", name: "Groq", authenticated: false },
+    ]);
+    expect(listAgentProviders(runtime, { featuredOnly: true })).toEqual([
+      { id: "anthropic", name: "Anthropic", authenticated: true },
+      { id: "openai", name: "OpenAI", authenticated: false },
+      { id: "openrouter", name: "OpenRouter", authenticated: false },
     ]);
     expect(findAgentProvider(runtime, "Anthropic")?.id).toBe("anthropic");
+    expect(findAgentProvider(runtime, "groq")?.id).toBe("groq");
     expect(findAgentProvider(runtime, "sonnet")).toBeUndefined();
   });
 });

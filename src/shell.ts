@@ -657,6 +657,7 @@ export class TunedTensorShellSession {
     ]);
 
     const catalog = { includeUnauthenticated: true } as const;
+    const featuredCatalog = { ...catalog, featuredOnly: true } as const;
     const provider = query ? findAgentProvider(runtime, query) : undefined;
     if (provider) {
       const matches = listAgentModels(runtime, { ...catalog, provider: provider.id });
@@ -678,7 +679,7 @@ export class TunedTensorShellSession {
       return lines;
     }
 
-    const providers = listAgentProviders(runtime);
+    const providers = listAgentProviders(runtime, { featuredOnly: true });
     lines.push("", chalk.bold("Providers"));
     if (providers.length === 0) {
       lines.push(chalk.dim("  no providers in the catalog"));
@@ -686,12 +687,13 @@ export class TunedTensorShellSession {
       for (const choice of providers) {
         lines.push(this.formatAgentProviderChoice(choice));
       }
+      lines.push(chalk.dim("  Other providers: /login <id> or /model <id>"));
       if (providers.some((choice) => !choice.authenticated)) {
         lines.push(chalk.dim("  Use /login <provider> to save a key."));
       }
     }
 
-    const all = listAgentModels(runtime, catalog);
+    const all = listAgentModels(runtime, featuredCatalog);
     const preferred = summary
       ? all.filter((model) => model.provider === summary.provider)
       : [];
@@ -801,7 +803,7 @@ export class TunedTensorShellSession {
         }
         let providerId = command.args[0]?.trim();
         if (!providerId) {
-          const providers = listAgentProviders(runtime);
+          const providers = listAgentProviders(runtime, { featuredOnly: true });
           if (providers.length === 0) {
             throw new ShellParseError("No providers in the catalog.");
           }
@@ -809,6 +811,7 @@ export class TunedTensorShellSession {
             "",
             chalk.bold("Providers"),
             ...providers.map((choice) => this.formatAgentProviderChoice(choice)),
+            chalk.dim("  Other providers: /login <id>"),
           ]);
           if (!this.io.promptLine) {
             throw new ShellParseError("Usage: /login <provider>");

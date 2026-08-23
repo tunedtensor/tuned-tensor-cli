@@ -99,9 +99,10 @@ Use `/login` to save a provider API key. The shell asks which provider, then
 prompts for the key with hidden input and stores it under TT's local agent
 config. `/login <provider>` skips the provider prompt.
 `tt` does not accept provider secrets as flags and does not read
-`~/.pi/agent/`. `/model` lists providers even when auth is still missing and
-marks those entries `auth required`. Local endpoints such as Ollama still
-need a placeholder `apiKey` in `models.json`.
+`~/.pi/agent/`. `/model` and `/login` show Anthropic, OpenAI, Google, and
+OpenRouter. Other catalog providers remain available if you type their id.
+Unauthenticated entries are marked `auth required`. Local endpoints such as
+Ollama still need a placeholder `apiKey` in `models.json`.
 
 Before the shell opens, `tt` performs a short, non-blocking npm version check.
 If a newer stable release is available it recommends

@@ -19,6 +19,27 @@ import {
  * over these functions.
  */
 
+/** Providers shown in `/login` and `/model` so onboarding stays short. */
+export const FEATURED_AGENT_PROVIDERS = [
+  "anthropic",
+  "openai",
+  "google",
+  "openrouter",
+] as const;
+
+const FEATURED_PROVIDER_INDEX = new Map<string, number>(
+  FEATURED_AGENT_PROVIDERS.map((id, index) => [id, index]),
+);
+
+function isFeaturedProvider(id: string): boolean {
+  return FEATURED_PROVIDER_INDEX.has(id);
+}
+
+export interface ListAgentProvidersOptions {
+  /** Limit the list to the onboarding providers. */
+  featuredOnly?: boolean;
+}
+
 export interface AgentProviderChoice {
   id: string;
   name: string;
@@ -65,6 +86,8 @@ export interface ListAgentModelsOptions {
   query?: string;
   /** Cap the returned list after relevance/alphabetic ordering. */
   limit?: number;
+  /** Limit the list to the onboarding providers. */
+  featuredOnly?: boolean;
 }
 
 function modelKey(model: { provider: string; id: string }): string {
@@ -90,15 +113,25 @@ function modelRelevance(
 
 export function listAgentProviders(
   runtime: AgentModelRuntime,
+  options: ListAgentProvidersOptions = {},
 ): AgentProviderChoice[] {
   return runtime
     .getProviders()
+    .filter((provider) => !options.featuredOnly || isFeaturedProvider(provider.id))
     .map((provider): AgentProviderChoice => ({
       id: provider.id,
       name: provider.name ?? provider.id,
       authenticated: runtime.hasConfiguredAuth(provider.id),
     }))
-    .sort((left, right) => left.id.localeCompare(right.id));
+    .sort((left, right) => {
+      const leftRank = FEATURED_PROVIDER_INDEX.get(left.id);
+      const rightRank = FEATURED_PROVIDER_INDEX.get(right.id);
+      if (leftRank !== undefined || rightRank !== undefined) {
+        return (leftRank ?? Number.MAX_SAFE_INTEGER) - (rightRank ?? Number.MAX_SAFE_INTEGER)
+          || left.id.localeCompare(right.id);
+      }
+      return left.id.localeCompare(right.id);
+    });
 }
 
 export function findAgentProvider(
@@ -117,7 +150,8 @@ export function listAgentModels(
   let models: AgentModelChoice[] = runtime
     .getModels(options.provider)
     .filter((model) =>
-      options.includeUnauthenticated || runtime.hasConfiguredAuth(model.provider)
+      (options.includeUnauthenticated || runtime.hasConfiguredAuth(model.provider))
+      && (!options.featuredOnly || isFeaturedProvider(model.provider))
     )
     .map((model): AgentModelChoice => ({
       provider: model.provider,
