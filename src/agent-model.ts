@@ -23,8 +23,8 @@ export interface AgentModelRuntime {
   setRuntimeApiKey?(provider: string, apiKey: string): Promise<void>;
 }
 
-export function missingProviderAuthMessage(provider: string): string {
-  return `Provider "${provider}" is not authenticated. Open the tt shell and run /login ${provider} to save a key, then try again.`;
+export function missingProviderAuthMessage(): string {
+  return "No API key is saved for the selected model. Run /login, or /model to pick a different one.";
 }
 
 export function unknownAgentProviderMessage(provider: string): string {
@@ -42,6 +42,34 @@ function pushSecret(secrets: string[], value: unknown): void {
   const secret = value.trim();
   if (secret.length < MIN_REDACTED_SECRET_LENGTH) return;
   if (!secrets.includes(secret)) secrets.push(secret);
+}
+
+/**
+ * Write a provider API key into TT's agent `auth.json` (Pi's on-disk format).
+ * Merges with existing providers. Pi's `setRuntimeApiKey` is in-memory only.
+ */
+export function persistProviderApiKey(provider: string, apiKey: string, authPath = getAgentAuthPath()): void {
+  const key = apiKey.trim();
+  if (!key) {
+    throw new Error("API key cannot be empty.");
+  }
+  let stored: Record<string, unknown> = {};
+  if (existsSync(authPath)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(authPath, "utf-8"));
+    } catch (error) {
+      throw new Error(
+        `Failed to read ${authPath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (!isRecord(parsed)) {
+      throw new Error(`Invalid auth.json: expected an object at ${authPath}`);
+    }
+    stored = parsed;
+  }
+  stored[provider] = { type: "api_key", key };
+  writePrivateJson(authPath, stored);
 }
 
 /** API keys and OAuth tokens from TT's agent auth file, for thread redaction. */
@@ -78,7 +106,7 @@ export function resolveAgentModel(
 ): ResolvedAgentModel {
   const resolved = resolveAgentModelDefinition(runtime, selection);
   if (!runtime.hasConfiguredAuth(selection.provider)) {
-    throw new Error(missingProviderAuthMessage(selection.provider));
+    throw new Error(missingProviderAuthMessage());
   }
   return resolved;
 }

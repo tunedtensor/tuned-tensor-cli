@@ -84,7 +84,7 @@ such as `runs list` and `doctor` work immediately. Chat waits until you choose
 a provider and model from inside the shell:
 
 ```text
-tt v0.13.1-beta.0
+tt v0.13.1-beta.1
 agent not configured · workflow model base
 ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
 
@@ -113,7 +113,7 @@ After a model is selected, the banner shows it and ordinary sentences go to
 the agent:
 
 ```text
-tt v0.13.1-beta.0
+tt v0.13.1-beta.1
 agent anthropic/claude-sonnet-4-5 · workflow model base
 ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
 
