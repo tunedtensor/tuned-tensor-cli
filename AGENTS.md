@@ -25,6 +25,8 @@ After `npm run build`, run `npm link` to make the `tt` command available globall
 - The CLI targets Node 22+ (`tsup.config.ts` sets `target: "node22"`)
   because the bundled local workflow and its locked Python runner require it.
 - Agent selection is stored at `~/.config/tuned-tensor/config.json`.
+  Provider auth and custom models live under
+  `~/.config/tuned-tensor/agent/` (`auth.json`, `models.json`, threads).
 - All tests are fully self-contained with mocked API calls — no API key or network access is needed to run the test suite.
 
 ## Releasing

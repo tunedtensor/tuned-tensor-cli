@@ -139,11 +139,16 @@ describe("parseSlashCommand", () => {
     expect(() => parseSlashCommand("/local")).toThrow(/Unknown session command/);
   });
 
-  it("parses /model and suggests fixes for mistyped session commands", () => {
+  it("parses /model and /login and suggests fixes for mistyped session commands", () => {
     expect(parseSlashCommand("/model")).toEqual({ name: "model", args: [] });
     expect(parseSlashCommand("/model abc123")).toEqual({
       name: "model",
       args: ["abc123"],
+    });
+    expect(parseSlashCommand("/login")).toEqual({ name: "login", args: [] });
+    expect(parseSlashCommand("/login openrouter")).toEqual({
+      name: "login",
+      args: ["openrouter"],
     });
     expect(() => parseSlashCommand("/stat")).toThrow(/Did you mean \/status\?/);
     expect(() => parseSlashCommand("/models")).toThrow(/need no slash/);
@@ -156,6 +161,7 @@ describe("command completion", () => {
 
     expect(complete("runs c")[0]).toContain("runs compare");
     expect(complete("/mo")[0]).toEqual(["/model"]);
+    expect(complete("/lo")[0]).toEqual(["/login"]);
     expect(complete("cl")[0].join(" ")).not.toMatch(/\bcloud\b/);
     expect(complete("auth")[0].join(" ")).not.toMatch(/\bauth\b/);
     expect(complete("publish")[0].join(" ")).not.toMatch(/\bpublish\b/);
@@ -262,8 +268,25 @@ describe("renderShellBanner", () => {
     expect(banner).toContain("agent");
     expect(banner).toContain("workflow model");
     expect(banner).toContain("ctrl+c stop/clear");
-    expect(banner).toContain("Ask TT anything");
+    expect(banner).toContain("Use /model to choose a provider and model");
+    expect(banner).toContain("Workflow commands work now");
+    expect(banner).not.toContain("Ask TT anything");
     expect(banner).not.toContain("██");
+  });
+
+  it("asks for a prompt once a provider and model are selected", () => {
+    const banner = renderShellBanner({
+      mode: "local",
+      modeSource: "default-local",
+      cwd: "/tmp/local-project",
+      context: {
+        ...fakeContext("/tmp/local-project"),
+        agent: { provider: "anthropic", model: "claude-sonnet-4-5" },
+      },
+      version: "0.6.0",
+    });
+    expect(banner).toContain("Ask TT anything. Known commands run directly.");
+    expect(banner).not.toContain("Use /model to choose");
   });
 
   it("omits the version when none is provided", () => {
@@ -493,19 +516,31 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     process.env.XDG_CONFIG_HOME = configRoot;
     const stdout: string[] = [];
     const stderr: string[] = [];
+    const models = [
+      { id: "claude-sonnet-4-5", provider: "anthropic", name: "Claude Sonnet 4.5", reasoning: true },
+      { id: "claude-haiku-4-5", provider: "anthropic", name: "Claude Haiku 4.5", reasoning: false },
+      { id: "gpt-5.2", provider: "openai", name: "GPT 5.2", reasoning: true },
+      { id: "gpt-5.6-sol", provider: "openai", name: "GPT-5.6 Sol", reasoning: true },
+      {
+        id: "deepseek/deepseek-v4-flash-0731",
+        provider: "openrouter",
+        name: "DeepSeek V4 Flash 0731",
+        reasoning: true,
+      },
+      { id: "llama-3.3-70b", provider: "groq", name: "Llama 3.3 70B", reasoning: false },
+    ];
     const modelRuntime = {
-      getProviders: () => [{ id: "anthropic", name: "Anthropic" }],
-      getModels: () => [
-        { id: "claude-sonnet-4-5", provider: "anthropic", name: "Claude Sonnet 4.5", reasoning: true },
-        { id: "claude-haiku-4-5", provider: "anthropic", name: "Claude Haiku 4.5", reasoning: false },
+      getProviders: () => [
+        { id: "anthropic", name: "Anthropic" },
+        { id: "openai", name: "OpenAI" },
+        { id: "openrouter", name: "OpenRouter" },
+        { id: "groq", name: "Groq" },
       ],
-      getModel: (provider: string, model: string) => ({
-        id: model,
-        provider,
-        name: model === "claude-sonnet-4-5" ? "Claude Sonnet 4.5" : "Claude Haiku 4.5",
-        reasoning: model !== "claude-haiku-4-5",
-      }),
-      hasConfiguredAuth: () => true,
+      getModels: (provider?: string) =>
+        provider ? models.filter((model) => model.provider === provider) : models,
+      getModel: (provider: string, model: string) =>
+        models.find((candidate) => candidate.provider === provider && candidate.id === model),
+      hasConfiguredAuth: (provider: string) => provider === "anthropic",
     };
     const session = await createShellSession({
       cwd: "/tmp/local-project",
@@ -529,8 +564,33 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     try {
       let output = await run("/model");
       expect(output).toContain("Agent model");
-      expect(output).toContain("Available models");
+      expect(output).toContain("Providers");
+      expect(output).toContain("openai");
+      expect(output).toContain("openrouter");
+      expect(output).not.toContain("anthropic");
+      expect(output).not.toContain("groq");
+      expect(output).toContain("Other providers: /login <id> or /model <id>");
+      expect(output).toMatch(/openai[\s\S]*auth required/);
+      expect(output).toContain("Use /login <provider> to save a key.");
+      expect(output).toContain("/login <provider>");
+      expect(output).toContain("Suggestions");
+      expect(output).toContain("openai/gpt-5.6-sol");
+      expect(output).toContain("openrouter/deepseek/deepseek-v4-flash-0731");
+      expect(output).not.toContain("anthropic/claude-sonnet-4-5");
+      expect(output).not.toContain("openai/gpt-5.2");
+      expect(output).not.toContain("groq/llama-3.3-70b");
+      expect(output).not.toMatch(/… \d+ more/);
+      expect(output).toContain("Use /model <provider> to list models");
+
+      output = await run("/model groq");
+      expect(output).toContain("Models from groq");
+      expect(output).toContain("groq/llama-3.3-70b");
+
+      output = await run("/model anthropic");
+      expect(output).toContain("Models from anthropic");
       expect(output).toContain("anthropic/claude-sonnet-4-5");
+      expect(output).toContain("anthropic/claude-haiku-4-5");
+      expect(output).not.toContain("openai/gpt-5.2");
 
       output = await run("/model sonnet");
       expect(output).toContain('Models matching "sonnet"');
@@ -547,5 +607,172 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       delete process.env.XDG_CONFIG_HOME;
       rmSync(configRoot, { recursive: true, force: true });
     }
+  });
+
+  it("notes when /model <provider> truncates a long catalog", async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), "tt-shell-model-trunc-"));
+    process.env.XDG_CONFIG_HOME = configRoot;
+    const stdout: string[] = [];
+    const models = Array.from({ length: 21 }, (_, index) => ({
+      id: `model-${String(index + 1).padStart(2, "0")}`,
+      provider: "anthropic",
+      name: `Model ${index + 1}`,
+      reasoning: true,
+    }));
+    const session = await createShellSession({
+      cwd: "/tmp/local-project",
+      env: { HOME: "/tmp/home" },
+      io: {
+        write: (text) => stdout.push(text),
+        writeError: vi.fn(),
+        clear: vi.fn(),
+      },
+      runner: async () => ({ exitCode: 0 }),
+      agentModelRuntime: async () => ({
+        getProviders: () => [{ id: "anthropic", name: "Anthropic" }],
+        getModels: (provider?: string) =>
+          provider ? models.filter((model) => model.provider === provider) : models,
+        getModel: (provider: string, model: string) =>
+          models.find((candidate) => candidate.provider === provider && candidate.id === model),
+        hasConfiguredAuth: () => true,
+      }),
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
+    });
+
+    try {
+      stdout.length = 0;
+      await session.handleLine("/model anthropic");
+      const output = stdout.join("");
+      expect(output).toContain("Models from anthropic");
+      expect(output).toContain("anthropic/model-01");
+      expect(output).toContain("anthropic/model-20");
+      expect(output).not.toContain("anthropic/model-21");
+      expect(output).toMatch(/… 1 more — \/model <query> to search/);
+    } finally {
+      delete process.env.XDG_CONFIG_HOME;
+      rmSync(configRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("saves a provider API key through /login without putting the secret on the command line", async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), "tt-shell-login-"));
+    process.env.XDG_CONFIG_HOME = configRoot;
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const keys: Array<{ provider: string; apiKey: string }> = [];
+    const authenticated = new Set<string>();
+    const models = [
+      { id: "claude-sonnet-4-5", provider: "anthropic", name: "Claude Sonnet 4.5", reasoning: true },
+      { id: "gpt-5.2", provider: "openai", name: "GPT 5.2", reasoning: true },
+    ];
+    const prompts: string[] = [];
+    const session = await createShellSession({
+      cwd: "/tmp/local-project",
+      env: { HOME: "/tmp/home" },
+      io: {
+        write: (text) => stdout.push(text),
+        writeError: (text) => stderr.push(text),
+        clear: vi.fn(),
+        promptLine: async (message) => {
+          prompts.push(message);
+          return "openai";
+        },
+        promptSecret: async (message) => {
+          prompts.push(message);
+          return "  sk-test-openai  ";
+        },
+      },
+      runner: async () => ({ exitCode: 0 }),
+      agentModelRuntime: async () => ({
+        getProviders: () => [
+          { id: "anthropic", name: "Anthropic" },
+          { id: "openai", name: "OpenAI" },
+          { id: "groq", name: "Groq" },
+        ],
+        getModels: (provider?: string) =>
+          provider ? models.filter((model) => model.provider === provider) : models,
+        getModel: (provider: string, model: string) =>
+          models.find((candidate) => candidate.provider === provider && candidate.id === model),
+        hasConfiguredAuth: (provider: string) => authenticated.has(provider),
+        setRuntimeApiKey: async (provider, apiKey) => {
+          keys.push({ provider, apiKey });
+          authenticated.add(provider);
+        },
+      }),
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
+    });
+
+    try {
+      stdout.length = 0;
+      stderr.length = 0;
+      prompts.length = 0;
+      await session.handleLine("/login");
+      expect(stdout.join("")).toContain("Providers");
+      expect(stdout.join("")).toContain("openai");
+      expect(stdout.join("")).not.toContain("anthropic");
+      expect(stdout.join("")).not.toContain("groq");
+      expect(stdout.join("")).toContain("Other providers: /login <id>");
+      expect(prompts).toEqual(["Provider: ", "OpenAI API key: "]);
+      expect(stderr.join("")).toBe("");
+      expect(keys).toEqual([{ provider: "openai", apiKey: "sk-test-openai" }]);
+      expect(stdout.join("")).toContain("Saved openai credentials");
+
+      stdout.length = 0;
+      stderr.length = 0;
+      await session.handleLine("/login missing");
+      expect(stderr.join("")).toMatch(/Unknown provider "missing".*\/login <id> or \/model <id>/);
+
+      stdout.length = 0;
+      stderr.length = 0;
+      prompts.length = 0;
+      await session.handleLine("/login anthropic");
+      expect(prompts).toEqual(["Anthropic API key: "]);
+      expect(stdout.join("")).toContain("Saved anthropic credentials");
+      expect(keys).toEqual([
+        { provider: "openai", apiKey: "sk-test-openai" },
+        { provider: "anthropic", apiKey: "sk-test-openai" },
+      ]);
+      expect(stderr.join("")).toBe("");
+
+      stdout.length = 0;
+      await session.handleLine("/model openai/gpt-5.2");
+      expect(stdout.join("")).toContain("Agent model: openai/gpt-5.2");
+
+      stdout.length = 0;
+      stderr.length = 0;
+      prompts.length = 0;
+      await session.handleLine("/login");
+      expect(prompts[0]).toBe("Provider: ");
+      expect(prompts).not.toContain("OpenRouter API key: ");
+    } finally {
+      delete process.env.XDG_CONFIG_HOME;
+      rmSync(configRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses /login when the session cannot prompt for a key", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const session = await createShellSession({
+      cwd: "/tmp/local-project",
+      env: {},
+      io: {
+        write: (text) => stdout.push(text),
+        writeError: (text) => stderr.push(text),
+        clear: vi.fn(),
+      },
+      runner: async () => ({ exitCode: 0 }),
+      agentModelRuntime: async () => ({
+        getProviders: () => [{ id: "openai", name: "OpenAI" }],
+        getModels: () => [],
+        getModel: () => undefined,
+        hasConfiguredAuth: () => false,
+        setRuntimeApiKey: async () => {},
+      }),
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
+    });
+
+    await session.handleLine("/login openai");
+    expect(stderr.join("")).toMatch(/interactive tt session/);
   });
 });

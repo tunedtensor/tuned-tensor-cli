@@ -1,6 +1,9 @@
+import { chmodSync, existsSync } from "node:fs";
 import {
+  getAgentAuthPath,
   resolveAgentModel,
   resolveAgentModelDefinition,
+  unknownAgentProviderMessage,
   type AgentModelRuntime,
 } from "./agent-model.js";
 import {
@@ -16,6 +19,40 @@ import {
  * the `tt agent ...` commands and the `/model` shell command are thin wrappers
  * over these functions.
  */
+
+/** Providers shown in `/login` and `/model` so onboarding stays short. */
+export const FEATURED_AGENT_PROVIDERS = [
+  "openai",
+  "openrouter",
+] as const;
+
+/** Explicit `/model` suggestions. First matching catalog id wins. */
+export const RECOMMENDED_AGENT_MODELS = [
+  { provider: "openai", ids: ["gpt-5.6-sol"] },
+  {
+    provider: "openrouter",
+    ids: ["deepseek/deepseek-v4-flash-0731", "deepseek/deepseek-v4-flash"],
+  },
+] as const;
+
+const FEATURED_PROVIDER_INDEX = new Map<string, number>(
+  FEATURED_AGENT_PROVIDERS.map((id, index) => [id, index]),
+);
+
+function isFeaturedProvider(id: string): boolean {
+  return FEATURED_PROVIDER_INDEX.has(id);
+}
+
+export interface ListAgentProvidersOptions {
+  /** Limit the list to the onboarding providers. */
+  featuredOnly?: boolean;
+}
+
+export interface AgentProviderChoice {
+  id: string;
+  name: string;
+  authenticated: boolean;
+}
 
 export interface AgentModelChoice {
   provider: string;
@@ -57,6 +94,8 @@ export interface ListAgentModelsOptions {
   query?: string;
   /** Cap the returned list after relevance/alphabetic ordering. */
   limit?: number;
+  /** Limit the list to the onboarding providers. */
+  featuredOnly?: boolean;
 }
 
 function modelKey(model: { provider: string; id: string }): string {
@@ -80,6 +119,38 @@ function modelRelevance(
   return undefined;
 }
 
+export function listAgentProviders(
+  runtime: AgentModelRuntime,
+  options: ListAgentProvidersOptions = {},
+): AgentProviderChoice[] {
+  return runtime
+    .getProviders()
+    .filter((provider) => !options.featuredOnly || isFeaturedProvider(provider.id))
+    .map((provider): AgentProviderChoice => ({
+      id: provider.id,
+      name: provider.name ?? provider.id,
+      authenticated: runtime.hasConfiguredAuth(provider.id),
+    }))
+    .sort((left, right) => {
+      const leftRank = FEATURED_PROVIDER_INDEX.get(left.id);
+      const rightRank = FEATURED_PROVIDER_INDEX.get(right.id);
+      if (leftRank !== undefined || rightRank !== undefined) {
+        return (leftRank ?? Number.MAX_SAFE_INTEGER) - (rightRank ?? Number.MAX_SAFE_INTEGER)
+          || left.id.localeCompare(right.id);
+      }
+      return left.id.localeCompare(right.id);
+    });
+}
+
+export function findAgentProvider(
+  runtime: AgentModelRuntime,
+  id: string,
+): AgentProviderChoice | undefined {
+  const needle = id.trim().toLowerCase();
+  if (!needle) return undefined;
+  return listAgentProviders(runtime).find((provider) => provider.id.toLowerCase() === needle);
+}
+
 export function listAgentModels(
   runtime: AgentModelRuntime,
   options: ListAgentModelsOptions = {},
@@ -87,7 +158,8 @@ export function listAgentModels(
   let models: AgentModelChoice[] = runtime
     .getModels(options.provider)
     .filter((model) =>
-      options.includeUnauthenticated || runtime.hasConfiguredAuth(model.provider)
+      (options.includeUnauthenticated || runtime.hasConfiguredAuth(model.provider))
+      && (!options.featuredOnly || isFeaturedProvider(model.provider))
     )
     .map((model): AgentModelChoice => ({
       provider: model.provider,
@@ -119,6 +191,26 @@ export function listAgentModels(
   return models;
 }
 
+/** The two onboarding model picks, if they exist in the catalog. */
+export function recommendAgentModels(
+  runtime: AgentModelRuntime,
+  options: Pick<ListAgentModelsOptions, "includeUnauthenticated"> = {},
+): AgentModelChoice[] {
+  const models = listAgentModels(runtime, {
+    includeUnauthenticated: options.includeUnauthenticated ?? true,
+  });
+  const picks: AgentModelChoice[] = [];
+  for (const recommendation of RECOMMENDED_AGENT_MODELS) {
+    const match = recommendation.ids
+      .map((id) => models.find((model) =>
+        model.provider === recommendation.provider && model.id === id
+      ))
+      .find((model) => model !== undefined);
+    if (match) picks.push(match);
+  }
+  return picks;
+}
+
 export function describeAgentModel(
   runtime: AgentModelRuntime,
   env: Readonly<NodeJS.ProcessEnv>,
@@ -138,6 +230,28 @@ export function describeAgentModel(
     authenticated: runtime.hasConfiguredAuth(selection.provider),
     supportsThinking: resolved.model.reasoning !== false,
   };
+}
+
+export async function loginAgentProvider(
+  runtime: AgentModelRuntime,
+  provider: string,
+  apiKey: string,
+): Promise<{ provider: string }> {
+  const choice = findAgentProvider(runtime, provider);
+  if (!choice) {
+    throw new Error(unknownAgentProviderMessage(provider));
+  }
+  const key = apiKey.trim();
+  if (!key) {
+    throw new Error("API key cannot be empty.");
+  }
+  if (typeof runtime.setRuntimeApiKey !== "function") {
+    throw new Error("This session cannot store provider credentials.");
+  }
+  await runtime.setRuntimeApiKey(choice.id, key);
+  const authPath = getAgentAuthPath();
+  if (existsSync(authPath)) chmodSync(authPath, 0o600);
+  return { provider: choice.id };
 }
 
 export function setAgentModel(

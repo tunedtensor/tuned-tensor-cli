@@ -79,33 +79,41 @@ The interactive agent harness and conversation state run on your laptop.
 Inference runs through the provider/model you select, which may be a
 local endpoint or a remote provider.
 
-`tt` reuses provider authentication and custom model definitions from
-`~/.pi/agent/auth.json` and `~/.pi/agent/models.json`. Authenticate a provider
-through its normal login flow; `tt` deliberately has no provider-secret flags.
-Then inspect and select a provider/model:
+Run `tt` to open one terminal for conversation and commands. Workflow commands
+such as `runs list` and `doctor` work immediately. Chat waits until you choose
+a provider and model from inside the shell:
 
-```bash
-tt agent models --all
-tt agent configure --provider anthropic --model claude-sonnet-4-5 --thinking high
-tt agent status
+```text
+tt v0.13.1-beta.0
+agent not configured · workflow model base
+ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
+
+Use /model to choose a provider and model. Workflow commands work now.
+› /model
+› /login openai
+› /model openai
+› /model openai/gpt-5.6-sol
 ```
 
-`--thinking` accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or
-`max`.
-Selection metadata can be overridden per process with
-`TUNED_TENSOR_AGENT_PROVIDER`, `TUNED_TENSOR_AGENT_MODEL`, and
-`TUNED_TENSOR_AGENT_THINKING`. These values are not credentials.
-
-After configuration, run `tt` to open one terminal for conversation and
-commands:
+Use `/login` to save a provider API key. The shell asks which provider, then
+prompts for the key with hidden input and stores it under TT's local agent
+config. `/login <provider>` skips the provider prompt.
+`tt` does not accept provider secrets as flags and does not read
+`~/.pi/agent/`. `/model` and `/login` show OpenAI and OpenRouter.
+Other catalog providers remain available if you type their id.
+Unauthenticated entries are marked `auth required`. Local endpoints such as
+Ollama still need a placeholder `apiKey` in `models.json`.
 
 Before the shell opens, `tt` performs a short, non-blocking npm version check.
 If a newer stable release is available it recommends
 `npm install -g @tuned-tensor/cli@latest`; offline or unavailable registry
 checks are ignored.
 
+After a model is selected, the banner shows it and ordinary sentences go to
+the agent:
+
 ```text
-tt v0.13.0
+tt v0.13.1-beta.0
 agent anthropic/claude-sonnet-4-5 · workflow model base
 ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
 
@@ -138,16 +146,24 @@ is bound to the current workspace so changing directories before approval fails
 safely instead of writing somewhere else. Ambiguous write failures remain
 sealed as `outcome_unknown` for manual inspection. `/reject` never mutates.
 
-Useful shell controls include `/help`, `/status`, `/context`, `/model`, `/cd`,
-`/clear`, and `/exit`.
+Useful shell controls include `/help`, `/status`, `/context`, `/model`,
+`/login`, `/cd`, `/clear`, and `/exit`.
 The shell banner and `/context` surface the assistant's configured provider and
 model (`agent provider/model`) separately from the workflow model, so the
 model answering your prompts is always visible. `/model` shows and changes the
-laptop-local TT agent model: run it with no arguments for a short list of
-suggestions, search with `/model <query>` (only the closest matches are
-shown), or switch with `/model <provider>/<model>` (for example
-`/model anthropic/claude-sonnet-4-5`). The equivalent non-interactive commands
-are `tt agent models`, `tt agent configure`, and `tt agent status`.
+laptop-local TT agent model: run it with no arguments to list providers and the
+two suggested models (GPT-5.6 Sol and DeepSeek V4 Flash), `/model <provider>`
+to list that provider's models, search
+with `/model <query>` (only the closest matches are shown), or switch with
+`/model <provider>/<model>` (for example `/model anthropic/claude-sonnet-4-5`).
+`/login` asks which provider to authenticate, then prompts for that provider's
+API key with hidden input. `/login <provider>` skips the provider prompt.
+The equivalent non-interactive commands are `tt agent models`,
+`tt agent configure`, and `tt agent status`.
+`tt agent configure --thinking` accepts `off`, `minimal`, `low`, `medium`,
+`high`, `xhigh`, or `max`. Selection metadata can be overridden per process with
+`TUNED_TENSOR_AGENT_PROVIDER`, `TUNED_TENSOR_AGENT_MODEL`, and
+`TUNED_TENSOR_AGENT_THINKING`. These values are not credentials.
 The shell keeps normal terminal scrollback and command history only for the
 current process.
 

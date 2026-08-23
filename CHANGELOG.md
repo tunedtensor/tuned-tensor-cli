@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+## [0.13.1-beta.0] - 2026-08-23
+
+### Added
+
+- `/login` asks for a provider, then prompts for that provider's API key
+  (input is hidden) and stores it in TT's local agent auth file.
+  `/login <provider>` skips the provider prompt.
+
+### Changed
+
+- Interactive `tt` is the first onboarding step. The unconfigured shell banner
+  and chat hint point at `/model` instead of requiring `tt agent configure`
+  first. `/model` and `/login` show OpenAI and OpenRouter.
+  `/model` suggests `openai/gpt-5.6-sol` and OpenRouter DeepSeek V4 Flash.
+  Other catalog providers remain available as `/model <id>` or `/login <id>`.
+  `/model <provider>` lists that provider's models. `tt agent configure`
+  remains the non-interactive path.
+- Provider `auth.json` and `models.json` now live under
+  `~/.config/tuned-tensor/agent/` (or the XDG equivalent). `tt` no longer
+  reads or writes `~/.pi/agent/`. Missing-auth errors tell you to open the
+  `tt` shell and run `/login` instead of pointing at environment variables
+  or hand-editing that file. Unknown-provider errors point at
+  `/login <id>` or `/model <id>`.
+
+### Fixed
+
+- `/login` no longer doubles typed characters on the provider and API key
+  prompts (the shell readline was still listening while a nested prompt ran).
+- Thread persistence redacts API keys and OAuth tokens stored by `/login`,
+  including keys saved later in the same `tt` session.
+- `/model <provider>` notes when the catalog is truncated.
+- README no longer says local endpoints such as Ollama can be selected
+  without a key.
+
 ## [0.13.0] - 2026-08-18
 
 First stable local-only `tt`. Hosted account commands stay in the tree but

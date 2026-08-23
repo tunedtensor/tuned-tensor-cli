@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   describeAgentModel,
+  findAgentProvider,
   listAgentModels,
+  listAgentProviders,
+  loginAgentProvider,
+  recommendAgentModels,
   setAgentModel,
 } from "../agent-control.js";
 import type { AgentModelRuntime } from "../agent-model.js";
@@ -22,6 +26,7 @@ function makeRuntime(overrides: Partial<AgentModelRuntime> = {}): AgentModelRunt
       { id: "anthropic", name: "Anthropic" },
       { id: "openai", name: "OpenAI" },
       { id: "openrouter", name: "OpenRouter" },
+      { id: "groq", name: "Groq" },
     ],
     getModels: () => models,
     getModel: (provider, model) =>
@@ -79,6 +84,88 @@ describe("listAgentModels", () => {
 
     const all = listAgentModels(runtime, { includeUnauthenticated: true });
     expect(all.some((model) => model.provider === "openrouter")).toBe(true);
+  });
+});
+
+describe("listAgentProviders", () => {
+  it("lists providers with auth state and matches an exact provider id", () => {
+    const runtime = makeRuntime({
+      hasConfiguredAuth: (provider) => provider === "anthropic",
+    });
+    expect(listAgentProviders(runtime)).toEqual([
+      { id: "openai", name: "OpenAI", authenticated: false },
+      { id: "openrouter", name: "OpenRouter", authenticated: false },
+      { id: "anthropic", name: "Anthropic", authenticated: true },
+      { id: "groq", name: "Groq", authenticated: false },
+    ]);
+    expect(listAgentProviders(runtime, { featuredOnly: true })).toEqual([
+      { id: "openai", name: "OpenAI", authenticated: false },
+      { id: "openrouter", name: "OpenRouter", authenticated: false },
+    ]);
+    expect(findAgentProvider(runtime, "Anthropic")?.id).toBe("anthropic");
+    expect(findAgentProvider(runtime, "groq")?.id).toBe("groq");
+    expect(findAgentProvider(runtime, "sonnet")).toBeUndefined();
+  });
+});
+
+describe("recommendAgentModels", () => {
+  it("recommends GPT-5.6 Sol and DeepSeek V4 Flash when they are in the catalog", () => {
+    const runtime = makeRuntime({
+      getModels: () => [
+        ...models,
+        { id: "gpt-5.6-sol", provider: "openai", name: "GPT-5.6 Sol", reasoning: true },
+        {
+          id: "deepseek/deepseek-v4-flash-0731",
+          provider: "openrouter",
+          name: "DeepSeek V4 Flash 0731",
+          reasoning: true,
+        },
+      ],
+    });
+    expect(recommendAgentModels(runtime).map((model) => `${model.provider}/${model.id}`)).toEqual([
+      "openai/gpt-5.6-sol",
+      "openrouter/deepseek/deepseek-v4-flash-0731",
+    ]);
+  });
+
+  it("falls back to undated DeepSeek V4 Flash and omits missing picks", () => {
+    const runtime = makeRuntime({
+      getModels: () => [
+        {
+          id: "deepseek/deepseek-v4-flash",
+          provider: "openrouter",
+          name: "DeepSeek V4 Flash",
+          reasoning: true,
+        },
+      ],
+    });
+    expect(recommendAgentModels(runtime).map((model) => `${model.provider}/${model.id}`)).toEqual([
+      "openrouter/deepseek/deepseek-v4-flash",
+    ]);
+  });
+});
+
+describe("loginAgentProvider", () => {
+  it("stores a trimmed API key for a known provider", async () => {
+    const keys: Array<{ provider: string; apiKey: string }> = [];
+    const runtime = makeRuntime({
+      setRuntimeApiKey: async (provider, apiKey) => {
+        keys.push({ provider, apiKey });
+      },
+    });
+    await expect(loginAgentProvider(runtime, "OpenRouter", "  sk-or-test  "))
+      .resolves.toEqual({ provider: "openrouter" });
+    expect(keys).toEqual([{ provider: "openrouter", apiKey: "sk-or-test" }]);
+  });
+
+  it("rejects an unknown provider, empty key, or runtime that cannot store credentials", async () => {
+    const runtime = makeRuntime();
+    await expect(loginAgentProvider(runtime, "missing", "sk-test"))
+      .rejects.toThrow(/unknown provider "missing".*\/login <id> or \/model <id>/i);
+    await expect(loginAgentProvider(runtime, "anthropic", "   "))
+      .rejects.toThrow(/cannot be empty/i);
+    await expect(loginAgentProvider(runtime, "anthropic", "sk-test"))
+      .rejects.toThrow(/cannot store provider credentials/i);
   });
 });
 

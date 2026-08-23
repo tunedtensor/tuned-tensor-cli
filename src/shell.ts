@@ -20,10 +20,18 @@ import {
 } from "./shell-context.js";
 import {
   describeAgentModel,
+  findAgentProvider,
   listAgentModels,
+  listAgentProviders,
+  loginAgentProvider,
+  recommendAgentModels,
   setAgentModel,
+  type AgentModelChoice,
+  type AgentModelSummary,
+  type AgentProviderChoice,
 } from "./agent-control.js";
-import type { AgentModelRuntime } from "./agent-model.js";
+import { unknownAgentProviderMessage, type AgentModelRuntime } from "./agent-model.js";
+import { promptHiddenInput, promptVisibleInput } from "./secret-prompt.js";
 
 export type { WorkflowMode } from "./command-catalog.js";
 
@@ -231,6 +239,7 @@ export type SlashCommandName =
   | "status"
   | "context"
   | "model"
+  | "login"
   | "clear"
   | "cd"
   | "exit";
@@ -245,6 +254,7 @@ const SLASH_NAMES = new Set([
   "status",
   "context",
   "model",
+  "login",
   "clear",
   "cd",
   "exit",
@@ -336,6 +346,8 @@ export interface ShellSessionIO {
   write(text: string): void;
   writeError(text: string): void;
   clear(): void;
+  promptLine?(message: string): Promise<string>;
+  promptSecret?(message: string): Promise<string>;
 }
 
 export type ShellContextProvider = (
@@ -496,6 +508,9 @@ export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
   const heading = snapshot.version
     ? `${accent.bold("tt")} ${chalk.dim(`v${snapshot.version}`)}`
     : accent.bold("tt");
+  const configured = Boolean(
+    snapshot.context.agent?.provider && snapshot.context.agent?.model,
+  );
   const lines = [
     heading,
     chalk.dim(
@@ -503,7 +518,11 @@ export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
     ),
     chalk.dim("ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete"),
     "",
-    chalk.dim("Ask TT anything. Known commands run directly."),
+    chalk.dim(
+      configured
+        ? "Ask TT anything. Known commands run directly."
+        : "Use /model to choose a provider and model. Workflow commands work now.",
+    ),
   ];
   return `${lines.join("\n")}\n\n`;
 }
@@ -633,56 +652,90 @@ export class TunedTensorShellSession {
     const lines = styleDetailLines([
       detailLine("Agent model", label),
       detailLine("Change", "/model <provider>/<model>"),
+      detailLine("List", "/model <provider>"),
       detailLine("Search", "/model <query>"),
+      detailLine("Login", "/login <provider>"),
     ]);
 
-    const all = listAgentModels(runtime);
-    if (all.length === 0) {
-      lines.push("", chalk.dim("  no authenticated models — run `tt agent models --all` for the full catalog"));
-      return lines;
-    }
-
-    if (query) {
-      const matches = listAgentModels(runtime, { query });
-      lines.push("", chalk.bold(`Models matching ${JSON.stringify(query)}`));
+    const catalog = { includeUnauthenticated: true } as const;
+    const featuredCatalog = { ...catalog, featuredOnly: true } as const;
+    const provider = query ? findAgentProvider(runtime, query) : undefined;
+    if (provider) {
+      const matches = listAgentModels(runtime, { ...catalog, provider: provider.id });
+      lines.push("", chalk.bold(`Models from ${provider.id}`));
+      this.appendAgentModelChoices(lines, matches, summary, 20, "/model <query> to search");
       if (matches.length === 0) {
-        lines.push(chalk.dim("  no matches"));
-      } else {
-        const shown = matches.slice(0, 10);
-        for (const model of shown) {
-          lines.push(this.formatAgentModelChoice(model, summary));
-        }
-        if (matches.length > shown.length) {
-          lines.push(chalk.dim(`  … ${matches.length - shown.length} more — refine the query`));
-        }
+        lines.push(chalk.dim("  no models"));
       }
       return lines;
     }
 
-    const preferred = summary
-      ? all.filter((model) => model.provider === summary.provider)
-      : [];
-    const rest = summary
-      ? all.filter((model) => model.provider !== summary.provider)
-      : all;
-    const shown = [...preferred, ...rest].slice(0, 8);
-    lines.push("", chalk.bold(summary ? "Suggestions" : "Available models"));
-    for (const model of shown) {
-      lines.push(this.formatAgentModelChoice(model, summary));
+    if (query) {
+      const matches = listAgentModels(runtime, { ...catalog, query });
+      lines.push("", chalk.bold(`Models matching ${JSON.stringify(query)}`));
+      this.appendAgentModelChoices(lines, matches, summary, 10, "refine the query");
+      if (matches.length === 0) {
+        lines.push(chalk.dim("  no matches"));
+      }
+      return lines;
     }
-    if (all.length > shown.length) {
-      lines.push(chalk.dim(`  … ${all.length - shown.length} more — /model <query> to search`));
+
+    const providers = listAgentProviders(runtime, { featuredOnly: true });
+    lines.push("", chalk.bold("Providers"));
+    if (providers.length === 0) {
+      lines.push(chalk.dim("  no providers in the catalog"));
+    } else {
+      for (const choice of providers) {
+        lines.push(this.formatAgentProviderChoice(choice));
+      }
+      lines.push(chalk.dim("  Other providers: /login <id> or /model <id>"));
+      if (providers.some((choice) => !choice.authenticated)) {
+        lines.push(chalk.dim("  Use /login <provider> to save a key."));
+      }
+    }
+
+    const suggestions = recommendAgentModels(runtime, featuredCatalog);
+    lines.push("", chalk.bold("Suggestions"));
+    this.appendAgentModelChoices(lines, suggestions, summary);
+    if (suggestions.length === 0) {
+      lines.push(chalk.dim("  no models in the catalog"));
+    } else {
+      lines.push(chalk.dim("  Use /model <provider> to list models, /model <query> to search"));
     }
     return lines;
   }
 
+  private appendAgentModelChoices(
+    lines: string[],
+    models: readonly AgentModelChoice[],
+    summary: AgentModelSummary | undefined,
+    limit?: number,
+    moreHint?: string,
+  ): void {
+    const shown = limit ? models.slice(0, limit) : models;
+    for (const model of shown) {
+      lines.push(this.formatAgentModelChoice(model, summary));
+    }
+    if (limit && models.length > shown.length) {
+      const hint = moreHint ? ` — ${moreHint}` : "";
+      lines.push(chalk.dim(`  … ${models.length - shown.length} more${hint}`));
+    }
+  }
+
+  private formatAgentProviderChoice(provider: AgentProviderChoice): string {
+    const displayName = provider.name !== provider.id ? `  ${provider.name}` : "";
+    const auth = provider.authenticated ? "" : chalk.dim("  auth required");
+    return `  ${accent(provider.id)}${displayName}${auth}`;
+  }
+
   private formatAgentModelChoice(
-    model: { provider: string; id: string; name: string },
+    model: AgentModelChoice,
     summary: { provider: string; model: string } | undefined,
   ): string {
     const active = summary?.provider === model.provider && summary?.model === model.id;
     const displayName = model.name !== model.id ? `  ${model.name}` : "";
-    return `  ${accent(`${model.provider}/${model.id}`)}${displayName}${active ? chalk.dim(" (active)") : ""}`;
+    const auth = model.authenticated ? "" : chalk.dim("  auth required");
+    return `  ${accent(`${model.provider}/${model.id}`)}${displayName}${active ? chalk.dim(" (active)") : ""}${auth}`;
   }
 
   private async handleSlash(command: ParsedSlashCommand): Promise<ShellLineAction> {
@@ -711,7 +764,7 @@ export class TunedTensorShellSession {
           return "continue";
         }
         if (command.args.length !== 1) {
-          throw new ShellParseError("Usage: /model [<query> | <provider>/<model>]");
+          throw new ShellParseError("Usage: /model [<query> | <provider> | <provider>/<model>]");
         }
         const target = command.args[0]!;
         const slash = target.indexOf("/");
@@ -734,6 +787,47 @@ export class TunedTensorShellSession {
           : "";
         this.io.write(
           `${successMark()} Agent model: ${result.selection.provider}/${result.selection.model} (thinking ${result.selection.thinking})${note}.\n`,
+        );
+        return "continue";
+      }
+      case "login": {
+        const runtime = await this.requireAgentModelRuntime();
+        if (command.args.length > 1) {
+          throw new ShellParseError("Usage: /login [<provider>]");
+        }
+        let providerId = command.args[0]?.trim();
+        if (!providerId) {
+          const providers = listAgentProviders(runtime, { featuredOnly: true });
+          if (providers.length === 0) {
+            throw new ShellParseError("No providers in the catalog.");
+          }
+          this.writeLines([
+            "",
+            chalk.bold("Providers"),
+            ...providers.map((choice) => this.formatAgentProviderChoice(choice)),
+            chalk.dim("  Other providers: /login <id>"),
+          ]);
+          if (!this.io.promptLine) {
+            throw new ShellParseError("Usage: /login <provider>");
+          }
+          providerId = (await this.io.promptLine("Provider: ")).trim();
+          if (!providerId) {
+            throw new ShellParseError("Usage: /login <provider>");
+          }
+        }
+        const provider = findAgentProvider(runtime, providerId);
+        if (!provider) {
+          throw new ShellParseError(unknownAgentProviderMessage(providerId));
+        }
+        if (!this.io.promptSecret) {
+          throw new ShellParseError("Provider login needs an interactive tt session.");
+        }
+        const label = provider.name !== provider.id ? provider.name : provider.id;
+        const apiKey = await this.io.promptSecret(`${label} API key: `);
+        const result = await loginAgentProvider(runtime, provider.id, apiKey);
+        await this.refreshContext();
+        this.io.write(
+          `${successMark()} Saved ${result.provider} credentials. Chat and /model can use this provider now.\n`,
         );
         return "continue";
       }
@@ -937,6 +1031,36 @@ export async function startInteractiveShell(
 
   let readline: Interface | undefined;
   const terminalInput = input as RawModeInput;
+  const withPrompt = async (
+    message: string,
+    prompt: (
+      message: string,
+      input: NodeJS.ReadableStream,
+      output: NodeJS.WritableStream,
+    ) => Promise<string>,
+  ): Promise<string> => {
+    // pause() is not enough: the nested prompt must also detach stdin
+    // keypress listeners or each key is applied twice (op → oopp).
+    readline?.pause();
+    const restoreRawMode = terminalInput.isRaw === true
+      && typeof terminalInput.setRawMode === "function";
+    if (restoreRawMode) terminalInput.setRawMode!(false);
+    try {
+      return await prompt(message, input, output);
+    } finally {
+      if (restoreRawMode) terminalInput.setRawMode!(true);
+      readline?.resume();
+    }
+  };
+  const io: ShellSessionIO = {
+    ...streamIO(output, error),
+    async promptLine(message) {
+      return await withPrompt(message, promptVisibleInput);
+    },
+    async promptSecret(message) {
+      return await withPrompt(message, promptHiddenInput);
+    },
+  };
   const foregroundRunner: ShellCommandRunner = (request) =>
     withForegroundSignalHandoff(
       {
@@ -948,7 +1072,7 @@ export async function startInteractiveShell(
     );
   const session = await createShellSession({
     runner: foregroundRunner,
-    io: streamIO(output, error),
+    io,
     agent: options.agent,
     cwd: options.cwd,
     env: options.env,

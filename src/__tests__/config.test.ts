@@ -103,6 +103,12 @@ describe("config", () => {
     });
   });
 
+  describe("getAgentConfigDir", () => {
+    it("places agent files under the TT config directory", () => {
+      expect(configModule.getAgentConfigDir()).toBe(join(TEST_DIR, "tuned-tensor", "agent"));
+    });
+  });
+
   describe("getBaseUrl", () => {
     it("returns default URL when nothing is set", () => {
       expect(configModule.getBaseUrl()).toBe("https://tunedtensor.com");

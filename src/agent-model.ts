@@ -1,10 +1,7 @@
-import {
-  getAgentDir,
-  ModelRuntime,
-} from "@earendil-works/pi-coding-agent";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { AgentSelection, AgentThinkingLevel } from "./config.js";
+import { getAgentConfigDir, type AgentSelection, type AgentThinkingLevel } from "./config.js";
 
 export interface AgentProviderInfo {
   id: string;
@@ -23,6 +20,51 @@ export interface AgentModelRuntime {
   getModels(provider?: string): readonly AgentModelInfo[];
   getModel(provider: string, model: string): AgentModelInfo | undefined;
   hasConfiguredAuth(provider: string): boolean;
+  setRuntimeApiKey?(provider: string, apiKey: string): Promise<void>;
+}
+
+export function missingProviderAuthMessage(provider: string): string {
+  return `Provider "${provider}" is not authenticated. Open the tt shell and run /login ${provider} to save a key, then try again.`;
+}
+
+export function unknownAgentProviderMessage(provider: string): string {
+  return `Unknown provider "${provider}". Use /login <id> or /model <id>.`;
+}
+
+const MIN_REDACTED_SECRET_LENGTH = 8;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function pushSecret(secrets: string[], value: unknown): void {
+  if (typeof value !== "string") return;
+  const secret = value.trim();
+  if (secret.length < MIN_REDACTED_SECRET_LENGTH) return;
+  if (!secrets.includes(secret)) secrets.push(secret);
+}
+
+/** API keys and OAuth tokens from TT's agent auth file, for thread redaction. */
+export function readStoredProviderSecrets(authPath = getAgentAuthPath()): string[] {
+  if (!existsSync(authPath)) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(authPath, "utf-8"));
+  } catch {
+    return [];
+  }
+  if (!isRecord(parsed)) return [];
+  const secrets: string[] = [];
+  for (const credential of Object.values(parsed)) {
+    if (!isRecord(credential)) continue;
+    if (credential.type === "api_key") {
+      pushSecret(secrets, credential.key);
+    } else if (credential.type === "oauth") {
+      pushSecret(secrets, credential.access);
+      pushSecret(secrets, credential.refresh);
+    }
+  }
+  return secrets;
 }
 
 export interface ResolvedAgentModel {
@@ -36,9 +78,7 @@ export function resolveAgentModel(
 ): ResolvedAgentModel {
   const resolved = resolveAgentModelDefinition(runtime, selection);
   if (!runtime.hasConfiguredAuth(selection.provider)) {
-    throw new Error(
-      `Authenticate provider "${selection.provider}" first, then retry. Provider secrets are never accepted by tt flags.`,
-    );
+    throw new Error(missingProviderAuthMessage(selection.provider));
   }
   return resolved;
 }
@@ -69,15 +109,27 @@ export function resolveAgentModelDefinition(
   return { model, thinking: selection.thinking };
 }
 
+export function getAgentAuthPath(): string {
+  return join(getAgentConfigDir(), "auth.json");
+}
+
+export function getAgentModelsPath(): string {
+  return join(getAgentConfigDir(), "models.json");
+}
+
 export async function createPiModelRuntime(): Promise<ModelRuntime> {
-  const agentDir = getAgentDir();
-  const modelsPath = join(agentDir, "models.json");
+  const agentDir = getAgentConfigDir();
+  ensurePrivateDir(agentDir);
+  const modelsPath = getAgentModelsPath();
+  const authPath = getAgentAuthPath();
   ensureOpenRouterAppHeaders(modelsPath);
-  return await ModelRuntime.create({
-    authPath: join(agentDir, "auth.json"),
+  const runtime = await ModelRuntime.create({
+    authPath,
     modelsPath,
     allowModelNetwork: false,
   });
+  if (existsSync(authPath)) chmodSync(authPath, 0o600);
+  return runtime;
 }
 
 /**
@@ -93,6 +145,17 @@ const OPENROUTER_APP_HEADERS: Record<string, string> = {
   "X-OpenRouter-Categories": "cli-agent",
   "X-Title": "Tuned Tensor",
 };
+
+function ensurePrivateDir(dir: string): void {
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+}
+
+function writePrivateJson(path: string, value: unknown): void {
+  ensurePrivateDir(dirname(path));
+  writeFileSync(path, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
+  chmodSync(path, 0o600);
+}
 
 function ensureOpenRouterAppHeaders(modelsPath: string): void {
   let config: Record<string, unknown> = {};
@@ -126,6 +189,5 @@ function ensureOpenRouterAppHeaders(modelsPath: string): void {
   Object.assign(headers, OPENROUTER_APP_HEADERS);
 
   if (JSON.stringify(config) === before) return;
-  mkdirSync(dirname(modelsPath), { recursive: true });
-  writeFileSync(modelsPath, JSON.stringify(config, null, 2) + "\n");
+  writePrivateJson(modelsPath, config);
 }

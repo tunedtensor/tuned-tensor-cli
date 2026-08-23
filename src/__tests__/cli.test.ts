@@ -400,6 +400,7 @@ describe("unified command routing", () => {
       // Fails before the agent is configured.
       await options.agent?.handleLine("hello");
       expect(errors).toContain("agent is not configured");
+      expect(errors).toContain("/model");
       // Configure mid-session, as `tt agent configure` does.
       updateConfig({
         agent: { provider: "openai", model: "gpt-5.2", thinking: "medium" },
