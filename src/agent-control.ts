@@ -1,6 +1,5 @@
-import { chmodSync, existsSync } from "node:fs";
 import {
-  getAgentAuthPath,
+  persistProviderApiKey,
   resolveAgentModel,
   resolveAgentModelDefinition,
   unknownAgentProviderMessage,
@@ -245,12 +244,10 @@ export async function loginAgentProvider(
   if (!key) {
     throw new Error("API key cannot be empty.");
   }
-  if (typeof runtime.setRuntimeApiKey !== "function") {
-    throw new Error("This session cannot store provider credentials.");
+  persistProviderApiKey(choice.id, key);
+  if (typeof runtime.setRuntimeApiKey === "function") {
+    await runtime.setRuntimeApiKey(choice.id, key);
   }
-  await runtime.setRuntimeApiKey(choice.id, key);
-  const authPath = getAgentAuthPath();
-  if (existsSync(authPath)) chmodSync(authPath, 0o600);
   return { provider: choice.id };
 }
 

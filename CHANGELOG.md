@@ -2,8 +2,16 @@
 
 ## Unreleased
 
+## [0.13.1-beta.1] - 2026-08-23
+
 ### Fixed
 
+- `/login` writes the API key into `~/.config/tuned-tensor/agent/auth.json`.
+  Pi's `setRuntimeApiKey` only keeps the key in memory, so the file stayed
+  `{}` and the next `tt` session asked for `/login` again.
+- Missing-auth chat errors no longer name a leftover provider or tell you to
+  open the tt shell (you are already in it). They point at `/login` or
+  `/model`.
 - Local-runner tests no longer fail when SIGINT and SIGTERM arrive at the
   child in either order while cleanup is still pending.
 

@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   createPiModelRuntime,
+  getAgentAuthPath,
   getAgentModelsPath,
+  persistProviderApiKey,
   readStoredProviderSecrets,
   resolveAgentModel,
   type AgentModelRuntime,
@@ -74,7 +76,7 @@ describe("local agent model resolution", () => {
       provider: "anthropic",
       model: "claude-sonnet-4-5",
       thinking: "medium",
-    })).toThrow(/not authenticated.*Open the tt shell and run \/login anthropic/i);
+    })).toThrow(/No API key is saved for the selected model.*\/login.*\/model/i);
   });
 
   it("rejects a thinking level unsupported by the selected model", () => {
@@ -220,6 +222,45 @@ describe("local agent model resolution", () => {
       mkdirSync(dirname(authPath), { recursive: true });
       writeFileSync(authPath, "{ not json");
       expect(readStoredProviderSecrets()).toEqual([]);
+    } finally {
+      rmSync(xdg, { recursive: true, force: true });
+    }
+  });
+
+  it("persists an API key into auth.json without clobbering other providers", () => {
+    const xdg = isolatedConfigHome();
+    try {
+      const authPath = getAgentAuthPath();
+      mkdirSync(dirname(authPath), { recursive: true });
+      writeFileSync(authPath, JSON.stringify({
+        openai: { type: "api_key", key: "sk-keep-openai" },
+        groq: { type: "oauth", access: "groq-access-token", refresh: "groq-refresh-token", expires: 1 },
+      }));
+      persistProviderApiKey("openrouter", "  sk-or-persisted  ");
+      expect(JSON.parse(readFileSync(authPath, "utf-8"))).toEqual({
+        openai: { type: "api_key", key: "sk-keep-openai" },
+        groq: { type: "oauth", access: "groq-access-token", refresh: "groq-refresh-token", expires: 1 },
+        openrouter: { type: "api_key", key: "sk-or-persisted" },
+      });
+      persistProviderApiKey("openrouter", "sk-or-replaced");
+      expect(JSON.parse(readFileSync(authPath, "utf-8")).openrouter).toEqual({
+        type: "api_key",
+        key: "sk-or-replaced",
+      });
+      expect(statSync(authPath).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(xdg, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to clobber an unparseable auth.json", () => {
+    const xdg = isolatedConfigHome();
+    try {
+      const authPath = getAgentAuthPath();
+      mkdirSync(dirname(authPath), { recursive: true });
+      writeFileSync(authPath, "{ not json");
+      expect(() => persistProviderApiKey("openrouter", "sk-or-new")).toThrow(/Failed to read/);
+      expect(readFileSync(authPath, "utf-8")).toBe("{ not json");
     } finally {
       rmSync(xdg, { recursive: true, force: true });
     }

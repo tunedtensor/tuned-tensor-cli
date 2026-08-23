@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import chalk from "chalk";
@@ -716,6 +716,8 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       expect(stderr.join("")).toBe("");
       expect(keys).toEqual([{ provider: "openai", apiKey: "sk-test-openai" }]);
       expect(stdout.join("")).toContain("Saved openai credentials");
+      expect(JSON.parse(readFileSync(join(configRoot, "tuned-tensor", "agent", "auth.json"), "utf-8")))
+        .toEqual({ openai: { type: "api_key", key: "sk-test-openai" } });
 
       stdout.length = 0;
       stderr.length = 0;
@@ -732,6 +734,11 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
         { provider: "openai", apiKey: "sk-test-openai" },
         { provider: "anthropic", apiKey: "sk-test-openai" },
       ]);
+      expect(JSON.parse(readFileSync(join(configRoot, "tuned-tensor", "agent", "auth.json"), "utf-8")))
+        .toEqual({
+          openai: { type: "api_key", key: "sk-test-openai" },
+          anthropic: { type: "api_key", key: "sk-test-openai" },
+        });
       expect(stderr.join("")).toBe("");
 
       stdout.length = 0;

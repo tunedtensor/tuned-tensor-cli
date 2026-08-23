@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -146,7 +146,8 @@ describe("recommendAgentModels", () => {
 });
 
 describe("loginAgentProvider", () => {
-  it("stores a trimmed API key for a known provider", async () => {
+  it("persists a trimmed API key and overlays it on the current session", async () => {
+    const configRoot = temporaryConfigRoot();
     const keys: Array<{ provider: string; apiKey: string }> = [];
     const runtime = makeRuntime({
       setRuntimeApiKey: async (provider, apiKey) => {
@@ -156,16 +157,30 @@ describe("loginAgentProvider", () => {
     await expect(loginAgentProvider(runtime, "OpenRouter", "  sk-or-test  "))
       .resolves.toEqual({ provider: "openrouter" });
     expect(keys).toEqual([{ provider: "openrouter", apiKey: "sk-or-test" }]);
+    const authPath = join(configRoot, "tuned-tensor", "agent", "auth.json");
+    expect(JSON.parse(readFileSync(authPath, "utf-8"))).toEqual({
+      openrouter: { type: "api_key", key: "sk-or-test" },
+    });
+    expect(statSync(authPath).mode & 0o777).toBe(0o600);
   });
 
-  it("rejects an unknown provider, empty key, or runtime that cannot store credentials", async () => {
+  it("persists even when the current session has no in-memory overlay", async () => {
+    const configRoot = temporaryConfigRoot();
+    await expect(loginAgentProvider(makeRuntime(), "openai", "sk-live-openai"))
+      .resolves.toEqual({ provider: "openai" });
+    expect(JSON.parse(readFileSync(join(configRoot, "tuned-tensor", "agent", "auth.json"), "utf-8")))
+      .toEqual({ openai: { type: "api_key", key: "sk-live-openai" } });
+  });
+
+  it("rejects an unknown provider or empty key without writing auth.json", async () => {
+    const configRoot = temporaryConfigRoot();
     const runtime = makeRuntime();
     await expect(loginAgentProvider(runtime, "missing", "sk-test"))
       .rejects.toThrow(/unknown provider "missing".*\/login <id> or \/model <id>/i);
     await expect(loginAgentProvider(runtime, "anthropic", "   "))
       .rejects.toThrow(/cannot be empty/i);
-    await expect(loginAgentProvider(runtime, "anthropic", "sk-test"))
-      .rejects.toThrow(/cannot store provider credentials/i);
+    expect(() => readFileSync(join(configRoot, "tuned-tensor", "agent", "auth.json"), "utf-8"))
+      .toThrow(/ENOENT/);
   });
 });
 
