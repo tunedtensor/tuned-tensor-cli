@@ -27,6 +27,15 @@ export const FEATURED_AGENT_PROVIDERS = [
   "openrouter",
 ] as const;
 
+/** Explicit `/model` suggestions. First matching catalog id wins. */
+export const RECOMMENDED_AGENT_MODELS = [
+  { provider: "openai", ids: ["gpt-5.6-sol"] },
+  {
+    provider: "openrouter",
+    ids: ["deepseek/deepseek-v4-flash-0731", "deepseek/deepseek-v4-flash"],
+  },
+] as const;
+
 const FEATURED_PROVIDER_INDEX = new Map<string, number>(
   FEATURED_AGENT_PROVIDERS.map((id, index) => [id, index]),
 );
@@ -183,54 +192,22 @@ export function listAgentModels(
   return models;
 }
 
-function recommendationPenalty(id: string): number {
-  const lower = id.toLowerCase();
-  let penalty = 0;
-  if (lower.includes("~")) penalty += 1000;
-  if (lower.includes(":")) penalty += 500;
-  if (/\d{8}/.test(lower)) penalty += 200;
-  if (/(mini|nano|lite|haiku|spark|robotics)/.test(lower)) penalty += 50;
-  if (/(preview|latest)/.test(lower)) penalty += 20;
-  return penalty + lower.length;
-}
-
-function recommendationBonus(provider: string, id: string): number {
-  const lower = id.toLowerCase();
-  if (provider === "anthropic" && lower.includes("sonnet")) return 100;
-  if (provider === "openai" && /^gpt-\d/.test(lower)) return 100;
-  if (provider === "google" && lower.includes("gemini") && lower.includes("pro")) return 80;
-  if (provider === "google" && lower.includes("gemini") && lower.includes("flash")) return 60;
-  if (provider === "openrouter" && lower.includes("deepseek")) return 40;
-  return 0;
-}
-
-function isOpenRouterFirstPartyMirror(id: string): boolean {
-  return /^(anthropic|openai|google)\//i.test(id);
-}
-
-/** One onboarding pick per featured provider. */
+/** The two onboarding model picks, if they exist in the catalog. */
 export function recommendAgentModels(
   runtime: AgentModelRuntime,
   options: Pick<ListAgentModelsOptions, "includeUnauthenticated"> = {},
 ): AgentModelChoice[] {
   const models = listAgentModels(runtime, {
-    includeUnauthenticated: options.includeUnauthenticated,
-    featuredOnly: true,
+    includeUnauthenticated: options.includeUnauthenticated ?? true,
   });
   const picks: AgentModelChoice[] = [];
-  for (const provider of FEATURED_AGENT_PROVIDERS) {
-    const candidates = models.filter((model) => {
-      if (model.provider !== provider) return false;
-      if (provider === "openrouter" && isOpenRouterFirstPartyMirror(model.id)) return false;
-      return true;
-    });
-    if (candidates.length === 0) continue;
-    candidates.sort((left, right) => {
-      const leftScore = recommendationBonus(provider, left.id) - recommendationPenalty(left.id);
-      const rightScore = recommendationBonus(provider, right.id) - recommendationPenalty(right.id);
-      return rightScore - leftScore || left.id.localeCompare(right.id);
-    });
-    picks.push(candidates[0]!);
+  for (const recommendation of RECOMMENDED_AGENT_MODELS) {
+    const match = recommendation.ids
+      .map((id) => models.find((model) =>
+        model.provider === recommendation.provider && model.id === id
+      ))
+      .find((model) => model !== undefined);
+    if (match) picks.push(match);
   }
   return picks;
 }

@@ -8,7 +8,7 @@ import {
   resolveAgentModel,
   type AgentModelRuntime,
 } from "../agent-model.js";
-import { FEATURED_AGENT_PROVIDERS } from "../agent-control.js";
+import { FEATURED_AGENT_PROVIDERS, recommendAgentModels } from "../agent-control.js";
 
 const originalConfigHome = process.env.XDG_CONFIG_HOME;
 const originalPiAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -95,6 +95,11 @@ describe("local agent model resolution", () => {
       expect(productionRuntime.getModels().length).toBeGreaterThan(0);
       const providerIds = productionRuntime.getProviders().map((provider) => provider.id);
       expect(providerIds).toEqual(expect.arrayContaining([...FEATURED_AGENT_PROVIDERS]));
+      expect(recommendAgentModels(productionRuntime).map((model) => `${model.provider}/${model.id}`))
+        .toEqual([
+          "openai/gpt-5.6-sol",
+          "openrouter/deepseek/deepseek-v4-flash-0731",
+        ]);
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally {
       rmSync(xdg, { recursive: true, force: true });

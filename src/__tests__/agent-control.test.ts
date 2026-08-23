@@ -110,26 +110,37 @@ describe("listAgentProviders", () => {
 });
 
 describe("recommendAgentModels", () => {
-  it("picks one flagship model per featured provider", () => {
-    const runtime = makeRuntime();
-    expect(recommendAgentModels(runtime).map((model) => `${model.provider}/${model.id}`)).toEqual([
-      "anthropic/claude-sonnet-4-5",
-      "openai/gpt-5.2",
-      "openrouter/meta-llama/llama-3.3-70b",
-    ]);
-  });
-
-  it("skips OpenRouter mirrors of first-party models", () => {
+  it("recommends GPT-5.6 Sol and DeepSeek V4 Flash when they are in the catalog", () => {
     const runtime = makeRuntime({
       getModels: () => [
         ...models,
-        { id: "anthropic/claude-sonnet-4.5", provider: "openrouter", name: "Claude Sonnet", reasoning: true },
-        { id: "deepseek/deepseek-v4-flash", provider: "openrouter", name: "DeepSeek Flash", reasoning: true },
+        { id: "gpt-5.6-sol", provider: "openai", name: "GPT-5.6 Sol", reasoning: true },
+        {
+          id: "deepseek/deepseek-v4-flash-0731",
+          provider: "openrouter",
+          name: "DeepSeek V4 Flash 0731",
+          reasoning: true,
+        },
       ],
     });
     expect(recommendAgentModels(runtime).map((model) => `${model.provider}/${model.id}`)).toEqual([
-      "anthropic/claude-sonnet-4-5",
-      "openai/gpt-5.2",
+      "openai/gpt-5.6-sol",
+      "openrouter/deepseek/deepseek-v4-flash-0731",
+    ]);
+  });
+
+  it("falls back to undated DeepSeek V4 Flash and omits missing picks", () => {
+    const runtime = makeRuntime({
+      getModels: () => [
+        {
+          id: "deepseek/deepseek-v4-flash",
+          provider: "openrouter",
+          name: "DeepSeek V4 Flash",
+          reasoning: true,
+        },
+      ],
+    });
+    expect(recommendAgentModels(runtime).map((model) => `${model.provider}/${model.id}`)).toEqual([
       "openrouter/deepseek/deepseek-v4-flash",
     ]);
   });

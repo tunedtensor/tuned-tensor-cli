@@ -151,8 +151,9 @@ Useful shell controls include `/help`, `/status`, `/context`, `/model`,
 The shell banner and `/context` surface the assistant's configured provider and
 model (`agent provider/model`) separately from the workflow model, so the
 model answering your prompts is always visible. `/model` shows and changes the
-laptop-local TT agent model: run it with no arguments to list providers and one
-suggested model each, `/model <provider>` to list that provider's models, search
+laptop-local TT agent model: run it with no arguments to list providers and the
+two suggested models (GPT-5.6 Sol and DeepSeek V4 Flash), `/model <provider>`
+to list that provider's models, search
 with `/model <query>` (only the closest matches are shown), or switch with
 `/model <provider>/<model>` (for example `/model anthropic/claude-sonnet-4-5`).
 `/login` asks which provider to authenticate, then prompts for that provider's

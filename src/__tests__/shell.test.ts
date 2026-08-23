@@ -520,12 +520,20 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       { id: "claude-sonnet-4-5", provider: "anthropic", name: "Claude Sonnet 4.5", reasoning: true },
       { id: "claude-haiku-4-5", provider: "anthropic", name: "Claude Haiku 4.5", reasoning: false },
       { id: "gpt-5.2", provider: "openai", name: "GPT 5.2", reasoning: true },
+      { id: "gpt-5.6-sol", provider: "openai", name: "GPT-5.6 Sol", reasoning: true },
+      {
+        id: "deepseek/deepseek-v4-flash-0731",
+        provider: "openrouter",
+        name: "DeepSeek V4 Flash 0731",
+        reasoning: true,
+      },
       { id: "llama-3.3-70b", provider: "groq", name: "Llama 3.3 70B", reasoning: false },
     ];
     const modelRuntime = {
       getProviders: () => [
         { id: "anthropic", name: "Anthropic" },
         { id: "openai", name: "OpenAI" },
+        { id: "openrouter", name: "OpenRouter" },
         { id: "groq", name: "Groq" },
       ],
       getModels: (provider?: string) =>
@@ -565,13 +573,13 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       expect(output).toContain("Use /login <provider> to save a key.");
       expect(output).toContain("/login <provider>");
       expect(output).toContain("Suggestions");
-      expect(output).toContain("anthropic/claude-sonnet-4-5");
-      expect(output).toContain("openai/gpt-5.2");
-      expect(output).not.toContain("anthropic/claude-haiku-4-5");
+      expect(output).toContain("openai/gpt-5.6-sol");
+      expect(output).toContain("openrouter/deepseek/deepseek-v4-flash-0731");
+      expect(output).not.toContain("anthropic/claude-sonnet-4-5");
+      expect(output).not.toContain("openai/gpt-5.2");
       expect(output).not.toContain("groq/llama-3.3-70b");
       expect(output).not.toMatch(/… \d+ more/);
       expect(output).toContain("Use /model <provider> to list models");
-      expect(output).toMatch(/openai\/gpt-5\.2[\s\S]*auth required/);
 
       output = await run("/model groq");
       expect(output).toContain("Models from groq");
