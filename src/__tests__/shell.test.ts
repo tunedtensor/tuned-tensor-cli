@@ -139,11 +139,16 @@ describe("parseSlashCommand", () => {
     expect(() => parseSlashCommand("/local")).toThrow(/Unknown session command/);
   });
 
-  it("parses /model and suggests fixes for mistyped session commands", () => {
+  it("parses /model and /login and suggests fixes for mistyped session commands", () => {
     expect(parseSlashCommand("/model")).toEqual({ name: "model", args: [] });
     expect(parseSlashCommand("/model abc123")).toEqual({
       name: "model",
       args: ["abc123"],
+    });
+    expect(parseSlashCommand("/login")).toEqual({ name: "login", args: [] });
+    expect(parseSlashCommand("/login openrouter")).toEqual({
+      name: "login",
+      args: ["openrouter"],
     });
     expect(() => parseSlashCommand("/stat")).toThrow(/Did you mean \/status\?/);
     expect(() => parseSlashCommand("/models")).toThrow(/need no slash/);
@@ -156,6 +161,7 @@ describe("command completion", () => {
 
     expect(complete("runs c")[0]).toContain("runs compare");
     expect(complete("/mo")[0]).toEqual(["/model"]);
+    expect(complete("/lo")[0]).toEqual(["/login"]);
     expect(complete("cl")[0].join(" ")).not.toMatch(/\bcloud\b/);
     expect(complete("auth")[0].join(" ")).not.toMatch(/\bauth\b/);
     expect(complete("publish")[0].join(" ")).not.toMatch(/\bpublish\b/);
@@ -552,6 +558,8 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       expect(output).toContain("anthropic");
       expect(output).toContain("openai");
       expect(output).toMatch(/openai[\s\S]*auth required/);
+      expect(output).toContain("Use /login <provider> to save a key.");
+      expect(output).toContain("/login <provider>");
       expect(output).toContain("Available models");
       expect(output).toContain("anthropic/claude-sonnet-4-5");
       expect(output).toContain("openai/gpt-5.2");
@@ -623,5 +631,103 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       delete process.env.XDG_CONFIG_HOME;
       rmSync(configRoot, { recursive: true, force: true });
     }
+  });
+
+  it("saves a provider API key through /login without putting the secret on the command line", async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), "tt-shell-login-"));
+    process.env.XDG_CONFIG_HOME = configRoot;
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const keys: Array<{ provider: string; apiKey: string }> = [];
+    const authenticated = new Set<string>();
+    const models = [
+      { id: "claude-sonnet-4-5", provider: "anthropic", name: "Claude Sonnet 4.5", reasoning: true },
+      { id: "gpt-5.2", provider: "openai", name: "GPT 5.2", reasoning: true },
+    ];
+    const session = await createShellSession({
+      cwd: "/tmp/local-project",
+      env: { HOME: "/tmp/home" },
+      io: {
+        write: (text) => stdout.push(text),
+        writeError: (text) => stderr.push(text),
+        clear: vi.fn(),
+        promptSecret: async () => "  sk-test-openai  ",
+      },
+      runner: async () => ({ exitCode: 0 }),
+      agentModelRuntime: async () => ({
+        getProviders: () => [
+          { id: "anthropic", name: "Anthropic" },
+          { id: "openai", name: "OpenAI" },
+        ],
+        getModels: (provider?: string) =>
+          provider ? models.filter((model) => model.provider === provider) : models,
+        getModel: (provider: string, model: string) =>
+          models.find((candidate) => candidate.provider === provider && candidate.id === model),
+        hasConfiguredAuth: (provider: string) => authenticated.has(provider),
+        setRuntimeApiKey: async (provider, apiKey) => {
+          keys.push({ provider, apiKey });
+          authenticated.add(provider);
+        },
+      }),
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
+    });
+
+    try {
+      stdout.length = 0;
+      stderr.length = 0;
+      await session.handleLine("/login");
+      expect(stderr.join("")).toMatch(/Usage: \/login <provider>/);
+
+      stdout.length = 0;
+      stderr.length = 0;
+      await session.handleLine("/login missing");
+      expect(stderr.join("")).toMatch(/Unknown provider "missing"/);
+
+      stdout.length = 0;
+      stderr.length = 0;
+      await session.handleLine("/login openai");
+      expect(stdout.join("")).toContain("Saved openai credentials");
+      expect(keys).toEqual([{ provider: "openai", apiKey: "sk-test-openai" }]);
+      expect(stderr.join("")).toBe("");
+
+      stdout.length = 0;
+      await session.handleLine("/model openai/gpt-5.2");
+      expect(stdout.join("")).toContain("Agent model: openai/gpt-5.2");
+
+      stdout.length = 0;
+      stderr.length = 0;
+      await session.handleLine("/login");
+      expect(stdout.join("")).toContain("Saved openai credentials");
+      expect(keys).toHaveLength(2);
+    } finally {
+      delete process.env.XDG_CONFIG_HOME;
+      rmSync(configRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses /login when the session cannot prompt for a key", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const session = await createShellSession({
+      cwd: "/tmp/local-project",
+      env: {},
+      io: {
+        write: (text) => stdout.push(text),
+        writeError: (text) => stderr.push(text),
+        clear: vi.fn(),
+      },
+      runner: async () => ({ exitCode: 0 }),
+      agentModelRuntime: async () => ({
+        getProviders: () => [{ id: "openai", name: "OpenAI" }],
+        getModels: () => [],
+        getModel: () => undefined,
+        hasConfiguredAuth: () => false,
+        setRuntimeApiKey: async () => {},
+      }),
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
+    });
+
+    await session.handleLine("/login openai");
+    expect(stderr.join("")).toMatch(/interactive tt session/);
   });
 });

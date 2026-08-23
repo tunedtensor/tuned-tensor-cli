@@ -1,4 +1,6 @@
+import { chmodSync, existsSync } from "node:fs";
 import {
+  getAgentAuthPath,
   resolveAgentModel,
   resolveAgentModelDefinition,
   type AgentModelRuntime,
@@ -166,6 +168,28 @@ export function describeAgentModel(
     authenticated: runtime.hasConfiguredAuth(selection.provider),
     supportsThinking: resolved.model.reasoning !== false,
   };
+}
+
+export async function loginAgentProvider(
+  runtime: AgentModelRuntime,
+  provider: string,
+  apiKey: string,
+): Promise<{ provider: string }> {
+  const choice = findAgentProvider(runtime, provider);
+  if (!choice) {
+    throw new Error(`Unknown provider "${provider}". Use /model to list providers.`);
+  }
+  const key = apiKey.trim();
+  if (!key) {
+    throw new Error("API key cannot be empty.");
+  }
+  if (typeof runtime.setRuntimeApiKey !== "function") {
+    throw new Error("This session cannot store provider credentials.");
+  }
+  await runtime.setRuntimeApiKey(choice.id, key);
+  const authPath = getAgentAuthPath();
+  if (existsSync(authPath)) chmodSync(authPath, 0o600);
+  return { provider: choice.id };
 }
 
 export function setAgentModel(

@@ -23,12 +23,14 @@ import {
   findAgentProvider,
   listAgentModels,
   listAgentProviders,
+  loginAgentProvider,
   setAgentModel,
   type AgentModelChoice,
   type AgentModelSummary,
   type AgentProviderChoice,
 } from "./agent-control.js";
 import type { AgentModelRuntime } from "./agent-model.js";
+import { promptHiddenInput } from "./secret-prompt.js";
 
 export type { WorkflowMode } from "./command-catalog.js";
 
@@ -236,6 +238,7 @@ export type SlashCommandName =
   | "status"
   | "context"
   | "model"
+  | "login"
   | "clear"
   | "cd"
   | "exit";
@@ -250,6 +253,7 @@ const SLASH_NAMES = new Set([
   "status",
   "context",
   "model",
+  "login",
   "clear",
   "cd",
   "exit",
@@ -341,6 +345,7 @@ export interface ShellSessionIO {
   write(text: string): void;
   writeError(text: string): void;
   clear(): void;
+  promptSecret?(message: string): Promise<string>;
 }
 
 export type ShellContextProvider = (
@@ -647,6 +652,7 @@ export class TunedTensorShellSession {
       detailLine("Change", "/model <provider>/<model>"),
       detailLine("List", "/model <provider>"),
       detailLine("Search", "/model <query>"),
+      detailLine("Login", "/login <provider>"),
     ]);
 
     const catalog = { includeUnauthenticated: true } as const;
@@ -678,6 +684,9 @@ export class TunedTensorShellSession {
     } else {
       for (const choice of providers) {
         lines.push(this.formatAgentProviderChoice(choice));
+      }
+      if (providers.some((choice) => !choice.authenticated)) {
+        lines.push(chalk.dim("  Use /login <provider> to save a key."));
       }
     }
 
@@ -781,6 +790,37 @@ export class TunedTensorShellSession {
           : "";
         this.io.write(
           `${successMark()} Agent model: ${result.selection.provider}/${result.selection.model} (thinking ${result.selection.thinking})${note}.\n`,
+        );
+        return "continue";
+      }
+      case "login": {
+        const runtime = await this.requireAgentModelRuntime();
+        if (command.args.length > 1) {
+          throw new ShellParseError("Usage: /login [<provider>]");
+        }
+        const requested = command.args[0]?.trim();
+        const fallback = requested
+          ? undefined
+          : describeAgentModel(runtime, this.env)?.provider;
+        const providerId = requested || fallback;
+        if (!providerId) {
+          throw new ShellParseError("Usage: /login <provider>");
+        }
+        const provider = findAgentProvider(runtime, providerId);
+        if (!provider) {
+          throw new ShellParseError(
+            `Unknown provider "${providerId}". Use /model to list providers.`,
+          );
+        }
+        if (!this.io.promptSecret) {
+          throw new ShellParseError("Provider login needs an interactive tt session.");
+        }
+        const label = provider.name !== provider.id ? provider.name : provider.id;
+        const apiKey = await this.io.promptSecret(`${label} API key: `);
+        const result = await loginAgentProvider(runtime, provider.id, apiKey);
+        await this.refreshContext();
+        this.io.write(
+          `${successMark()} Saved ${result.provider} credentials. Chat and /model can use this provider now.\n`,
         );
         return "continue";
       }
@@ -984,6 +1024,21 @@ export async function startInteractiveShell(
 
   let readline: Interface | undefined;
   const terminalInput = input as RawModeInput;
+  const io: ShellSessionIO = {
+    ...streamIO(output, error),
+    async promptSecret(message) {
+      readline?.pause();
+      const restoreRawMode = terminalInput.isRaw === true
+        && typeof terminalInput.setRawMode === "function";
+      if (restoreRawMode) terminalInput.setRawMode!(false);
+      try {
+        return await promptHiddenInput(message, input, output);
+      } finally {
+        if (restoreRawMode) terminalInput.setRawMode!(true);
+        readline?.resume();
+      }
+    },
+  };
   const foregroundRunner: ShellCommandRunner = (request) =>
     withForegroundSignalHandoff(
       {
@@ -995,7 +1050,7 @@ export async function startInteractiveShell(
     );
   const session = await createShellSession({
     runner: foregroundRunner,
-    io: streamIO(output, error),
+    io,
     agent: options.agent,
     cwd: options.cwd,
     env: options.env,

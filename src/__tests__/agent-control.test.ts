@@ -7,6 +7,7 @@ import {
   findAgentProvider,
   listAgentModels,
   listAgentProviders,
+  loginAgentProvider,
   setAgentModel,
 } from "../agent-control.js";
 import type { AgentModelRuntime } from "../agent-model.js";
@@ -96,6 +97,30 @@ describe("listAgentProviders", () => {
     ]);
     expect(findAgentProvider(runtime, "Anthropic")?.id).toBe("anthropic");
     expect(findAgentProvider(runtime, "sonnet")).toBeUndefined();
+  });
+});
+
+describe("loginAgentProvider", () => {
+  it("stores a trimmed API key for a known provider", async () => {
+    const keys: Array<{ provider: string; apiKey: string }> = [];
+    const runtime = makeRuntime({
+      setRuntimeApiKey: async (provider, apiKey) => {
+        keys.push({ provider, apiKey });
+      },
+    });
+    await expect(loginAgentProvider(runtime, "OpenRouter", "  sk-or-test  "))
+      .resolves.toEqual({ provider: "openrouter" });
+    expect(keys).toEqual([{ provider: "openrouter", apiKey: "sk-or-test" }]);
+  });
+
+  it("rejects an unknown provider, empty key, or runtime that cannot store credentials", async () => {
+    const runtime = makeRuntime();
+    await expect(loginAgentProvider(runtime, "missing", "sk-test"))
+      .rejects.toThrow(/unknown provider "missing"/i);
+    await expect(loginAgentProvider(runtime, "anthropic", "   "))
+      .rejects.toThrow(/cannot be empty/i);
+    await expect(loginAgentProvider(runtime, "anthropic", "sk-test"))
+      .rejects.toThrow(/cannot store provider credentials/i);
   });
 });
 

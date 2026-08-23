@@ -20,6 +20,11 @@ export interface AgentModelRuntime {
   getModels(provider?: string): readonly AgentModelInfo[];
   getModel(provider: string, model: string): AgentModelInfo | undefined;
   hasConfiguredAuth(provider: string): boolean;
+  setRuntimeApiKey?(provider: string, apiKey: string): Promise<void>;
+}
+
+export function missingProviderAuthMessage(provider: string): string {
+  return `Provider "${provider}" is not authenticated. Use /login ${provider} to save a key, then try again.`;
 }
 
 export interface ResolvedAgentModel {
@@ -33,9 +38,7 @@ export function resolveAgentModel(
 ): ResolvedAgentModel {
   const resolved = resolveAgentModelDefinition(runtime, selection);
   if (!runtime.hasConfiguredAuth(selection.provider)) {
-    throw new Error(
-      `Provider "${selection.provider}" is not authenticated. Set a provider environment variable such as ANTHROPIC_API_KEY, or add credentials to ${getAgentAuthPath()}. Provider secrets are never accepted by tt flags.`,
-    );
+    throw new Error(missingProviderAuthMessage(selection.provider));
   }
   return resolved;
 }

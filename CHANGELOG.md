@@ -4,6 +4,12 @@
 
 ## [0.13.1-beta.0] - 2026-08-23
 
+### Added
+
+- `/login <provider>` prompts for a provider API key in the shell (input is
+  hidden) and stores it in TT's local agent auth file. `/login` with no
+  argument uses the currently selected provider.
+
 ### Changed
 
 - Interactive `tt` is the first onboarding step. The unconfigured shell banner
@@ -13,12 +19,11 @@
   `tt agent configure` remains the non-interactive path.
 - Provider `auth.json` and `models.json` now live under
   `~/.config/tuned-tensor/agent/` (or the XDG equivalent). `tt` no longer
-  reads or writes `~/.pi/agent/`.
+  reads or writes `~/.pi/agent/`. Missing-auth errors point at `/login`
+  instead of environment variables or hand-editing that file.
 
 ### Fixed
 
-- Missing-auth errors name the TT `auth.json` path and provider environment
-  variables instead of only saying not to pass secrets as flags.
 - `/model <provider>` notes when the catalog is truncated.
 - README no longer says local endpoints such as Ollama can be selected
   without a key.
