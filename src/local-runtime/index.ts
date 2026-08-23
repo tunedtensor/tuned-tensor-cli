@@ -45,6 +45,7 @@ export * from "./run-reporter.js";
 export * from "./store.js";
 export * from "./general-regression.js";
 export * from "./active-model.js";
+export * from "./nanochat-lifecycle.js";
 
 export interface LocalRunnerInfo {
   name: "tuned-tensor-local";

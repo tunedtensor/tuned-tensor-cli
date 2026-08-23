@@ -181,6 +181,46 @@ to an omitted predecessor. Cloud-targeted steps fail closed unless you pass
 `--dry-run`. The TT agent may describe, validate, and prepare a plan, but has
 no direct pipeline-execute tool.
 
+## Audited nanochat lifecycle
+
+The portable Pipeline v1 contract remains the bounded base-versus-adapter
+workflow. From-scratch nanochat runs have a separate local lifecycle because
+they produce several checkpoint families instead of one run-scoped adapter.
+TuneTensor executes a fixed stage vocabulary rather than arbitrary commands:
+
+1. Hugging Face dataset download
+2. tokenizer training and evaluation
+3. base pretraining and evaluation
+4. supervised chat fine-tuning and chat evaluation
+5. optional reinforcement learning
+6. bounded inference benchmarking
+7. packaging
+
+Start from a clean, pinned nanochat checkout and a Python environment that can
+run it on the host GPU:
+
+```bash
+tt nanochat init \
+  --checkout /opt/nanochat \
+  --python /opt/nanochat/.venv/bin/python
+tt nanochat validate --file nanochat.json
+tt nanochat run --file nanochat.json
+```
+
+The generated recipe is deliberately a tiny GPU smoke profile. Increase its
+bounded model, data, and iteration settings only after it passes. Each run is
+written below `artifactRoot/<run-id>/` with:
+
+- the exact nanochat Git revision and tracked-dirty state;
+- the Hugging Face dataset identity and SHA-256 of every downloaded shard;
+- every stage command, dependency, timestamp, exit code, and private log;
+- content hashes for tokenizer and checkpoint outputs;
+- `lifecycle.json` and a final `package.json` checkpoint reference.
+
+RL is represented in every manifest and is skipped unless explicitly enabled.
+Current nanochat RL iterates a full GSM8K epoch, so it is not enabled in the
+smoke profile.
+
 ## Quick start
 
 Create a local project on an NVIDIA host:

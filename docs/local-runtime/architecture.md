@@ -40,6 +40,24 @@ The first version intentionally excludes:
 The next model or method should arrive with its own locked dependencies,
 resource defaults, data contract, and real CUDA acceptance test.
 
+## Foundation-model lifecycle boundary
+
+`tt nanochat` is a separate, bounded execution boundary for from-scratch
+experiments. It does not weaken the strict LoRA request schema or Pipeline v1's
+single-model-artifact invariant. The adapter accepts no user-authored commands:
+it maps validated numeric settings onto nanochat's known modules for dataset
+download, tokenizer training/evaluation, base training/evaluation, SFT, chat
+evaluation, optional RL, bounded inference benchmarking, and packaging.
+
+The checkout must be pinned to a full Git commit. Tracked modifications fail
+closed unless the recipe records an explicit `allowDirty` exception. Child
+processes receive an allow-listed environment without common provider
+credential environment variables. Every downloaded Hugging Face shard,
+tokenizer file, checkpoint, command, log,
+and stage transition is recorded in the run's content-hashed lifecycle
+manifest. This keeps training evidence independently reviewable without
+pretending nanochat itself is a general scheduler or artifact store.
+
 ## Python boundary
 
 Node owns input validation, state, process lifecycle, manifests, and reports.

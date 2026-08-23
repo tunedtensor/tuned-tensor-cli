@@ -28,6 +28,9 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   { path: "pipeline validate", description: "Validate a pipeline without executing it.", group: "Workflow", modes: LOCAL },
   { path: "pipeline plan", description: "Resolve pipeline steps and required artifacts.", group: "Workflow", modes: LOCAL },
   { path: "pipeline run", description: "Run or dry-run a local pipeline.", group: "Workflow", modes: LOCAL },
+  { path: "nanochat init", description: "Pin a nanochat checkout and create a lifecycle recipe.", group: "Workflow", modes: LOCAL },
+  { path: "nanochat validate", description: "Validate nanochat source and lifecycle configuration.", group: "Workflow", modes: LOCAL },
+  { path: "nanochat run", description: "Run and audit the complete nanochat lifecycle.", group: "Workflow", modes: LOCAL },
   { path: "shell", description: "Open the conversational terminal.", group: "Workflow", modes: LOCAL },
 
   { path: "runs list", description: "List local runs.", group: "Inspect", modes: LOCAL },

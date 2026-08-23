@@ -29,6 +29,7 @@ import { isJsonMode, setJsonMode } from "./output.js";
 import { registerLocalCommands } from "./commands/local.js";
 import { registerAgentCommands } from "./commands/agent.js";
 import { registerPipelineCommands } from "./commands/pipeline.js";
+import { registerNanochatCommands } from "./commands/nanochat.js";
 import { checkForCliUpdate, formatCliUpdateNotice } from "./update-check.js";
 export { extractPassthroughOptions } from "./passthrough.js";
 
@@ -318,6 +319,7 @@ export function createProgram(
     stderr: runtime.stderr ?? process.stderr,
   });
   registerPipelineCommands(program);
+  registerNanochatCommands(program);
   registerAgentCommands(program, {
     env,
     output: runtime.stdout ?? process.stdout,

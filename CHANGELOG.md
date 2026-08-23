@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- Added `tt nanochat init|validate|run`, a bounded local adapter for auditing
+  nanochat dataset acquisition, tokenizer work, pretraining, base evaluation,
+  SFT, chat evaluation, optional RL, and packaging. Runs pin the nanochat Git
+  revision and content-hash downloaded Hugging Face shards and stage outputs.
+
 ## [0.13.0] - 2026-08-18
 
 First stable local-only `tt`. Hosted account commands stay in the tree but
