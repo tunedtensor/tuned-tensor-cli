@@ -403,7 +403,9 @@ describe("runLocalCommand", () => {
 
     const result = await running;
     expect(result.exitCode).toBe(0);
-    expect(result.json).toEqual({ signals: ["SIGINT", "SIGTERM"] });
+    const signals = (result.json as { signals: string[] }).signals;
+    expect(signals).toHaveLength(2);
+    expect(signals).toEqual(expect.arrayContaining(["SIGINT", "SIGTERM"]));
     expect(process.listenerCount("SIGINT")).toBe(sigintListeners);
     expect(process.listenerCount("SIGTERM")).toBe(sigtermListeners);
   });

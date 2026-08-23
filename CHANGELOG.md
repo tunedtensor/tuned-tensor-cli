@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- Local-runner tests no longer fail when SIGINT and SIGTERM arrive at the
+  child in either order while cleanup is still pending.
+
 ## [0.13.1-beta.0] - 2026-08-23
 
 ### Added
