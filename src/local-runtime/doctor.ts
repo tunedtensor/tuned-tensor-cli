@@ -3,7 +3,8 @@ import { access, mkdir, statfs, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
-import type { FineTuneRunRequest, LocalRunnerConfig } from "./contracts.js";
+import type { FineTuneRunRequest, LocalFoundationSpecFile, LocalRunnerConfig } from "./contracts.js";
+import { foundationPlaceholderIssues } from "./local-project.js";
 import {
   minimalMachineLearningEnvironment,
   withHuggingFaceCacheEnvironment,
@@ -210,6 +211,17 @@ export function buildDoctorPythonPlans(config: LocalRunnerConfig): PythonProbePl
   ];
 }
 
+function foundationPlaceholderCheck(spec: LocalFoundationSpecFile): DoctorCheck {
+  const issues = foundationPlaceholderIssues(spec);
+  return {
+    name: "spec-content",
+    ok: issues.length === 0,
+    message: issues.length > 0
+      ? "The spec still contains generated placeholder content; edit it before training."
+      : `${spec.examples.length} spec example(s); foundation engine`,
+  };
+}
+
 function placeholderSpecCheck(request: FineTuneRunRequest): DoctorCheck {
   const placeholder = request.spec_snapshot.examples.some((example) =>
     /replace this with/i.test(example.input) || /replace this with/i.test(example.output)
@@ -247,7 +259,11 @@ async function localBaseModelCheck(
   }
 }
 
-export async function runDoctor(config: LocalRunnerConfig, request?: FineTuneRunRequest): Promise<DoctorCheck[]> {
+export async function runDoctor(
+  config: LocalRunnerConfig,
+  request?: FineTuneRunRequest,
+  foundationSpec?: LocalFoundationSpecFile,
+): Promise<DoctorCheck[]> {
   const checks: DoctorCheck[] = [];
   const nodeVersion = process.versions.node;
   const nodeMajor = Number(nodeVersion.split(".")[0]);
@@ -267,7 +283,9 @@ export async function runDoctor(config: LocalRunnerConfig, request?: FineTuneRun
     ));
   }
 
-  if (request) {
+  if (foundationSpec) {
+    checks.push(foundationPlaceholderCheck(foundationSpec));
+  } else if (request) {
     checks.push(placeholderSpecCheck(request));
     resolveTrainingModel(request.spec_snapshot.base_model);
   }

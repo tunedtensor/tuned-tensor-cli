@@ -198,8 +198,12 @@ export function assertLocalRunInputReady(request: FineTuneRunRequest): void {
   }
 }
 
+export function foundationPlaceholderIssues(spec: LocalFoundationSpecFile): string[] {
+  return placeholderIssues(spec.system_prompt, spec.examples);
+}
+
 export function assertFoundationSpecReady(spec: LocalFoundationSpecFile): void {
-  const issues = placeholderIssues(spec.system_prompt, spec.examples);
+  const issues = foundationPlaceholderIssues(spec);
   if (issues.length > 0) {
     throw new Error(`Edit the generated foundation spec before training: ${issues.join("; ")}.`);
   }

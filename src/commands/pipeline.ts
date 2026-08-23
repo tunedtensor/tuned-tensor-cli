@@ -133,7 +133,7 @@ export function registerPipelineCommands(parent: Command): void {
   pipeline.command("validate")
     .description("Validate a pipeline without any execution or transfer")
     .option("-f, --file <path>", "Pipeline file", DEFAULT_PIPELINE_FILE)
-    .option("--spec <path>", "Foundation spec used when the pipeline file is absent")
+    .option("--spec <path>", "Local behavior spec used to detect leftover engine mismatches", DEFAULT_SPEC_FILE)
     .action(async (options: { file: string; spec?: string }) => {
       const errors = validatePipeline(await resolvePipelineDocument(options));
       const result = { valid: errors.length === 0, errors };
@@ -145,7 +145,7 @@ export function registerPipelineCommands(parent: Command): void {
   pipeline.command("plan")
     .description("Resolve step targets and required artifact transfers")
     .option("-f, --file <path>", "Pipeline file", DEFAULT_PIPELINE_FILE)
-    .option("--spec <path>", "Foundation spec used when the pipeline file is absent")
+    .option("--spec <path>", "Local behavior spec used to detect leftover engine mismatches", DEFAULT_SPEC_FILE)
     .option("--only <ids>", "Comma-separated step IDs to include")
     .option("--skip <ids>", "Comma-separated step IDs to omit")
     .action(async (options: { file: string; spec?: string; only?: string; skip?: string }) => {

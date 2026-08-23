@@ -159,6 +159,54 @@ describe("pipeline commands", () => {
     }
   });
 
+  it("validate uses the default spec so leftover adapter pipelines fail beside a foundation spec", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tt-pipeline-"));
+    const cwd = process.cwd();
+    writeFileSync(
+      join(dir, "tunedtensor.json"),
+      JSON.stringify({
+        engine: "foundation",
+        name: "foundation-spec",
+        system_prompt: "Answer questions.",
+        guidelines: [],
+        constraints: [],
+        examples: [
+          { input: "hello", output: "world" },
+          { input: "thanks", output: "you are welcome" },
+        ],
+        foundation: {
+          vocab_size: 256,
+          max_chars: 20000,
+          depth: 2,
+          pretrain_steps: 2,
+          finetune_steps: 2,
+          rl_steps: 0,
+          batch_size: 2,
+          sequence_length: 64,
+          nproc_per_node: 1,
+        },
+      }),
+    );
+    writeFileSync(
+      join(dir, "tunedtensor.pipeline.json"),
+      JSON.stringify({
+        version: 1,
+        name: "adapter",
+        target: "local",
+        steps: [{ id: "baseline", uses: "evaluate", with: { model: "base" } }],
+      }),
+    );
+    const program = createProgram("test");
+    program.exitOverride();
+    try {
+      process.chdir(dir);
+      await expect(program.parseAsync(["node", "tt", "pipeline", "validate"])).rejects.toThrow(/is an adapter recipe/);
+    } finally {
+      process.chdir(cwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects run requests without --dry-run in this side-effect-free slice", async () => {
     const program = createProgram("test");
     program.exitOverride();

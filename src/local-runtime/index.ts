@@ -906,15 +906,19 @@ async function main(argv: string[]): Promise<void> {
     const hasDefaultSpec = cli.positionals[0]
       ? true
       : Boolean((await stat(inputPath).catch(() => null))?.isFile());
-    const request = hasDefaultSpec
-      ? await (async () => {
-        const input = await loadLocalRunInput(inputPath);
-        if (input.kind === "foundation-spec") return undefined;
-        if (input.kind === "spec") return input.request;
+    let request: FineTuneRunRequest | undefined;
+    let foundationSpec: import("./contracts.js").LocalFoundationSpecFile | undefined;
+    if (hasDefaultSpec) {
+      const input = await loadLocalRunInput(inputPath);
+      if (input.kind === "foundation-spec") {
+        foundationSpec = input.spec;
+      } else if (input.kind === "spec") {
+        request = input.request;
+      } else {
         throw new Error(`TT Local CLI expects a tunedtensor.json behavior spec, not a full run request: ${input.path}`);
-      })()
-      : undefined;
-    const checks = await runDoctor(configSelection.config, request);
+      }
+    }
+    const checks = await runDoctor(configSelection.config, request, foundationSpec);
     const ok = checks.every((check) => check.ok);
     printJson({
       ok,
