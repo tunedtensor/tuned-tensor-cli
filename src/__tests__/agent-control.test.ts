@@ -8,6 +8,7 @@ import {
   listAgentModels,
   listAgentProviders,
   loginAgentProvider,
+  recommendAgentModels,
   setAgentModel,
 } from "../agent-control.js";
 import type { AgentModelRuntime } from "../agent-model.js";
@@ -105,6 +106,32 @@ describe("listAgentProviders", () => {
     expect(findAgentProvider(runtime, "Anthropic")?.id).toBe("anthropic");
     expect(findAgentProvider(runtime, "groq")?.id).toBe("groq");
     expect(findAgentProvider(runtime, "sonnet")).toBeUndefined();
+  });
+});
+
+describe("recommendAgentModels", () => {
+  it("picks one flagship model per featured provider", () => {
+    const runtime = makeRuntime();
+    expect(recommendAgentModels(runtime).map((model) => `${model.provider}/${model.id}`)).toEqual([
+      "anthropic/claude-sonnet-4-5",
+      "openai/gpt-5.2",
+      "openrouter/meta-llama/llama-3.3-70b",
+    ]);
+  });
+
+  it("skips OpenRouter mirrors of first-party models", () => {
+    const runtime = makeRuntime({
+      getModels: () => [
+        ...models,
+        { id: "anthropic/claude-sonnet-4.5", provider: "openrouter", name: "Claude Sonnet", reasoning: true },
+        { id: "deepseek/deepseek-v4-flash", provider: "openrouter", name: "DeepSeek Flash", reasoning: true },
+      ],
+    });
+    expect(recommendAgentModels(runtime).map((model) => `${model.provider}/${model.id}`)).toEqual([
+      "anthropic/claude-sonnet-4-5",
+      "openai/gpt-5.2",
+      "openrouter/deepseek/deepseek-v4-flash",
+    ]);
   });
 });
 

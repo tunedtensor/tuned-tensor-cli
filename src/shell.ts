@@ -24,6 +24,7 @@ import {
   listAgentModels,
   listAgentProviders,
   loginAgentProvider,
+  recommendAgentModels,
   setAgentModel,
   type AgentModelChoice,
   type AgentModelSummary,
@@ -693,20 +694,13 @@ export class TunedTensorShellSession {
       }
     }
 
-    const all = listAgentModels(runtime, featuredCatalog);
-    const preferred = summary
-      ? all.filter((model) => model.provider === summary.provider)
-      : [];
-    const rest = summary
-      ? all.filter((model) => model.provider !== summary.provider)
-      : all;
-    const shown = [...preferred, ...rest].slice(0, 8);
-    lines.push("", chalk.bold(summary ? "Suggestions" : "Available models"));
-    this.appendAgentModelChoices(lines, shown, summary);
-    if (all.length === 0) {
+    const suggestions = recommendAgentModels(runtime, featuredCatalog);
+    lines.push("", chalk.bold("Suggestions"));
+    this.appendAgentModelChoices(lines, suggestions, summary);
+    if (suggestions.length === 0) {
       lines.push(chalk.dim("  no models in the catalog"));
-    } else if (all.length > shown.length) {
-      lines.push(chalk.dim(`  … ${all.length - shown.length} more — /model <provider> to list, /model <query> to search`));
+    } else {
+      lines.push(chalk.dim("  Use /model <provider> to list models, /model <query> to search"));
     }
     return lines;
   }

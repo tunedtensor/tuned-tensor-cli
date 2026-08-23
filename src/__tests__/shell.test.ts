@@ -564,10 +564,13 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       expect(output).toMatch(/openai[\s\S]*auth required/);
       expect(output).toContain("Use /login <provider> to save a key.");
       expect(output).toContain("/login <provider>");
-      expect(output).toContain("Available models");
+      expect(output).toContain("Suggestions");
       expect(output).toContain("anthropic/claude-sonnet-4-5");
       expect(output).toContain("openai/gpt-5.2");
+      expect(output).not.toContain("anthropic/claude-haiku-4-5");
       expect(output).not.toContain("groq/llama-3.3-70b");
+      expect(output).not.toMatch(/… \d+ more/);
+      expect(output).toContain("Use /model <provider> to list models");
       expect(output).toMatch(/openai\/gpt-5\.2[\s\S]*auth required/);
 
       output = await run("/model groq");
