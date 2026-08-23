@@ -5,6 +5,8 @@ import {
   canonicalFoundationPipeline,
   canonicalPipeline,
   createExecutionPlan,
+  isFoundationPipeline,
+  parsePipeline,
   pipelineFromFoundationHyperparameters,
   validatePipeline,
   type Pipeline,
@@ -44,11 +46,23 @@ function pipelineFromSpec(input: Extract<LocalRunInput, { kind: "foundation-spec
 
 async function resolvePipelineDocument(options: { file: string; spec?: string }): Promise<unknown> {
   const filePath = resolve(options.file);
-  if (existsSync(filePath)) return loadPipelineFile(options.file);
-  if (options.spec) {
-    const input = await loadLocalRunInput(resolve(options.spec));
-    if (input.kind === "foundation-spec") return pipelineFromSpec(input);
+  const fileExists = existsSync(filePath);
+  const specPath = options.spec ? resolve(options.spec) : undefined;
+  const specInput = specPath && existsSync(specPath) ? await loadLocalRunInput(specPath) : undefined;
+
+  if (specInput?.kind === "foundation-spec") {
+    if (fileExists) {
+      const document = loadPipelineFile(options.file);
+      if (isFoundationPipeline(parsePipeline(document))) return document;
+      throw new Error(
+        `Pipeline file ${options.file} is an adapter recipe, but ${options.spec} is a foundation spec. Use a foundation pipeline, omit --file, or pass an adapter spec.`,
+      );
+    }
+    return pipelineFromSpec(specInput);
   }
+
+  if (fileExists) return loadPipelineFile(options.file);
+  if (specPath && !existsSync(specPath)) await loadLocalRunInput(specPath);
   throw new Error(
     `Pipeline file not found: ${options.file}. Run \`tt pipeline init\` or pass a foundation --spec.`,
   );

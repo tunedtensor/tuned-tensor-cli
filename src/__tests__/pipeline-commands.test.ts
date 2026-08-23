@@ -80,6 +80,55 @@ describe("pipeline commands", () => {
     }
   });
 
+  it("rejects a leftover adapter pipeline file when --spec is foundation", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tt-pipeline-"));
+    const spec = join(dir, "tunedtensor.json");
+    const pipeline = join(dir, "tunedtensor.pipeline.json");
+    writeFileSync(
+      spec,
+      JSON.stringify({
+        engine: "foundation",
+        name: "foundation-spec",
+        system_prompt: "Answer questions.",
+        guidelines: [],
+        constraints: [],
+        examples: [
+          { input: "hello", output: "world" },
+          { input: "thanks", output: "you are welcome" },
+        ],
+        foundation: {
+          vocab_size: 256,
+          max_chars: 20000,
+          depth: 2,
+          pretrain_steps: 2,
+          finetune_steps: 2,
+          rl_steps: 0,
+          batch_size: 2,
+          sequence_length: 64,
+          nproc_per_node: 1,
+        },
+      }),
+    );
+    writeFileSync(
+      pipeline,
+      JSON.stringify({
+        version: 1,
+        name: "adapter",
+        target: "local",
+        steps: [{ id: "baseline", uses: "evaluate", with: { model: "base" } }],
+      }),
+    );
+    const program = createProgram("test");
+    program.exitOverride();
+    try {
+      await expect(
+        program.parseAsync(["node", "tt", "pipeline", "validate", "--spec", spec, "--file", pipeline]),
+      ).rejects.toThrow(/is an adapter recipe/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects run requests without --dry-run in this side-effect-free slice", async () => {
     const program = createProgram("test");
     program.exitOverride();
