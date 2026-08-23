@@ -579,4 +579,49 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       rmSync(configRoot, { recursive: true, force: true });
     }
   });
+
+  it("notes when /model <provider> truncates a long catalog", async () => {
+    const configRoot = mkdtempSync(join(tmpdir(), "tt-shell-model-trunc-"));
+    process.env.XDG_CONFIG_HOME = configRoot;
+    const stdout: string[] = [];
+    const models = Array.from({ length: 21 }, (_, index) => ({
+      id: `model-${String(index + 1).padStart(2, "0")}`,
+      provider: "anthropic",
+      name: `Model ${index + 1}`,
+      reasoning: true,
+    }));
+    const session = await createShellSession({
+      cwd: "/tmp/local-project",
+      env: { HOME: "/tmp/home" },
+      io: {
+        write: (text) => stdout.push(text),
+        writeError: vi.fn(),
+        clear: vi.fn(),
+      },
+      runner: async () => ({ exitCode: 0 }),
+      agentModelRuntime: async () => ({
+        getProviders: () => [{ id: "anthropic", name: "Anthropic" }],
+        getModels: (provider?: string) =>
+          provider ? models.filter((model) => model.provider === provider) : models,
+        getModel: (provider: string, model: string) =>
+          models.find((candidate) => candidate.provider === provider && candidate.id === model),
+        hasConfiguredAuth: () => true,
+      }),
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
+    });
+
+    try {
+      stdout.length = 0;
+      await session.handleLine("/model anthropic");
+      const output = stdout.join("");
+      expect(output).toContain("Models from anthropic");
+      expect(output).toContain("anthropic/model-01");
+      expect(output).toContain("anthropic/model-20");
+      expect(output).not.toContain("anthropic/model-21");
+      expect(output).toMatch(/… 1 more — \/model <query> to search/);
+    } finally {
+      delete process.env.XDG_CONFIG_HOME;
+      rmSync(configRoot, { recursive: true, force: true });
+    }
+  });
 });

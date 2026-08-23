@@ -15,6 +15,14 @@
   `~/.config/tuned-tensor/agent/` (or the XDG equivalent). `tt` no longer
   reads or writes `~/.pi/agent/`.
 
+### Fixed
+
+- Missing-auth errors name the TT `auth.json` path and provider environment
+  variables instead of only saying not to pass secrets as flags.
+- `/model <provider>` notes when the catalog is truncated.
+- README no longer says local endpoints such as Ollama can be selected
+  without a key.
+
 ## [0.13.0] - 2026-08-18
 
 First stable local-only `tt`. Hosted account commands stay in the tree but

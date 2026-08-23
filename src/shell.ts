@@ -654,7 +654,7 @@ export class TunedTensorShellSession {
     if (provider) {
       const matches = listAgentModels(runtime, { ...catalog, provider: provider.id });
       lines.push("", chalk.bold(`Models from ${provider.id}`));
-      this.appendAgentModelChoices(lines, matches, summary, 20);
+      this.appendAgentModelChoices(lines, matches, summary, 20, "/model <query> to search");
       if (matches.length === 0) {
         lines.push(chalk.dim("  no models"));
       }
@@ -664,11 +664,9 @@ export class TunedTensorShellSession {
     if (query) {
       const matches = listAgentModels(runtime, { ...catalog, query });
       lines.push("", chalk.bold(`Models matching ${JSON.stringify(query)}`));
-      this.appendAgentModelChoices(lines, matches, summary, 10);
+      this.appendAgentModelChoices(lines, matches, summary, 10, "refine the query");
       if (matches.length === 0) {
         lines.push(chalk.dim("  no matches"));
-      } else if (matches.length > 10) {
-        lines.push(chalk.dim(`  … ${matches.length - 10} more — refine the query`));
       }
       return lines;
     }
@@ -706,10 +704,15 @@ export class TunedTensorShellSession {
     models: readonly AgentModelChoice[],
     summary: AgentModelSummary | undefined,
     limit?: number,
+    moreHint?: string,
   ): void {
     const shown = limit ? models.slice(0, limit) : models;
     for (const model of shown) {
       lines.push(this.formatAgentModelChoice(model, summary));
+    }
+    if (limit && models.length > shown.length) {
+      const hint = moreHint ? ` — ${moreHint}` : "";
+      lines.push(chalk.dim(`  … ${models.length - shown.length} more${hint}`));
     }
   }
 

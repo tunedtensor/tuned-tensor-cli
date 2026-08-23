@@ -100,8 +100,9 @@ Use /model to choose a provider and model. Workflow commands work now.
 Provider environment variables such as `ANTHROPIC_API_KEY` still apply.
 `tt` deliberately has no provider-secret flags and does not read
 `~/.pi/agent/`. `/model` lists providers even when auth is still missing and
-marks those entries `auth required`. Local endpoints such as Ollama can be
-selected without a key.
+marks those entries `auth required`. Selecting a model still needs provider
+auth: an environment variable, credentials in `auth.json`, or a placeholder
+`apiKey` in `models.json` for local endpoints such as Ollama.
 
 Before the shell opens, `tt` performs a short, non-blocking npm version check.
 If a newer stable release is available it recommends

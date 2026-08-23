@@ -72,7 +72,7 @@ describe("local agent model resolution", () => {
       provider: "anthropic",
       model: "claude-sonnet-4-5",
       thinking: "medium",
-    })).toThrow(/authenticate.*anthropic/i);
+    })).toThrow(/not authenticated.*ANTHROPIC_API_KEY.*auth\.json/is);
   });
 
   it("rejects a thinking level unsupported by the selected model", () => {

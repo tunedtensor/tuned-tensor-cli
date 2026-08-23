@@ -34,7 +34,7 @@ export function resolveAgentModel(
   const resolved = resolveAgentModelDefinition(runtime, selection);
   if (!runtime.hasConfiguredAuth(selection.provider)) {
     throw new Error(
-      `Authenticate provider "${selection.provider}" first, then retry. Provider secrets are never accepted by tt flags.`,
+      `Provider "${selection.provider}" is not authenticated. Set a provider environment variable such as ANTHROPIC_API_KEY, or add credentials to ${getAgentAuthPath()}. Provider secrets are never accepted by tt flags.`,
     );
   }
   return resolved;
