@@ -81,14 +81,16 @@ export async function createPiModelRuntime(): Promise<ModelRuntime> {
 }
 
 /**
- * OpenRouter attributes requests to an app via the HTTP-Referer/X-Title
- * headers. Without them the OpenRouter dashboard shows tt's agent traffic as
- * "Unknown" app. tt composes provider-level `headers` from models.json over
- * the built-in openrouter provider, so we merge ours in (preserving any
- * existing user config) before the runtime loads.
+ * OpenRouter attributes requests to an app via HTTP-Referer and
+ * X-OpenRouter-Title. Keep legacy X-Title for backwards compatibility. tt
+ * composes provider-level `headers` from models.json over Pi's built-in
+ * OpenRouter attribution, so we merge ours in (preserving any existing user
+ * config) before the runtime loads.
  */
 const OPENROUTER_APP_HEADERS: Record<string, string> = {
   "HTTP-Referer": "https://tunedtensor.com",
+  "X-OpenRouter-Title": "Tuned Tensor",
+  "X-OpenRouter-Categories": "cli-agent",
   "X-Title": "Tuned Tensor",
 };
 
@@ -115,6 +117,12 @@ function ensureOpenRouterAppHeaders(modelsPath: string): void {
   const providers = asRecord(config.providers) ?? (config.providers = empty());
   const openrouter = asRecord(providers.openrouter) ?? (providers.openrouter = empty());
   const headers = asRecord(openrouter.headers) ?? (openrouter.headers = empty());
+  const attributionNames = new Set(
+    Object.keys(OPENROUTER_APP_HEADERS).map((name) => name.toLowerCase()),
+  );
+  for (const name of Object.keys(headers)) {
+    if (attributionNames.has(name.toLowerCase())) delete headers[name];
+  }
   Object.assign(headers, OPENROUTER_APP_HEADERS);
 
   if (JSON.stringify(config) === before) return;
