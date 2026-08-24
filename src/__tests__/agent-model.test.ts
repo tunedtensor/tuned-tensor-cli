@@ -208,6 +208,7 @@ describe("local agent model resolution", () => {
         "sk-login-openai-key",
         "or-access-token-value",
         "or-refresh-token-value",
+        "short",
       ]);
     } finally {
       rmSync(xdg, { recursive: true, force: true });
