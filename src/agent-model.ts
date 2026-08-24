@@ -31,8 +31,6 @@ export function unknownAgentProviderMessage(provider: string): string {
   return `Unknown provider "${provider}". Use /login <id> or /model <id>.`;
 }
 
-const MIN_REDACTED_SECRET_LENGTH = 8;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -40,7 +38,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function pushSecret(secrets: string[], value: unknown): void {
   if (typeof value !== "string") return;
   const secret = value.trim();
-  if (secret.length < MIN_REDACTED_SECRET_LENGTH) return;
+  if (!secret) return;
   if (!secrets.includes(secret)) secrets.push(secret);
 }
 
