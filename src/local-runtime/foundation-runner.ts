@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { LocalFoundationSpecFile } from "./contracts.js";
 import type { ExecutionPlan } from "../pipeline.js";
@@ -86,6 +86,16 @@ async function readJsonObject(path: string): Promise<Record<string, unknown>> {
   }
 }
 
+async function writePrivateText(path: string, content: string): Promise<void> {
+  const file = await open(path, "w", 0o600);
+  try {
+    await file.chmod(0o600);
+    await file.writeFile(content, "utf8");
+  } finally {
+    await file.close();
+  }
+}
+
 async function artifactFor(path: string): Promise<FoundationStepArtifact> {
   return { path, sha256: await hashPath(path) };
 }
@@ -94,6 +104,31 @@ function stepConfig(step: ExecutionPlan["steps"][number]): Record<string, unknow
   if (step.uses === "train") return {};
   if (step.uses === "tokenize") return { ...(step.with ?? {}) };
   return { ...step.with };
+}
+
+function assertFoundationPlanSupported(
+  spec: LocalFoundationSpecFile,
+  plan: ExecutionPlan,
+): void {
+  if (plan.steps.some((step) => step.uses === "rl")) {
+    const invalidReward = spec.examples.findIndex(
+      (example) => !/-?\d+(?:\.\d+)?/.test(example.output.replaceAll(",", "")),
+    );
+    if (invalidReward >= 0) {
+      throw new Error(
+        `Foundation RL requires a numeric expected output for every example; examples[${invalidReward}].output has none.`,
+      );
+    }
+  }
+  for (const step of plan.steps) {
+    if (step.uses !== "pretrain") continue;
+    const processCount = step.with.nprocPerNode ?? spec.foundation.nproc_per_node;
+    if (processCount !== 1) {
+      throw new Error(
+        `Foundation nproc_per_node is ${processCount}; only 1 is supported by the current single-process runtime.`,
+      );
+    }
+  }
 }
 
 export async function defaultFoundationSpawn(args: FoundationStepSpawnArgs): Promise<void> {
@@ -119,10 +154,12 @@ export async function runFoundationPipeline(args: {
   outputDir?: string;
   spawnStep?: FoundationStepSpawn;
 }): Promise<FoundationPipelineResult> {
+  assertFoundationPlanSupported(args.spec, args.plan);
   const outputDir = resolve(
     args.outputDir ?? join(dirname(resolve(args.specPath)), ".tt-foundation-runs", randomUUID()),
   );
-  await mkdir(outputDir, { recursive: true });
+  await mkdir(outputDir, { recursive: true, mode: 0o700 });
+  await chmod(outputDir, 0o700);
   const spawnStep = args.spawnStep ?? defaultFoundationSpawn;
   const produced = new Map<string, ProducedArtifacts>();
   const steps: FoundationStepResult[] = [];
@@ -154,7 +191,7 @@ export async function runFoundationPipeline(args: {
     let config: Record<string, unknown>;
 
     if (step.uses === "tokenize") {
-      entrypoint = "tokenize.py";
+      entrypoint = "train_tokenizer.py";
       config = {
         output_dir: output,
         vocab_size: fields.vocabSize ?? hp.vocab_size,
@@ -222,7 +259,7 @@ export async function runFoundationPipeline(args: {
       throw new Error(`Step ${step.id} needs a tokenizer from an earlier tokenize step.`);
     }
 
-    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    await writePrivateText(configPath, `${JSON.stringify(config, null, 2)}\n`);
     await spawnStep({ entrypoint, configPath, logPath, stepId: step.id });
 
     const metrics = await readJsonObject(join(output, "metrics.json"));
@@ -252,7 +289,7 @@ export async function runFoundationPipeline(args: {
     steps,
   };
   const reportPath = join(outputDir, "report.json");
-  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  await writePrivateText(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   return {
     status: "succeeded",
     ...(args.plan.name ? { name: args.plan.name } : {}),

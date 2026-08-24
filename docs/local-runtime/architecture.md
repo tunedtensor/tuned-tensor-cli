@@ -47,7 +47,16 @@ TT Local currently ships two such methods:
 - **Foundation** (`training/foundation`): a from-scratch BPE tokenizer and GPT
   with no Transformers/PEFT. Driven only by `tt pipeline` from a foundation
   `tunedtensor.json`. Pretrain, SFT, and RL require CUDA. Tokenizer training
-  and the CPU unit tests do not.
+  and the CPU unit tests do not. The current runtime is single-process and
+  rejects `nproc_per_node` values above 1 before creating run artifacts.
+
+The foundation engine is a readable lifecycle baseline inspired by nanochat,
+not a port of nanochat's data, distributed, optimizer, or compute-optimal
+training stack. Its bounded pretraining corpus repeats the foundation spec's
+prompt and examples, and chat evaluation reuses those examples. RL uses a
+sparse last-number exact reward and requires every expected output to contain a
+number. The resulting metrics prove stage wiring and can demonstrate deliberate
+overfitting; they do not measure held-out model capability.
 
 Do not mix those lockfiles. Each engine hashes its own `pyproject.toml` and
 `uv.lock` into a distinct cache environment.

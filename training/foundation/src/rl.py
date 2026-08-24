@@ -11,6 +11,19 @@ from data import END, encode_ids, example_pairs, format_prompt, numeric_reward
 from model import generate, load_model, param_count, save_model
 
 
+def bounded_rollout(
+    prompt_ids: list[int],
+    context_length: int,
+    requested_completion_tokens: int = 24,
+) -> tuple[list[int], int]:
+    """Fit the newest prompt tokens and a useful completion inside one context."""
+    if context_length < 2:
+        raise ValueError("RL requires a model context of at least two tokens.")
+    completion_tokens = min(requested_completion_tokens, context_length // 2)
+    prompt_tokens = context_length - completion_tokens
+    return (prompt_ids or [0])[-prompt_tokens:], completion_tokens
+
+
 def main(argv: list[str] | None = None) -> None:
     config = load_config(argv)
     require_cuda("rl")
@@ -26,9 +39,13 @@ def main(argv: list[str] | None = None) -> None:
     last_loss = 0.0
     for step in range(steps):
         example = examples[step % len(examples)]
-        prompt_ids = encode_ids(tokenizer, format_prompt(str(config.get("system_prompt") or ""), example["input"])) or [0]
+        prompt_ids = encode_ids(tokenizer, format_prompt(str(config.get("system_prompt") or ""), example["input"]))
+        prompt_ids, completion_tokens = bounded_rollout(
+            prompt_ids,
+            int(model.config["sequence_length"]),
+        )
         prompt = torch.tensor([prompt_ids], dtype=torch.long, device=device)
-        sampled = generate(model, prompt, max_new_tokens=24)
+        sampled = generate(model, prompt, max_new_tokens=completion_tokens)
         completion_ids = sampled[0, len(prompt_ids):].tolist()
         text = tokenizer.decode(completion_ids).split(END)[0]
         reward = numeric_reward(text, example["output"])

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import stat
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,8 +11,44 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import torch
 
-from data import IGNORE_INDEX, encode_sft_example, numeric_reward, parse_numeric_answer, train_tokenizer
+import rl
+from common import write_json
+from data import (
+    IGNORE_INDEX,
+    encode_ids,
+    encode_sft_example,
+    format_chat,
+    format_prompt,
+    numeric_reward,
+    parse_numeric_answer,
+    train_tokenizer,
+)
 from model import FoundationGPT, derived_heads, derived_width, model_config_from_depth
+
+
+class FoundationOutputTests(unittest.TestCase):
+    def test_json_outputs_are_private(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "metrics.json"
+            write_json(path, {"ok": True})
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+
+class FoundationEntrypointTests(unittest.TestCase):
+    def test_source_directory_does_not_shadow_python_tokenize_module(self) -> None:
+        source_dir = Path(__file__).resolve().parents[1] / "src"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import tokenize; assert hasattr(tokenize, 'open'), tokenize.__file__",
+            ],
+            cwd=source_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class FoundationModelTests(unittest.TestCase):
@@ -31,21 +70,43 @@ class FoundationTokenizerTests(unittest.TestCase):
 
 
 class FoundationSftMaskTests(unittest.TestCase):
-    def test_assistant_tokens_are_the_only_supervised_labels(self) -> None:
+    def test_assistant_targets_are_shifted_for_next_token_prediction(self) -> None:
+        system_prompt = "You are helpful."
+        user = "hello"
+        assistant = "world"
         tokenizer = train_tokenizer(
-            "<|system|> You are helpful. <|user|> hello <|assistant|> world <|end|>\n" * 16,
+            "<|system|> You are helpful. <|user|> hello <|assistant|> world <｜end｜>\n" * 16,
             vocab_size=96,
         )
-        input_ids, labels = encode_sft_example(tokenizer, "You are helpful.", "hello", "world", 32)
+        input_ids, labels = encode_sft_example(
+            tokenizer,
+            system_prompt,
+            user,
+            assistant,
+            32,
+        )
+        prefix_ids = encode_ids(tokenizer, format_prompt(system_prompt, user))
+        full_ids = encode_ids(tokenizer, format_chat(system_prompt, user, assistant))
+        first_assistant_target = len(prefix_ids) - 1
+
         self.assertEqual(len(input_ids), 32)
         self.assertEqual(len(labels), 32)
-        supervised = [token for token, label in zip(input_ids, labels) if label != IGNORE_INDEX]
-        self.assertTrue(all(label == token or label == IGNORE_INDEX for token, label in zip(input_ids, labels)))
-        self.assertGreater(len(supervised), 0)
-        self.assertLess(len(supervised), 32)
+        self.assertEqual(input_ids[: len(full_ids) - 1], full_ids[:-1])
+        self.assertTrue(all(label == IGNORE_INDEX for label in labels[:first_assistant_target]))
+        self.assertEqual(labels[first_assistant_target], full_ids[len(prefix_ids)])
+        self.assertEqual(
+            labels[first_assistant_target:first_assistant_target + len(full_ids) - len(prefix_ids)],
+            full_ids[len(prefix_ids):],
+        )
 
 
 class FoundationRlRewardTests(unittest.TestCase):
+    def test_rollout_fits_prompt_and_completion_inside_model_context(self) -> None:
+        prompt, completion_tokens = rl.bounded_rollout(list(range(40)), 16)
+        self.assertEqual(prompt, list(range(32, 40)))
+        self.assertEqual(completion_tokens, 8)
+        self.assertLessEqual(len(prompt) + completion_tokens, 16)
+
     def test_parses_the_last_number_and_rewards_exact_matches(self) -> None:
         self.assertEqual(parse_numeric_answer("2 + 2 = 4."), 4.0)
         self.assertEqual(numeric_reward("The answer is 4", "4"), 1.0)

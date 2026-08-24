@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -33,7 +33,7 @@ const spec: LocalFoundationSpecFile = {
 const mockSpawn: FoundationStepSpawn = async ({ configPath, entrypoint }) => {
   const config = JSON.parse(await readFile(configPath, "utf8")) as { output_dir: string };
   await mkdir(config.output_dir, { recursive: true });
-  if (entrypoint === "tokenize.py") {
+  if (entrypoint === "train_tokenizer.py") {
     await writeFile(join(config.output_dir, "tokenizer.json"), "{}\n");
   } else if (entrypoint === "evaluate.py") {
     await writeFile(join(config.output_dir, "report.json"), JSON.stringify({ ok: true, evaluator: "bpb" }) + "\n");
@@ -48,6 +48,65 @@ describe("foundation pipeline runner", () => {
   const dirs: string[] = [];
   afterEach(async () => {
     await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  it("rejects RL contracts without numeric rewards before creating run state", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-"));
+    dirs.push(dir);
+    const outputDir = join(dir, "run");
+    const nonNumericSpec: LocalFoundationSpecFile = {
+      ...spec,
+      examples: [
+        { input: "hello", output: "world" },
+        { input: "goodbye", output: "moon" },
+      ],
+      foundation: { ...spec.foundation, rl_steps: 1 },
+    };
+    const plan = createExecutionPlan(
+      pipelineFromFoundationHyperparameters(nonNumericSpec.name, nonNumericSpec.foundation),
+    );
+    let spawned = false;
+
+    await expect(runFoundationPipeline({
+      spec: nonNumericSpec,
+      plan,
+      specPath: join(dir, "tunedtensor.json"),
+      outputDir,
+      spawnStep: async (args) => {
+        spawned = true;
+        await mockSpawn(args);
+      },
+    })).rejects.toThrow(/RL.*numeric expected output/i);
+    expect(spawned).toBe(false);
+    await expect(access(outputDir)).rejects.toThrow();
+  });
+
+  it("rejects unsupported multi-process training before creating run state", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-"));
+    dirs.push(dir);
+    const specPath = join(dir, "tunedtensor.json");
+    const outputDir = join(dir, "run");
+    const multiProcessSpec: LocalFoundationSpecFile = {
+      ...spec,
+      foundation: { ...spec.foundation, nproc_per_node: 2 },
+    };
+    const plan = createExecutionPlan(
+      pipelineFromFoundationHyperparameters(multiProcessSpec.name, multiProcessSpec.foundation),
+    );
+    let spawned = false;
+
+    await expect(runFoundationPipeline({
+      spec: multiProcessSpec,
+      plan,
+      specPath,
+      outputDir,
+      spawnStep: async (args) => {
+        spawned = true;
+        await mockSpawn(args);
+      },
+    })).rejects.toThrow(/nproc_per_node.*only 1/i);
+    expect(spawned).toBe(false);
+    await expect(access(outputDir)).rejects.toThrow();
   });
 
   it("threads tokenizer and model artifacts and writes a hashed report", async () => {
@@ -68,6 +127,9 @@ describe("foundation pipeline runner", () => {
     expect(result.steps.map((step) => step.id)).toEqual(plan.steps.map((step) => step.id));
     expect(result.steps[0]?.artifacts.tokenizer?.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(result.steps[1]?.artifacts.model?.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect((await stat(join(dir, "run"))).mode & 0o777).toBe(0o700);
+    expect((await stat(join(dir, "run", "tokenize", "config.json"))).mode & 0o777).toBe(0o600);
+    expect((await stat(result.report_path)).mode & 0o777).toBe(0o600);
     const report = JSON.parse(await readFile(result.report_path, "utf8")) as { status: string; steps: unknown[] };
     expect(report.status).toBe("succeeded");
     expect(report.steps).toHaveLength(plan.steps.length);

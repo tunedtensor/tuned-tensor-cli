@@ -44,7 +44,7 @@ export const FOUNDATION_PYTHON_ENVIRONMENT = join(
   foundationRuntimeHash,
 );
 export type FoundationPythonEntrypoint =
-  | "tokenize.py"
+  | "train_tokenizer.py"
   | "pretrain.py"
   | "finetune.py"
   | "evaluate.py"

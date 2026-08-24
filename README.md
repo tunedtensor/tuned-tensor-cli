@@ -188,6 +188,15 @@ Two local engines share that document version:
   `inference` evaluators. Requires a foundation `tunedtensor.json`
   (`engine: "foundation"`, at least two examples, no `base_model`).
 
+The foundation engine is a small, readable local baseline inspired by Andrej
+Karpathy's [nanochat](https://github.com/karpathy/nanochat), not a port of its
+compute-optimal training stack. The first version deliberately builds a bounded
+pretraining corpus from the spec prompt and examples, reports chat accuracy on
+those same contract examples, and supports one training process. Optional RL
+uses a sparse last-number exact reward and therefore requires a numeric expected
+output for every example. Treat those metrics as an end-to-end execution and
+overfit check—not held-out capability or multi-GPU evidence.
+
 ```bash
 tt pipeline init --file pipeline.json
 tt pipeline init --engine foundation --file foundation.pipeline.json

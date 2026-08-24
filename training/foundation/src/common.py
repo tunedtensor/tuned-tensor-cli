@@ -15,8 +15,11 @@ def load_config(argv: list[str] | None = None) -> dict[str, Any]:
 
 def write_json(path: str | Path, value: Any) -> None:
     destination = Path(path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    destination.parent.chmod(0o700)
+    with destination.open("w", encoding="utf-8") as output:
+        destination.chmod(0o600)
+        output.write(json.dumps(value, indent=2) + "\n")
 
 
 def require_cuda(action: str) -> None:

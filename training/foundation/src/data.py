@@ -75,15 +75,15 @@ def encode_sft_example(
     pad_id = tokenizer.token_to_id(PAD) or 0
     prefix_ids = encode_ids(tokenizer, format_prompt(system_prompt, user))
     full_ids = encode_ids(tokenizer, format_chat(system_prompt, user, assistant))
-    if len(full_ids) > sequence_length:
-        overflow = len(full_ids) - sequence_length
+    model_tokens = sequence_length + 1
+    if len(full_ids) > model_tokens:
+        overflow = len(full_ids) - model_tokens
         prefix_ids = prefix_ids[overflow:] if overflow < len(prefix_ids) else []
-        full_ids = full_ids[-sequence_length:]
-    cutoff = min(len(prefix_ids), len(full_ids))
-    if cutoff >= len(full_ids):
-        cutoff = max(0, len(full_ids) - max(1, len(full_ids) // 4))
-    labels = [IGNORE_INDEX] * cutoff + full_ids[cutoff:]
-    input_ids = pad_or_trim(full_ids, sequence_length, pad_id)
+        full_ids = full_ids[-model_tokens:]
+    input_ids = pad_or_trim(full_ids[:-1], sequence_length, pad_id)
+    target_ids = full_ids[1:]
+    first_assistant_target = max(0, min(len(prefix_ids) - 1, len(target_ids)))
+    labels = [IGNORE_INDEX] * first_assistant_target + target_ids[first_assistant_target:]
     labels = pad_or_trim(labels, sequence_length, IGNORE_INDEX)
     return input_ids, labels
 
