@@ -8,7 +8,7 @@ from torch.nn import functional as F
 
 from common import load_config, require_cuda, write_json
 from data import END, encode_ids, example_pairs, format_prompt, numeric_reward
-from model import generate, load_model, param_count, save_model
+from model import FoundationGPT, load_model, param_count, save_model
 
 
 def bounded_rollout(
@@ -24,6 +24,32 @@ def bounded_rollout(
     return (prompt_ids or [0])[-prompt_tokens:], completion_tokens
 
 
+@torch.no_grad()
+def sample_rollout(
+    model: FoundationGPT,
+    prompt: torch.Tensor,
+    max_new_tokens: int,
+    *,
+    temperature: float = 1.0,
+    stop_token_id: int | None = None,
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    """Sample one on-policy completion, bounded by the model context."""
+    if temperature <= 0:
+        raise ValueError("RL sampling temperature must be positive.")
+    model.eval()
+    tokens = prompt
+    limit = int(model.config["sequence_length"])
+    for _ in range(max_new_tokens):
+        logits = model(tokens[:, -limit:])[:, -1, :] / temperature
+        probabilities = torch.softmax(logits, dim=-1)
+        next_token = torch.multinomial(probabilities, num_samples=1, generator=generator)
+        tokens = torch.cat([tokens, next_token], dim=1)
+        if stop_token_id is not None and bool(torch.all(next_token == stop_token_id)):
+            break
+    return tokens
+
+
 def main(argv: list[str] | None = None) -> None:
     config = load_config(argv)
     require_cuda("rl")
@@ -34,6 +60,8 @@ def main(argv: list[str] | None = None) -> None:
     if not examples:
         raise SystemExit("Foundation RL needs chat examples with verifiable answers.")
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    generator = torch.Generator(device=device)
+    generator.manual_seed(int(config.get("seed") or 0))
     steps = max(1, int(config.get("steps") or 1))
     last_reward = 0.0
     last_loss = 0.0
@@ -45,10 +73,17 @@ def main(argv: list[str] | None = None) -> None:
             int(model.config["sequence_length"]),
         )
         prompt = torch.tensor([prompt_ids], dtype=torch.long, device=device)
-        sampled = generate(model, prompt, max_new_tokens=completion_tokens)
+        sampled = sample_rollout(
+            model,
+            prompt,
+            max_new_tokens=completion_tokens,
+            stop_token_id=tokenizer.token_to_id(END),
+            generator=generator,
+        )
         completion_ids = sampled[0, len(prompt_ids):].tolist()
         text = tokenizer.decode(completion_ids).split(END)[0]
         reward = numeric_reward(text, example["output"])
+        model.train()
         logits = model(sampled[:, :-1])
         completion = sampled[:, len(prompt_ids):]
         if completion.size(1) == 0:

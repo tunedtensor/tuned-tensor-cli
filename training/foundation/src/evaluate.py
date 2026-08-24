@@ -8,7 +8,7 @@ from tokenizers import Tokenizer
 from torch.nn import functional as F
 
 from common import load_config, write_json
-from data import END, encode_ids, example_pairs, format_prompt, smoke_corpus, window_tokens
+from data import END, decoded_byte_count, encode_ids, example_pairs, format_prompt, smoke_corpus, window_tokens
 from model import bits_per_byte, generate, load_model
 
 
@@ -25,8 +25,7 @@ def evaluate_bpb(model, tokenizer: Tokenizer, corpus: str, sequence_length: int,
     with torch.no_grad():
         logits = model(inputs)
         nll = F.cross_entropy(logits.reshape(-1, logits.size(-1)), labels.reshape(-1), reduction="sum")
-    decoded = tokenizer.decode(inputs[0].tolist())
-    byte_count = max(len(decoded.encode("utf-8")), 1) * inputs.size(0)
+    byte_count = max(decoded_byte_count(tokenizer, labels.detach().cpu().tolist()), 1)
     return {
         "nll": float(nll.item()),
         "bpb": bits_per_byte(nll, byte_count),

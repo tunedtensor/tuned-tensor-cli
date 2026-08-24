@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -15,6 +16,7 @@ import rl
 from common import write_json
 from data import (
     IGNORE_INDEX,
+    decoded_byte_count,
     encode_ids,
     encode_sft_example,
     format_chat,
@@ -68,6 +70,13 @@ class FoundationTokenizerTests(unittest.TestCase):
         self.assertGreater(len(encoded.ids), 0)
         self.assertIn("hello", tokenizer.decode(encoded.ids))
 
+    def test_byte_count_sums_every_target_row(self) -> None:
+        class FakeTokenizer:
+            def decode(self, ids: list[int]) -> str:
+                return "a" if ids[0] == 1 else "éé"
+
+        self.assertEqual(decoded_byte_count(FakeTokenizer(), [[1, 9], [2, 9]]), 5)
+
 
 class FoundationSftMaskTests(unittest.TestCase):
     def test_assistant_targets_are_shifted_for_next_token_prediction(self) -> None:
@@ -106,6 +115,17 @@ class FoundationRlRewardTests(unittest.TestCase):
         self.assertEqual(prompt, list(range(32, 40)))
         self.assertEqual(completion_tokens, 8)
         self.assertLessEqual(len(prompt) + completion_tokens, 16)
+
+    def test_rollout_samples_from_the_policy_distribution(self) -> None:
+        model = FoundationGPT(model_config_from_depth(1, vocab_size=16, sequence_length=8))
+        prompt = torch.tensor([[1, 2]], dtype=torch.long)
+        chosen = torch.tensor([[7]], dtype=torch.long)
+
+        with patch.object(rl.torch, "multinomial", return_value=chosen) as sample:
+            rollout = rl.sample_rollout(model, prompt, max_new_tokens=2)
+
+        self.assertEqual(rollout.tolist(), [[1, 2, 7, 7]])
+        self.assertEqual(sample.call_count, 2)
 
     def test_parses_the_last_number_and_rewards_exact_matches(self) -> None:
         self.assertEqual(parse_numeric_answer("2 + 2 = 4."), 4.0)

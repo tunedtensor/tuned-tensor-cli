@@ -7,7 +7,7 @@ from tokenizers import Tokenizer
 from torch.nn import functional as F
 
 from common import load_config, require_cuda, write_json
-from data import corpus_hash, example_pairs, smoke_corpus, window_tokens
+from data import corpus_hash, decoded_byte_count, example_pairs, smoke_corpus, window_tokens
 from model import FoundationGPT, bits_per_byte, model_config_from_depth, param_count, save_model
 
 
@@ -43,8 +43,8 @@ def main(argv: list[str] | None = None) -> None:
         loss.backward()
         optimizer.step()
         last_loss = float(loss.item())
-        byte_count = len(tokenizer.decode(inputs[0].tolist()).encode("utf-8"))
-        last_bpb = bits_per_byte(loss.detach() * inputs.numel(), max(byte_count, 1) * inputs.size(0))
+        byte_count = decoded_byte_count(tokenizer, labels.detach().cpu().tolist())
+        last_bpb = bits_per_byte(loss.detach() * labels.numel(), max(byte_count, 1))
 
     output_dir = Path(config["output_dir"])
     save_model(model, output_dir)

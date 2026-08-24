@@ -59,6 +59,11 @@ def decode_ids(tokenizer: Tokenizer, ids: list[int]) -> str:
     return tokenizer.decode(ids, skip_special_tokens=False)
 
 
+def decoded_byte_count(tokenizer: Tokenizer, rows: list[list[int]]) -> int:
+    """Count decoded UTF-8 bytes across every target-token row."""
+    return sum(len(tokenizer.decode(row).encode("utf-8")) for row in rows)
+
+
 def pad_or_trim(ids: list[int], length: int, pad_id: int) -> list[int]:
     if len(ids) >= length:
         return ids[:length]

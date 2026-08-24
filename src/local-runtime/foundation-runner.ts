@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { chmod, mkdir, open, readdir, readFile, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { LocalFoundationSpecFile } from "./contracts.js";
 import type { ExecutionPlan } from "../pipeline.js";
@@ -57,7 +57,10 @@ function parseRef(value: { from: string }): { stepId: string; kind: string } {
 }
 
 async function hashPath(path: string): Promise<string> {
-  const info = await stat(path);
+  const info = await lstat(path);
+  if (info.isSymbolicLink()) {
+    throw new Error(`Foundation artifacts must not contain symbolic links: ${path}`);
+  }
   const hash = createHash("sha256");
   if (info.isDirectory()) {
     for (const name of (await readdir(path)).sort()) {
@@ -65,6 +68,9 @@ async function hashPath(path: string): Promise<string> {
       hash.update(await hashPath(join(path, name)));
     }
     return hash.digest("hex");
+  }
+  if (!info.isFile()) {
+    throw new Error(`Foundation artifacts must contain only regular files and directories: ${path}`);
   }
   await new Promise<void>((done, reject) => {
     const stream = createReadStream(path);
@@ -75,15 +81,26 @@ async function hashPath(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
-async function readJsonObject(path: string): Promise<Record<string, unknown>> {
+async function readRequiredJsonObject(
+  path: string,
+  description: string,
+): Promise<Record<string, unknown>> {
+  let content: string;
   try {
-    const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
+    content = await readFile(path, "utf8");
+  } catch (error) {
+    throw new Error(`${description} is missing or unreadable: ${path}`, { cause: error });
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content) as unknown;
+  } catch (error) {
+    throw new Error(`${description} is not valid JSON: ${path}`, { cause: error });
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${description} must be a JSON object: ${path}`);
+  }
+  return parsed as Record<string, unknown>;
 }
 
 async function writePrivateText(path: string, content: string): Promise<void> {
@@ -100,6 +117,30 @@ async function artifactFor(path: string): Promise<FoundationStepArtifact> {
   return { path, sha256: await hashPath(path) };
 }
 
+async function requireRegularNonemptyFile(path: string, description: string): Promise<void> {
+  let info;
+  try {
+    info = await lstat(path);
+  } catch (error) {
+    throw new Error(`${description} is missing: ${path}`, { cause: error });
+  }
+  if (info.isSymbolicLink() || !info.isFile() || info.size === 0) {
+    throw new Error(`${description} must be a non-empty regular file: ${path}`);
+  }
+}
+
+function requirePositiveIntegerFields(
+  value: Record<string, unknown>,
+  fields: string[],
+  description: string,
+): void {
+  for (const field of fields) {
+    if (!Number.isInteger(value[field]) || Number(value[field]) <= 0) {
+      throw new Error(`${description}.${field} must be a positive integer.`);
+    }
+  }
+}
+
 function stepConfig(step: ExecutionPlan["steps"][number]): Record<string, unknown> {
   if (step.uses === "train") return {};
   if (step.uses === "tokenize") return { ...(step.with ?? {}) };
@@ -110,6 +151,13 @@ function assertFoundationPlanSupported(
   spec: LocalFoundationSpecFile,
   plan: ExecutionPlan,
 ): void {
+  const supported = new Set(["tokenize", "pretrain", "finetune", "rl", "evaluate"]);
+  const unsupported = plan.steps.find((step) => !supported.has(step.uses));
+  if (unsupported) {
+    throw new Error(
+      `Foundation runner does not implement ${unsupported.uses} (step ${unsupported.id}).`,
+    );
+  }
   if (plan.steps.some((step) => step.uses === "rl")) {
     const invalidReward = spec.examples.findIndex(
       (example) => !/-?\d+(?:\.\d+)?/.test(example.output.replaceAll(",", "")),
@@ -262,19 +310,47 @@ export async function runFoundationPipeline(args: {
     await writePrivateText(configPath, `${JSON.stringify(config, null, 2)}\n`);
     await spawnStep({ entrypoint, configPath, logPath, stepId: step.id });
 
-    const metrics = await readJsonObject(join(output, "metrics.json"));
+    const metrics = await readRequiredJsonObject(
+      join(output, "metrics.json"),
+      `Foundation step "${step.id}" metrics`,
+    );
+    if (metrics.ok !== true) {
+      throw new Error(`Foundation step "${step.id}" metrics must report ok: true.`);
+    }
     const artifacts: Record<string, FoundationStepArtifact> = {};
     const record: ProducedArtifacts = {};
     if (step.uses === "tokenize") {
+      const tokenizerPath = join(output, "tokenizer.json");
+      await requireRegularNonemptyFile(tokenizerPath, `Foundation step "${step.id}" tokenizer.json`);
+      await readRequiredJsonObject(tokenizerPath, `Foundation step "${step.id}" tokenizer.json`);
       record.tokenizer = output;
       tokenizerDir = output;
       artifacts.tokenizer = await artifactFor(output);
     } else if (step.uses === "pretrain" || step.uses === "finetune" || step.uses === "rl") {
+      const modelPath = join(output, "model.safetensors");
+      const modelConfigPath = join(output, "config.json");
+      await requireRegularNonemptyFile(modelPath, `Foundation step "${step.id}" model.safetensors`);
+      const modelConfig = await readRequiredJsonObject(
+        modelConfigPath,
+        `Foundation step "${step.id}" config.json`,
+      );
+      requirePositiveIntegerFields(
+        modelConfig,
+        ["depth", "width", "heads", "vocab_size", "sequence_length"],
+        `Foundation step "${step.id}" config.json`,
+      );
       record.model = output;
       modelDir = output;
       artifacts.model = await artifactFor(output);
     } else if (step.uses === "evaluate") {
       const reportPath = join(output, "report.json");
+      const stepReport = await readRequiredJsonObject(
+        reportPath,
+        `Foundation step "${step.id}" report.json`,
+      );
+      if (stepReport.ok !== true) {
+        throw new Error(`Foundation step "${step.id}" report.json must report ok: true.`);
+      }
       record.report = reportPath;
       artifacts.report = await artifactFor(reportPath);
     }

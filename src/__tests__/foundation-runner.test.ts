@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -39,7 +39,13 @@ const mockSpawn: FoundationStepSpawn = async ({ configPath, entrypoint }) => {
     await writeFile(join(config.output_dir, "report.json"), JSON.stringify({ ok: true, evaluator: "bpb" }) + "\n");
   } else {
     await writeFile(join(config.output_dir, "model.safetensors"), "fake");
-    await writeFile(join(config.output_dir, "config.json"), "{}\n");
+    await writeFile(join(config.output_dir, "config.json"), JSON.stringify({
+      depth: 2,
+      width: 64,
+      heads: 4,
+      vocab_size: 256,
+      sequence_length: 64,
+    }) + "\n");
   }
   await writeFile(join(config.output_dir, "metrics.json"), JSON.stringify({ ok: true, entrypoint }) + "\n");
 };
@@ -107,6 +113,110 @@ describe("foundation pipeline runner", () => {
     })).rejects.toThrow(/nproc_per_node.*only 1/i);
     expect(spawned).toBe(false);
     await expect(access(outputDir)).rejects.toThrow();
+  });
+
+  it("rejects unsupported compare steps before creating run state", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-"));
+    dirs.push(dir);
+    const outputDir = join(dir, "run");
+    const recipe = pipelineFromFoundationHyperparameters(spec.name, spec.foundation);
+    recipe.steps.push({
+      id: "compare",
+      uses: "compare",
+      target: "local",
+      with: { before: { from: "bpb.report" }, after: { from: "chat.report" } },
+    });
+    const plan = createExecutionPlan(recipe);
+    let spawned = false;
+
+    await expect(runFoundationPipeline({
+      spec,
+      plan,
+      specPath: join(dir, "tunedtensor.json"),
+      outputDir,
+      spawnStep: async () => {
+        spawned = true;
+      },
+    })).rejects.toThrow(/does not implement compare/i);
+    expect(spawned).toBe(false);
+    await expect(access(outputDir)).rejects.toThrow();
+  });
+
+  it("rejects missing required step outputs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-"));
+    dirs.push(dir);
+    const recipe = pipelineFromFoundationHyperparameters(spec.name, spec.foundation);
+    const plan = createExecutionPlan(recipe, { only: ["tokenize", "pretrain"] });
+
+    await expect(runFoundationPipeline({
+      spec,
+      plan,
+      specPath: join(dir, "tunedtensor.json"),
+      outputDir: join(dir, "run"),
+      spawnStep: async ({ configPath, entrypoint }) => {
+        const config = JSON.parse(await readFile(configPath, "utf8")) as { output_dir: string };
+        await mkdir(config.output_dir, { recursive: true });
+        if (entrypoint === "train_tokenizer.py") {
+          await writeFile(join(config.output_dir, "tokenizer.json"), "{}\n");
+        } else {
+          await writeFile(join(config.output_dir, "config.json"), JSON.stringify({
+            depth: 2,
+            width: 64,
+            heads: 4,
+            vocab_size: 256,
+            sequence_length: 64,
+          }) + "\n");
+        }
+        await writeFile(join(config.output_dir, "metrics.json"), "{\"ok\":true}\n");
+      },
+    })).rejects.toThrow(/pretrain.*model\.safetensors/i);
+  });
+
+  it.each([
+    ["missing", undefined, /missing or unreadable/i],
+    ["malformed", "{", /not valid JSON/i],
+    ["unsuccessful", "{\"ok\":false}\n", /ok: true/i],
+  ])("rejects %s step metrics", async (_case, metrics, expected) => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-"));
+    dirs.push(dir);
+    const recipe = pipelineFromFoundationHyperparameters(spec.name, spec.foundation);
+    const plan = createExecutionPlan(recipe, { only: ["tokenize"] });
+
+    await expect(runFoundationPipeline({
+      spec,
+      plan,
+      specPath: join(dir, "tunedtensor.json"),
+      outputDir: join(dir, "run"),
+      spawnStep: async ({ configPath }) => {
+        const config = JSON.parse(await readFile(configPath, "utf8")) as { output_dir: string };
+        await mkdir(config.output_dir, { recursive: true });
+        await writeFile(join(config.output_dir, "tokenizer.json"), "{}\n");
+        if (metrics !== undefined) {
+          await writeFile(join(config.output_dir, "metrics.json"), metrics);
+        }
+      },
+    })).rejects.toThrow(expected);
+  });
+
+  it("rejects symlinks inside produced artifacts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-"));
+    dirs.push(dir);
+    const recipe = pipelineFromFoundationHyperparameters(spec.name, spec.foundation);
+    const plan = createExecutionPlan(recipe, { only: ["tokenize"] });
+
+    await expect(runFoundationPipeline({
+      spec,
+      plan,
+      specPath: join(dir, "tunedtensor.json"),
+      outputDir: join(dir, "run"),
+      spawnStep: async ({ configPath }) => {
+        const config = JSON.parse(await readFile(configPath, "utf8")) as { output_dir: string };
+        await mkdir(config.output_dir, { recursive: true });
+        await writeFile(join(config.output_dir, "tokenizer.json"), "{}\n");
+        await writeFile(join(config.output_dir, "metrics.json"), "{\"ok\":true}\n");
+        await symlink("/etc/hosts", join(config.output_dir, "external"));
+      },
+    })).rejects.toThrow(/symbolic link/i);
   });
 
   it("threads tokenizer and model artifacts and writes a hashed report", async () => {
