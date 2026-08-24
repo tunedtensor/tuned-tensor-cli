@@ -6,12 +6,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import torch
 
+import evaluate
 import rl
 import train_tokenizer as tokenizer_entrypoint
 from common import write_json
@@ -26,7 +28,7 @@ from data import (
     parse_numeric_answer,
     train_tokenizer,
 )
-from model import FoundationGPT, derived_heads, derived_width, model_config_from_depth, save_model
+from model import FoundationGPT, derived_heads, derived_width, generate, model_config_from_depth, save_model
 
 
 class FoundationOutputTests(unittest.TestCase):
@@ -93,6 +95,78 @@ class FoundationModelTests(unittest.TestCase):
         logits = model(torch.zeros(2, 8, dtype=torch.long))
         self.assertEqual(tuple(logits.shape), (2, 8, 128))
 
+    def test_generation_stops_when_every_row_emits_the_stop_token(self) -> None:
+        class FakeModel:
+            config = {"sequence_length": 8}
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def eval(self) -> None:
+                return None
+
+            def __call__(self, tokens: torch.Tensor) -> torch.Tensor:
+                logits = torch.zeros(tokens.size(0), tokens.size(1), 8)
+                next_id = 7 if self.calls == 0 else 5
+                logits[:, -1, next_id] = 1
+                self.calls += 1
+                return logits
+
+        model = FakeModel()
+        prompt = torch.tensor([[1, 2]], dtype=torch.long)
+
+        output = generate(model, prompt, max_new_tokens=8, stop_token_id=5)
+
+        self.assertEqual(output.tolist(), [[1, 2, 7, 5]])
+        self.assertEqual(model.calls, 2)
+
+
+class FoundationEvaluationTests(unittest.TestCase):
+    def test_chat_evaluation_stops_at_the_tokenizer_end_token(self) -> None:
+        class FakeEncoding:
+            ids = [1, 2]
+
+        class FakeTokenizer:
+            def encode(self, _text: str) -> FakeEncoding:
+                return FakeEncoding()
+
+            def token_to_id(self, _token: str) -> int:
+                return 5
+
+            def decode(self, ids: list[int]) -> str:
+                return "0" if ids == [7, 5] else "0 extra"
+
+        class FakeModel:
+            config = {"sequence_length": 8}
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def eval(self) -> None:
+                return None
+
+            def __call__(self, tokens: torch.Tensor) -> torch.Tensor:
+                logits = torch.zeros(tokens.size(0), tokens.size(1), 8)
+                next_id = 7 if self.calls == 0 else 5
+                logits[:, -1, next_id] = 1
+                self.calls += 1
+                return logits
+
+        metrics = cast(
+            dict[str, Any],
+            evaluate.evaluate_chat(
+                cast(FoundationGPT, FakeModel()),
+                cast(Any, FakeTokenizer()),
+                "Return one digit.",
+                [{"input": "parity digits 1 0", "output": "0"}],
+                torch.device("cpu"),
+            ),
+        )
+
+        self.assertEqual(metrics["correct"], 1)
+        self.assertEqual(metrics["accuracy"], 1.0)
+        self.assertEqual(metrics["predictions"][0]["actual"], "0")
+
 
 class FoundationTokenizerTests(unittest.TestCase):
     def test_whitespace_bpe_round_trips_words(self) -> None:
@@ -141,6 +215,14 @@ class FoundationSftMaskTests(unittest.TestCase):
 
 
 class FoundationRlRewardTests(unittest.TestCase):
+    def test_zero_reward_penalizes_the_sampled_completion(self) -> None:
+        token_log_probs = torch.tensor([-0.25], requires_grad=True)
+
+        loss = rl.policy_gradient_loss(token_log_probs, reward=0.0)
+        loss.backward()
+
+        self.assertGreater(float(token_log_probs.grad.item()), 0.0)
+
     def test_rollout_fits_prompt_and_completion_inside_model_context(self) -> None:
         prompt, completion_tokens = rl.bounded_rollout(list(range(40)), 16)
         self.assertEqual(prompt, list(range(32, 40)))

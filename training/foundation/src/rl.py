@@ -24,6 +24,12 @@ def bounded_rollout(
     return (prompt_ids or [0])[-prompt_tokens:], completion_tokens
 
 
+def policy_gradient_loss(token_log_probs: torch.Tensor, reward: float) -> torch.Tensor:
+    """Use a fixed binary-reward baseline so failed samples are discouraged."""
+    advantage = reward - 0.5
+    return -(advantage * token_log_probs.mean())
+
+
 @torch.no_grad()
 def sample_rollout(
     model: FoundationGPT,
@@ -92,7 +98,7 @@ def main(argv: list[str] | None = None) -> None:
         step_logits = logits[:, len(prompt_ids) - 1: len(prompt_ids) - 1 + completion.size(1)]
         log_probs = F.log_softmax(step_logits, dim=-1)
         token_log_probs = log_probs.gather(-1, completion.unsqueeze(-1)).squeeze(-1)
-        loss = -(reward * token_log_probs.mean())
+        loss = policy_gradient_loss(token_log_probs, reward)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()

@@ -47,7 +47,12 @@ def evaluate_chat(
     for example in examples:
         prompt_ids = encode_ids(tokenizer, format_prompt(system_prompt, example["input"])) or [0]
         tokens = torch.tensor([prompt_ids], dtype=torch.long, device=device)
-        generated = generate(model, tokens, max_new_tokens=32)[0].tolist()[len(prompt_ids):]
+        generated = generate(
+            model,
+            tokens,
+            max_new_tokens=32,
+            stop_token_id=tokenizer.token_to_id(END),
+        )[0].tolist()[len(prompt_ids):]
         text = tokenizer.decode(generated).split(END)[0].strip()
         matched = text == example["output"].strip()
         correct += int(matched)

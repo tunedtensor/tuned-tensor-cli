@@ -106,14 +106,26 @@ def generate(
     model: FoundationGPT,
     input_ids: torch.Tensor,
     max_new_tokens: int,
+    stop_token_id: int | None = None,
 ) -> torch.Tensor:
     model.eval()
     tokens = input_ids
     limit = model.config["sequence_length"]
+    finished = torch.zeros(tokens.size(0), dtype=torch.bool, device=tokens.device)
     for _ in range(max_new_tokens):
         logits = model(tokens[:, -limit:])
         next_token = logits[:, -1, :].argmax(dim=-1, keepdim=True)
+        if stop_token_id is not None:
+            next_token = torch.where(
+                finished.unsqueeze(1),
+                torch.full_like(next_token, stop_token_id),
+                next_token,
+            )
         tokens = torch.cat([tokens, next_token], dim=1)
+        if stop_token_id is not None:
+            finished |= next_token.squeeze(1).eq(stop_token_id)
+            if bool(finished.all()):
+                break
     return tokens
 
 
