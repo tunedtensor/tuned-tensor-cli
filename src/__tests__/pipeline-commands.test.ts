@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createProgram } from "../cli.js";
 import { setJsonMode } from "../output.js";
+import * as foundationRunner from "../local-runtime/foundation-runner.js";
 
 afterEach(() => {
   setJsonMode(false);
@@ -203,6 +204,55 @@ describe("pipeline commands", () => {
       await expect(program.parseAsync(["node", "tt", "pipeline", "validate"])).rejects.toThrow(/is an adapter recipe/);
     } finally {
       process.chdir(cwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs a foundation spec without throwing the old not-wired error", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tt-pipeline-"));
+    const spec = join(dir, "tunedtensor.json");
+    writeFileSync(spec, JSON.stringify({
+      engine: "foundation",
+      name: "Tiny GPT",
+      system_prompt: "You are a helpful assistant.",
+      guidelines: ["Answer directly."],
+      constraints: [],
+      examples: [
+        { input: "Hello", output: "Hi there." },
+        { input: "Thanks", output: "You're welcome." },
+      ],
+      foundation: {
+        depth: 2,
+        pretrain_steps: 2,
+        finetune_steps: 2,
+        rl_steps: 0,
+        vocab_size: 256,
+        max_chars: 20_000,
+        sequence_length: 64,
+        batch_size: 2,
+        nproc_per_node: 1,
+      },
+    }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const execute = vi.spyOn(foundationRunner, "runFoundationPipeline").mockResolvedValue({
+      status: "succeeded",
+      report_path: join(dir, "report.json"),
+      steps: [],
+    });
+    const program = createProgram("test");
+    program.exitOverride();
+    try {
+      await program.parseAsync([
+        "node", "tt", "--json", "pipeline", "run",
+        "--file", join(dir, "missing.pipeline.json"),
+        "--spec", spec,
+      ]);
+      expect(execute).toHaveBeenCalledOnce();
+      const output = JSON.parse(log.mock.calls.at(-1)?.[0] as string);
+      expect(output.status).toBe("succeeded");
+      expect(output.report_path).toBe(join(dir, "report.json"));
+    } finally {
+      execute.mockRestore();
       rmSync(dir, { recursive: true, force: true });
     }
   });

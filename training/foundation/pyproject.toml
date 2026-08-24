@@ -1,0 +1,24 @@
+[project]
+name = "tuned-tensor-foundation"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "huggingface-hub>=0.36.0",
+  "numpy>=2.0.0",
+  "safetensors>=0.4.5",
+  "tokenizers>=0.21.0",
+  "torch>=2.11.0",
+]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv]
+package = false

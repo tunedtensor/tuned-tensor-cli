@@ -1,0 +1,262 @@
+import { createHash, randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import type { LocalFoundationSpecFile } from "./contracts.js";
+import type { ExecutionPlan } from "../pipeline.js";
+import {
+  buildFoundationPythonCommand,
+  runLoggedProcess,
+  withFoundationPythonEnvironment,
+  type FoundationPythonEntrypoint,
+} from "./process-runner.js";
+
+export interface FoundationStepArtifact {
+  path: string;
+  sha256: string;
+}
+
+export interface FoundationStepResult {
+  id: string;
+  uses: string;
+  metrics: Record<string, unknown>;
+  artifacts: Record<string, FoundationStepArtifact>;
+}
+
+export interface FoundationPipelineResult {
+  status: "succeeded";
+  name?: string;
+  report_path: string;
+  steps: FoundationStepResult[];
+}
+
+export interface FoundationStepSpawnArgs {
+  entrypoint: FoundationPythonEntrypoint;
+  configPath: string;
+  logPath: string;
+  stepId: string;
+}
+
+export type FoundationStepSpawn = (args: FoundationStepSpawnArgs) => Promise<void>;
+
+interface ProducedArtifacts {
+  tokenizer?: string;
+  model?: string;
+  report?: string;
+}
+
+function isRef(value: unknown): value is { from: string } {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    && typeof (value as { from?: unknown }).from === "string";
+}
+
+function parseRef(value: { from: string }): { stepId: string; kind: string } {
+  const index = value.from.lastIndexOf(".");
+  if (index <= 0) throw new Error(`Invalid artifact reference: ${value.from}`);
+  return { stepId: value.from.slice(0, index), kind: value.from.slice(index + 1) };
+}
+
+async function hashPath(path: string): Promise<string> {
+  const info = await stat(path);
+  const hash = createHash("sha256");
+  if (info.isDirectory()) {
+    for (const name of (await readdir(path)).sort()) {
+      hash.update(name);
+      hash.update(await hashPath(join(path, name)));
+    }
+    return hash.digest("hex");
+  }
+  await new Promise<void>((done, reject) => {
+    const stream = createReadStream(path);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => done());
+  });
+  return hash.digest("hex");
+}
+
+async function readJsonObject(path: string): Promise<Record<string, unknown>> {
+  try {
+    const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+async function artifactFor(path: string): Promise<FoundationStepArtifact> {
+  return { path, sha256: await hashPath(path) };
+}
+
+function stepConfig(step: ExecutionPlan["steps"][number]): Record<string, unknown> {
+  if (step.uses === "train") return {};
+  if (step.uses === "tokenize") return { ...(step.with ?? {}) };
+  return { ...step.with };
+}
+
+export async function defaultFoundationSpawn(args: FoundationStepSpawnArgs): Promise<void> {
+  const launched = buildFoundationPythonCommand(args.entrypoint, ["--config", args.configPath]);
+  const result = await runLoggedProcess({
+    command: launched.command,
+    commandArgs: launched.commandArgs,
+    env: withFoundationPythonEnvironment(process.env),
+    logPath: args.logPath,
+    stage: args.stepId,
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `Foundation step "${args.stepId}" failed (exit ${result.exitCode}).${result.stderr ? `\n${result.stderr}` : ""}`,
+    );
+  }
+}
+
+export async function runFoundationPipeline(args: {
+  spec: LocalFoundationSpecFile;
+  plan: ExecutionPlan;
+  specPath: string;
+  outputDir?: string;
+  spawnStep?: FoundationStepSpawn;
+}): Promise<FoundationPipelineResult> {
+  const outputDir = resolve(
+    args.outputDir ?? join(dirname(resolve(args.specPath)), ".tt-foundation-runs", randomUUID()),
+  );
+  await mkdir(outputDir, { recursive: true });
+  const spawnStep = args.spawnStep ?? defaultFoundationSpawn;
+  const produced = new Map<string, ProducedArtifacts>();
+  const steps: FoundationStepResult[] = [];
+  const examples = args.spec.examples.map((example) => ({ input: example.input, output: example.output }));
+  const hp = args.spec.foundation;
+  let tokenizerDir: string | undefined;
+  let modelDir: string | undefined;
+
+  const resolveKind = (stepId: string, kind: string): string => {
+    const path = produced.get(stepId)?.[kind as keyof ProducedArtifacts];
+    if (!path) throw new Error(`Step ${stepId} did not produce ${kind}.`);
+    return path;
+  };
+
+  const resolveFrom = (value: unknown, kind: string, fallback?: string): string => {
+    if (isRef(value)) return resolveKind(parseRef(value).stepId, parseRef(value).kind);
+    if (fallback) return fallback;
+    throw new Error(`Missing ${kind} artifact.`);
+  };
+
+  for (const step of args.plan.steps) {
+    const stepDir = join(outputDir, step.id);
+    const output = join(stepDir, "output");
+    await mkdir(output, { recursive: true });
+    const configPath = join(stepDir, "config.json");
+    const logPath = join(stepDir, "step.log");
+    const fields = stepConfig(step);
+    let entrypoint: FoundationPythonEntrypoint;
+    let config: Record<string, unknown>;
+
+    if (step.uses === "tokenize") {
+      entrypoint = "tokenize.py";
+      config = {
+        output_dir: output,
+        vocab_size: fields.vocabSize ?? hp.vocab_size,
+        max_chars: fields.maxChars ?? hp.max_chars,
+        system_prompt: args.spec.system_prompt,
+        examples,
+      };
+    } else if (step.uses === "pretrain") {
+      tokenizerDir = resolveFrom(fields.tokenizer, "tokenizer", tokenizerDir);
+      entrypoint = "pretrain.py";
+      config = {
+        tokenizer_dir: tokenizerDir,
+        output_dir: output,
+        depth: fields.depth ?? hp.depth,
+        steps: fields.steps ?? hp.pretrain_steps,
+        batch_size: fields.batchSize ?? hp.batch_size,
+        sequence_length: fields.sequenceLength ?? hp.sequence_length,
+        nproc_per_node: fields.nprocPerNode ?? hp.nproc_per_node,
+        max_chars: hp.max_chars,
+        system_prompt: args.spec.system_prompt,
+        examples,
+      };
+    } else if (step.uses === "finetune") {
+      modelDir = resolveFrom(fields.model, "model", modelDir);
+      entrypoint = "finetune.py";
+      config = {
+        model_dir: modelDir,
+        tokenizer_dir: tokenizerDir,
+        output_dir: output,
+        steps: fields.steps ?? hp.finetune_steps,
+        batch_size: fields.batchSize ?? hp.batch_size,
+        sequence_length: hp.sequence_length,
+        system_prompt: args.spec.system_prompt,
+        examples,
+      };
+    } else if (step.uses === "rl") {
+      modelDir = resolveFrom(fields.model, "model", modelDir);
+      entrypoint = "rl.py";
+      config = {
+        model_dir: modelDir,
+        tokenizer_dir: tokenizerDir,
+        output_dir: output,
+        steps: fields.steps ?? hp.rl_steps,
+        system_prompt: args.spec.system_prompt,
+        examples,
+      };
+    } else if (step.uses === "evaluate") {
+      modelDir = resolveFrom(fields.model, "model", modelDir);
+      entrypoint = "evaluate.py";
+      config = {
+        evaluator: fields.evaluator ?? "bpb",
+        model_dir: modelDir,
+        tokenizer_dir: tokenizerDir,
+        output_dir: output,
+        sequence_length: hp.sequence_length,
+        max_chars: hp.max_chars,
+        system_prompt: args.spec.system_prompt,
+        examples,
+      };
+    } else {
+      throw new Error(`Foundation runner does not implement ${step.uses} (step ${step.id}).`);
+    }
+
+    if ((step.uses === "finetune" || step.uses === "rl" || step.uses === "evaluate") && !tokenizerDir) {
+      throw new Error(`Step ${step.id} needs a tokenizer from an earlier tokenize step.`);
+    }
+
+    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    await spawnStep({ entrypoint, configPath, logPath, stepId: step.id });
+
+    const metrics = await readJsonObject(join(output, "metrics.json"));
+    const artifacts: Record<string, FoundationStepArtifact> = {};
+    const record: ProducedArtifacts = {};
+    if (step.uses === "tokenize") {
+      record.tokenizer = output;
+      tokenizerDir = output;
+      artifacts.tokenizer = await artifactFor(output);
+    } else if (step.uses === "pretrain" || step.uses === "finetune" || step.uses === "rl") {
+      record.model = output;
+      modelDir = output;
+      artifacts.model = await artifactFor(output);
+    } else if (step.uses === "evaluate") {
+      const reportPath = join(output, "report.json");
+      record.report = reportPath;
+      artifacts.report = await artifactFor(reportPath);
+    }
+    produced.set(step.id, record);
+    steps.push({ id: step.id, uses: step.uses, metrics, artifacts });
+  }
+
+  const report = {
+    status: "succeeded" as const,
+    ...(args.plan.name ? { name: args.plan.name } : {}),
+    spec: args.specPath,
+    steps,
+  };
+  const reportPath = join(outputDir, "report.json");
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  return {
+    status: "succeeded",
+    ...(args.plan.name ? { name: args.plan.name } : {}),
+    report_path: reportPath,
+    steps,
+  };
+}

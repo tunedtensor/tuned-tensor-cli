@@ -19,6 +19,7 @@ import {
   type LocalRunInput,
 } from "../local-runtime/local-project.js";
 import { loadLocalRunnerConfig, runLocalPipeline, type LocalPipeline } from "../local-runtime/orchestrator.js";
+import { runFoundationPipeline } from "../local-runtime/foundation-runner.js";
 
 const DEFAULT_PIPELINE_FILE = "tunedtensor.pipeline.json";
 const DEFAULT_SPEC_FILE = "tunedtensor.json";
@@ -173,11 +174,19 @@ export function registerPipelineCommands(parent: Command): void {
         throw new Error(`Step "${remote.id}" targets cloud execution. This CLI is local-only; rewrite that step to local or use --dry-run.`);
       }
       const input = await loadLocalRunInput(resolve(options.spec));
-      if (input.kind === "foundation-spec") {
+      if (isParsedFoundationPipeline(document) || input.kind === "foundation-spec") {
+        if (input.kind !== "foundation-spec") {
+          throw new Error("Foundation pipelines require a foundation tunedtensor.json --spec.");
+        }
         assertFoundationSpecReady(input.spec);
-        throw new Error(
-          "Foundation pipeline execution is not wired yet. `tt pipeline plan` and `--dry-run` already honor this spec.",
-        );
+        const result = await runFoundationPipeline({
+          spec: input.spec,
+          plan,
+          specPath: resolve(options.spec),
+        });
+        if (isJsonMode()) return printJson(result);
+        printSuccess(`Foundation pipeline completed. Report: ${result.report_path}`);
+        return;
       }
       assertLocalRunInputReady(input.request);
       const config = await loadLocalRunnerConfig(options.config ? resolve(options.config) : undefined);

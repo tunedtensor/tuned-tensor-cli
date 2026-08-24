@@ -40,6 +40,18 @@ The first version intentionally excludes:
 The next model or method should arrive with its own locked dependencies,
 resource defaults, data contract, and real CUDA acceptance test.
 
+TT Local currently ships two such methods:
+
+- **Adapter** (`training/local-runner`): certified Transformers checkpoints and
+  PEFT LoRA SFT. Driven by `tt run` and adapter pipelines.
+- **Foundation** (`training/foundation`): a from-scratch BPE tokenizer and GPT
+  with no Transformers/PEFT. Driven only by `tt pipeline` from a foundation
+  `tunedtensor.json`. Pretrain, SFT, and RL require CUDA. Tokenizer training
+  and the CPU unit tests do not.
+
+Do not mix those lockfiles. Each engine hashes its own `pyproject.toml` and
+`uv.lock` into a distinct cache environment.
+
 ## Python boundary
 
 Node owns input validation, state, process lifecycle, manifests, and reports.

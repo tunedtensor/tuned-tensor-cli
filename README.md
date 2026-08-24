@@ -174,28 +174,36 @@ explicitly.
 
 ## Composable pipelines (v1)
 
-A pipeline is an ordered JSON recipe. Version 1 supports `train`, `evaluate`,
-and `compare` steps. This CLI executes local plans only. The v1 evaluator is
-`evaluate.with.evaluator: "behavior"`. `evaluate.with.model` is `"base"` or
-`{ "from": "step.model" }`; `compare.with.before` and
-`after` are `{ "from": "step.report" }`. References must point to an earlier
-step and to an output the producer actually exposes. The document contract
-itself is defined by the published `@tuned-tensor/pipeline-contract` package;
-the CLI adds only execution planning (step selection) on top of it.
+A pipeline is an ordered JSON recipe. This CLI executes local plans only. The
+portable document contract lives in `@tuned-tensor/pipeline-contract`. The CLI
+adds execution planning (step selection) on top of it.
+
+Two local engines share that document version:
+
+- **Adapter** (default): LoRA SFT on a certified Hugging Face checkpoint.
+  `tt run` and `tt pipeline` both work. Uses `train` / `evaluate` / `compare`
+  with `evaluate.with.evaluator: "behavior"`.
+- **Foundation**: from-scratch tokenizer + GPT. `tt pipeline` only. Uses
+  `tokenize` / `pretrain` / `finetune` / optional `rl` plus `bpb`, `chat`, and
+  `inference` evaluators. Requires a foundation `tunedtensor.json`
+  (`engine: "foundation"`, at least two examples, no `base_model`).
 
 ```bash
 tt pipeline init --file pipeline.json
+tt pipeline init --engine foundation --file foundation.pipeline.json
 tt pipeline validate --file pipeline.json
 tt --json pipeline plan --file pipeline.json
 tt --json pipeline run --dry-run --file pipeline.json --only baseline
 tt --json pipeline run --file pipeline.json \
   --spec tunedtensor.json --config local-runner.json
+tt init --engine foundation --name "Tiny GPT"
+tt --json pipeline run --spec tunedtensor.json --dry-run
 ```
 
 `--only` and `--skip` preserve dependency safety: a selected step cannot refer
 to an omitted predecessor. Cloud-targeted steps fail closed unless you pass
-`--dry-run`. The TT agent may describe, validate, and prepare a plan, but has
-no direct pipeline-execute tool.
+`--dry-run`. Foundation documents are local-only. The TT agent may describe,
+validate, and prepare a plan, but has no direct pipeline-execute tool.
 
 ## Quick start
 

@@ -17,7 +17,7 @@
     "test": "npm run test:cli && npm run test:local-runtime && npm run test:python",
     "test:cli": "vitest run",
     "test:local-runtime": "node --import tsx --test \"test/local-runtime/**/*.test.ts\"",
-    "test:python": "python3 -m unittest discover -s training/local-runner/tests -p 'test_*.py'",
+    "test:python": "python3 -m unittest discover -s training/local-runner/tests -p 'test_*.py' && uv run --frozen --project training/foundation python -m unittest discover -s training/foundation/tests -p 'test_*.py'",
     "test:watch": "vitest"
   },
   "files": [
@@ -25,6 +25,9 @@
     "training/local-runner/pyproject.toml",
     "training/local-runner/uv.lock",
     "training/local-runner/src/*.py",
+    "training/foundation/pyproject.toml",
+    "training/foundation/uv.lock",
+    "training/foundation/src/*.py",
     "docs/local-runtime",
     "examples/local-runtime/*.json",
     "examples/local-runtime/*.jsonl"
