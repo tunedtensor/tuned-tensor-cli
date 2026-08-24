@@ -9,6 +9,8 @@ import torch
 from torch import nn
 from safetensors.torch import load_file, save_file
 
+from common import ensure_private_directory, make_private_file, write_json
+
 
 def derived_width(depth: int) -> int:
     return 32 * int(depth)
@@ -116,11 +118,12 @@ def generate(
 
 
 def save_model(model: FoundationGPT, directory: str | Path) -> None:
-    destination = Path(directory)
-    destination.mkdir(parents=True, exist_ok=True)
+    destination = ensure_private_directory(directory)
     tensors = {key: value.detach().cpu().contiguous() for key, value in model.state_dict().items()}
-    save_file(tensors, str(destination / "model.safetensors"))
-    (destination / "config.json").write_text(json.dumps(model.config, indent=2) + "\n", encoding="utf-8")
+    model_path = destination / "model.safetensors"
+    save_file(tensors, str(model_path))
+    make_private_file(model_path)
+    write_json(destination / "config.json", model.config)
 
 
 def load_model(directory: str | Path, map_location: str | torch.device = "cpu") -> FoundationGPT:

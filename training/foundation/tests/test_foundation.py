@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import torch
 
 import rl
+import train_tokenizer as tokenizer_entrypoint
 from common import write_json
 from data import (
     IGNORE_INDEX,
@@ -25,7 +26,7 @@ from data import (
     parse_numeric_answer,
     train_tokenizer,
 )
-from model import FoundationGPT, derived_heads, derived_width, model_config_from_depth
+from model import FoundationGPT, derived_heads, derived_width, model_config_from_depth, save_model
 
 
 class FoundationOutputTests(unittest.TestCase):
@@ -34,6 +35,36 @@ class FoundationOutputTests(unittest.TestCase):
             path = Path(directory) / "nested" / "metrics.json"
             write_json(path, {"ok": True})
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+    def test_tokenizer_entrypoint_writes_a_private_artifact_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "tokenizer"
+            config = root / "config.json"
+            config.write_text(
+                '{"output_dir":"%s","vocab_size":64,"max_chars":2000,'
+                '"system_prompt":"Answer briefly.","examples":['
+                '{"input":"hello","output":"world"}]}' % output,
+                encoding="utf-8",
+            )
+
+            tokenizer_entrypoint.main(["--config", str(config)])
+
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE((output / "tokenizer.json").stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE((output / "metrics.json").stat().st_mode), 0o600)
+
+    def test_model_writer_writes_a_private_artifact_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "model"
+            model = FoundationGPT(model_config_from_depth(1, vocab_size=64, sequence_length=16))
+            model.lm_head.weight = torch.nn.Parameter(model.lm_head.weight.detach().clone())
+
+            save_model(model, output)
+
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE((output / "model.safetensors").stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE((output / "config.json").stat().st_mode), 0o600)
 
 
 class FoundationEntrypointTests(unittest.TestCase):

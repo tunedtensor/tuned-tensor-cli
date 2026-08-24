@@ -81,6 +81,25 @@ async function hashPath(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
+async function makePrivateTree(path: string): Promise<void> {
+  const info = await lstat(path);
+  if (info.isSymbolicLink()) {
+    throw new Error(`Foundation artifacts must not contain symbolic links: ${path}`);
+  }
+  if (info.isDirectory()) {
+    await chmod(path, 0o700);
+    for (const name of await readdir(path)) {
+      await makePrivateTree(join(path, name));
+    }
+    return;
+  }
+  if (info.isFile()) {
+    await chmod(path, 0o600);
+    return;
+  }
+  throw new Error(`Foundation artifacts must contain only regular files and directories: ${path}`);
+}
+
 async function readRequiredJsonObject(
   path: string,
   description: string,
@@ -231,7 +250,10 @@ export async function runFoundationPipeline(args: {
   for (const step of args.plan.steps) {
     const stepDir = join(outputDir, step.id);
     const output = join(stepDir, "output");
-    await mkdir(output, { recursive: true });
+    await mkdir(stepDir, { recursive: true, mode: 0o700 });
+    await chmod(stepDir, 0o700);
+    await mkdir(output, { recursive: true, mode: 0o700 });
+    await chmod(output, 0o700);
     const configPath = join(stepDir, "config.json");
     const logPath = join(stepDir, "step.log");
     const fields = stepConfig(step);
@@ -309,6 +331,7 @@ export async function runFoundationPipeline(args: {
 
     await writePrivateText(configPath, `${JSON.stringify(config, null, 2)}\n`);
     await spawnStep({ entrypoint, configPath, logPath, stepId: step.id });
+    await makePrivateTree(stepDir);
 
     const metrics = await readRequiredJsonObject(
       join(output, "metrics.json"),

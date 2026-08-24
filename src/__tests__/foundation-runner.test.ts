@@ -244,4 +244,27 @@ describe("foundation pipeline runner", () => {
     expect(report.status).toBe("succeeded");
     expect(report.steps).toHaveLength(plan.steps.length);
   });
+
+  it("normalizes every generated step directory and artifact to private modes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-"));
+    dirs.push(dir);
+    const recipe = pipelineFromFoundationHyperparameters(spec.name, spec.foundation);
+    const plan = createExecutionPlan(recipe, { only: ["tokenize", "pretrain"] });
+
+    await runFoundationPipeline({
+      spec,
+      plan,
+      specPath: join(dir, "tunedtensor.json"),
+      outputDir: join(dir, "run"),
+      spawnStep: mockSpawn,
+    });
+
+    if (process.platform !== "win32") {
+      expect((await stat(join(dir, "run", "tokenize"))).mode & 0o777).toBe(0o700);
+      expect((await stat(join(dir, "run", "tokenize", "output"))).mode & 0o777).toBe(0o700);
+      expect((await stat(join(dir, "run", "tokenize", "output", "tokenizer.json"))).mode & 0o777).toBe(0o600);
+      expect((await stat(join(dir, "run", "pretrain", "output", "config.json"))).mode & 0o777).toBe(0o600);
+      expect((await stat(join(dir, "run", "pretrain", "output", "model.safetensors"))).mode & 0o777).toBe(0o600);
+    }
+  });
 });
