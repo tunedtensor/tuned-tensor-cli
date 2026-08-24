@@ -84,7 +84,7 @@ such as `runs list` and `doctor` work immediately. Chat waits until you choose
 a provider and model from inside the shell:
 
 ```text
-tt v0.13.1-beta.1
+tt v0.13.1-beta.2
 agent not configured · workflow model base
 ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
 
@@ -113,7 +113,7 @@ After a model is selected, the banner shows it and ordinary sentences go to
 the agent:
 
 ```text
-tt v0.13.1-beta.1
+tt v0.13.1-beta.2
 agent anthropic/claude-sonnet-4-5 · workflow model base
 ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
 
@@ -174,28 +174,47 @@ explicitly.
 
 ## Composable pipelines (v1)
 
-A pipeline is an ordered JSON recipe. Version 1 supports `train`, `evaluate`,
-and `compare` steps. This CLI executes local plans only. The v1 evaluator is
-`evaluate.with.evaluator: "behavior"`. `evaluate.with.model` is `"base"` or
-`{ "from": "step.model" }`; `compare.with.before` and
-`after` are `{ "from": "step.report" }`. References must point to an earlier
-step and to an output the producer actually exposes. The document contract
-itself is defined by the published `@tuned-tensor/pipeline-contract` package;
-the CLI adds only execution planning (step selection) on top of it.
+A pipeline is an ordered JSON recipe. This CLI executes local plans only. The
+portable document contract lives in `@tuned-tensor/pipeline-contract`. The CLI
+adds execution planning (step selection) on top of it.
+
+Two local engines share that document version:
+
+- **Adapter** (default): LoRA SFT on a certified Hugging Face checkpoint.
+  `tt run` and `tt pipeline` both work. Uses `train` / `evaluate` / `compare`
+  with `evaluate.with.evaluator: "behavior"`.
+- **Foundation**: from-scratch tokenizer + GPT. `tt pipeline` only. Uses
+  `tokenize` / `pretrain` / `finetune` / optional `rl` plus `bpb`, `chat`, and
+  `inference` evaluators. Requires a foundation `tunedtensor.json`
+  (`engine: "foundation"`, at least two examples, no `base_model`).
+
+The foundation engine is a small, readable local baseline inspired by Andrej
+Karpathy's [nanochat](https://github.com/karpathy/nanochat), not a port of its
+compute-optimal training stack. The first version deliberately builds a bounded
+pretraining corpus from the spec prompt and examples, reports chat accuracy on
+those same contract examples, and supports one training process. Foundation
+plans reject `compare` before creating run artifacts; comparison remains an
+adapter-engine capability. Optional RL samples one seeded on-policy completion
+per step with a sparse last-number exact reward and therefore requires a numeric
+expected output for every example. Treat those metrics as an end-to-end
+execution and overfit check—not held-out capability or multi-GPU evidence.
 
 ```bash
 tt pipeline init --file pipeline.json
+tt pipeline init --engine foundation --file foundation.pipeline.json
 tt pipeline validate --file pipeline.json
 tt --json pipeline plan --file pipeline.json
 tt --json pipeline run --dry-run --file pipeline.json --only baseline
 tt --json pipeline run --file pipeline.json \
   --spec tunedtensor.json --config local-runner.json
+tt init --engine foundation --name "Tiny GPT"
+tt --json pipeline run --spec tunedtensor.json --dry-run
 ```
 
 `--only` and `--skip` preserve dependency safety: a selected step cannot refer
 to an omitted predecessor. Cloud-targeted steps fail closed unless you pass
-`--dry-run`. The TT agent may describe, validate, and prepare a plan, but has
-no direct pipeline-execute tool.
+`--dry-run`. Foundation documents are local-only. The TT agent may describe,
+validate, and prepare a plan, but has no direct pipeline-execute tool.
 
 ## Quick start
 

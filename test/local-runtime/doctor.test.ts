@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
-import { fineTuneRunRequestSchema, localRunnerConfigSchema } from "../../src/local-runtime/contracts.js";
+import { fineTuneRunRequestSchema, localFoundationSpecFileSchema, localRunnerConfigSchema } from "../../src/local-runtime/contracts.js";
 import { buildDoctorPythonPlans, runDoctor } from "../../src/local-runtime/doctor.js";
 
 test("doctor probes the locked uv runtime with one cache contract and mandatory CUDA", () => {
@@ -116,6 +116,37 @@ test("doctor rejects an unchanged generated placeholder spec", async () => {
       storeRoot: join(root, "store"),
       paths: { modelCache: join(root, "cache") },
     }), request);
+    assert.equal(checks.find((check) => check.name === "spec-content")?.ok, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor rejects an unchanged generated foundation spec", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-doctor-foundation-"));
+  try {
+    const spec = localFoundationSpecFileSchema.parse({
+      engine: "foundation",
+      name: "Placeholder foundation",
+      system_prompt: "Describe the behavior this local model should learn.",
+      examples: [
+        {
+          input: "Replace this with a representative input.",
+          output: "Replace this with the expected output.",
+        },
+        {
+          input: "Replace this with a different input.",
+          output: "Replace this with a different output.",
+        },
+      ],
+      foundation: {},
+    });
+    const checks = await runDoctor(localRunnerConfigSchema.parse({
+      dryRun: true,
+      artifactRoot: join(root, "artifacts"),
+      storeRoot: join(root, "store"),
+      paths: { modelCache: join(root, "cache") },
+    }), undefined, spec);
     assert.equal(checks.find((check) => check.name === "spec-content")?.ok, false);
   } finally {
     await rm(root, { recursive: true, force: true });

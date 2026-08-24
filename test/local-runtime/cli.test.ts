@@ -230,6 +230,30 @@ test("public workflow commands reject full run-request JSON", async () => {
   });
 });
 
+test("doctor rejects an unchanged generated foundation spec", async () => {
+  await withTemporaryProject(async (root) => {
+    const specPath = join(root, "tunedtensor.json");
+    const configPath = join(root, "local-runner.json");
+    await writeFile(configPath, `${JSON.stringify({
+      artifactRoot: "artifacts",
+      storeRoot: "state",
+      dryRun: true,
+    })}\n`, "utf8");
+
+    const initialized = runCli(["init", "--engine", "foundation", "--output", specPath], root);
+    assert.equal(initialized.status, 0, initialized.stderr);
+
+    const doctor = runCli(["doctor", specPath], root);
+    assert.equal(doctor.status, 1, doctor.stderr);
+    const payload = JSON.parse(doctor.stdout) as {
+      ok: boolean;
+      checks: Array<{ name: string; ok: boolean }>;
+    };
+    assert.equal(payload.ok, false);
+    assert.equal(payload.checks.find((check) => check.name === "spec-content")?.ok, false);
+  });
+});
+
 test("adjacent config is discovered for init, doctor, validate, and dry-run", async () => {
   await withTemporaryProject(async (root) => {
     const project = join(root, "project");

@@ -4,5 +4,7 @@ dist/
 .env
 .env.local
 .tt-local/
+.tt-foundation-runs/
 __pycache__/
 *.py[cod]
+.venv/

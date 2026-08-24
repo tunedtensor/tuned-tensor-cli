@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+## [0.13.1-beta.2] - 2026-08-24
+
+### Added
+
+- A local-only foundation engine can build a tokenizer and GPT checkpoint from
+  a foundation behavior spec, then run pretraining, supervised fine-tuning,
+  optional numeric-reward RL, chat/BPB evaluation, and inference benchmarking
+  as one ordered `tt pipeline` workflow.
+- `tt init --engine foundation` and `tt pipeline init --engine foundation`
+  create matching specs and contract-valid local DAGs. Validation, planning,
+  `--only`, and `--skip` preserve typed artifact dependencies before execution.
+- Foundation reports include hashed tokenizer, model, and evaluation artifacts
+  plus stage metrics for reproducible local inspection.
+
+### Changed
+
+- Pipeline parsing and normalization now consume the immutable
+  `@tuned-tensor/pipeline-contract@1.1.0` release. Foundation execution remains
+  CUDA-only and single-process; unsupported compositions fail before run-state
+  creation or GPU work.
+- The first foundation baseline is intentionally small and inspectable rather
+  than a port of NanoChat's distributed training stack. Its built-in chat
+  metrics reuse spec examples and are evidence of execution/in-sample fit, not
+  held-out model quality.
+
+### Security
+
+- Foundation run directories, prompts, configs, logs, reports, tokenizers, and
+  model artifacts are private (`0700` directories and `0600` files). Symlinks,
+  special nodes, missing outputs, malformed reports, and unsuccessful stage
+  metrics fail closed before artifacts are accepted or hashed.
+
+### Fixed
+
+- Correct next-token SFT label alignment and BPB byte accounting across every
+  batch row, and stop chat evaluation at the model's trained end token.
+- Keep RL context bounded and rollout sampling seeded and on-policy while using
+  a binary-reward advantage that corrects failed samples instead of allowing
+  one-answer policy collapse. Numeric reward inputs are validated before work
+  begins.
+- Avoid Python stdlib `tokenize` shadowing and reject unsupported multiprocess
+  plans before side effects.
+
 ## [0.13.1-beta.1] - 2026-08-23
 
 ### Fixed

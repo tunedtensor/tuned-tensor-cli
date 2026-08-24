@@ -6,7 +6,7 @@ import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { compareRuns } from "./compare.js";
 import { assertArtifactManifest } from "./artifacts.js";
-import { fineTuneRunRequestSchema, localBehaviorSpecFileSchema, localRunnerConfigSchema, type FineTuneRunRequest, type LocalRunnerConfig, type SpecSnapshot } from "./contracts.js";
+import { fineTuneRunRequestSchema, isFoundationSpecFile, localBehaviorSpecFileSchema, localRunnerConfigSchema, type FineTuneRunRequest, type LocalRunnerConfig, type SpecSnapshot } from "./contracts.js";
 import { buildSystemMessage } from "./dataset.js";
 import {
   loadLocalRunnerConfig,
@@ -25,6 +25,7 @@ import { prefetchBaseModel } from "./prefetch.js";
 import { createLocalStore, type LocalModelRecord, type LocalStore } from "./store.js";
 import {
   DEFAULT_LOCAL_SPEC_PATH,
+  assertFoundationSpecReady,
   assertLocalRunInputReady,
   initLocalRunnerConfigFile,
   initLocalSpecFile,
@@ -168,6 +169,7 @@ const COMMAND_DEFINITIONS: Record<string, CliCommandDefinition> = {
     description: "Create a local tunedtensor.json behavior spec.",
     options: [
       { name: "--name", value: "name", description: "Behavior spec name" },
+      { name: "--engine", value: "engine", description: "adapter (default) or foundation" },
       { name: "--model", value: "model", description: "Base model ID" },
       { name: "--output", value: "path", description: "Output spec path" },
       { name: "--profile", value: "profile", description: "Write a durable runner config (spark)" },
@@ -440,6 +442,11 @@ async function loadCliBehaviorSpec(inputPath: string, runId?: string) {
   const input = await loadLocalRunInput(inputPath, {
     ...(runId ? { runId } : {}),
   });
+  if (input.kind === "foundation-spec") {
+    throw new Error(
+      `This spec uses engine "foundation". Use \`tt pipeline run --spec ${input.path}\` instead of adapter commands like \`tt run\`.`,
+    );
+  }
   if (input.kind !== "spec") {
     throw new Error(`TT Local CLI expects a tunedtensor.json behavior spec, not a full run request: ${input.path}`);
   }
@@ -668,6 +675,9 @@ async function modelSystemPrompt(args: {
     if (!local.success) {
       throw new Error(`--spec must contain a tunedtensor.json behavior spec: ${resolve(specPath)}`);
     }
+    if (isFoundationSpecFile(local.data)) {
+      throw new Error("Foundation specs have no Hugging Face base model. `tt serve` cannot host them yet.");
+    }
     spec = local.data;
   } else {
     const runRequestPath = join(args.store.paths.runsDir, args.model.run_id, "request.json");
@@ -788,6 +798,9 @@ async function serveBaseModelFromCli(args: {
       JSON.parse(await readFile(specPath, "utf8")) as unknown,
     )
     : undefined;
+  if (spec && isFoundationSpecFile(spec)) {
+    throw new Error("Foundation specs have no Hugging Face base model. `tt serve` cannot host them yet.");
+  }
   let baseModel = spec?.base_model;
   if (!baseModel) {
     const store = createLocalStore(args.config.storeRoot);
@@ -893,10 +906,19 @@ async function main(argv: string[]): Promise<void> {
     const hasDefaultSpec = cli.positionals[0]
       ? true
       : Boolean((await stat(inputPath).catch(() => null))?.isFile());
-    const request = hasDefaultSpec
-      ? (await loadCliBehaviorSpec(inputPath)).request
-      : undefined;
-    const checks = await runDoctor(configSelection.config, request);
+    let request: FineTuneRunRequest | undefined;
+    let foundationSpec: import("./contracts.js").LocalFoundationSpecFile | undefined;
+    if (hasDefaultSpec) {
+      const input = await loadLocalRunInput(inputPath);
+      if (input.kind === "foundation-spec") {
+        foundationSpec = input.spec;
+      } else if (input.kind === "spec") {
+        request = input.request;
+      } else {
+        throw new Error(`TT Local CLI expects a tunedtensor.json behavior spec, not a full run request: ${input.path}`);
+      }
+    }
+    const checks = await runDoctor(configSelection.config, request, foundationSpec);
     const ok = checks.every((check) => check.ok);
     printJson({
       ok,
@@ -913,10 +935,18 @@ async function main(argv: string[]): Promise<void> {
     if (profile !== undefined && profile !== "spark") {
       throw new Error(`--profile must be spark, got: ${profile}`);
     }
+    const engine = readOption(argv, "--engine") ?? "adapter";
+    if (engine !== "adapter" && engine !== "foundation") {
+      throw new Error(`--engine must be adapter or foundation, got: ${engine}`);
+    }
+    if (engine === "foundation" && readOption(argv, "--model")) {
+      throw new Error("Foundation specs do not take --model; they train a tokenizer and GPT from scratch.");
+    }
     const spec = await initLocalSpecFile({
       outputPath,
-      name: readOption(argv, "--name") ?? "Local Tuned Tensor Spec",
-      baseModel: readOption(argv, "--model") ?? "Qwen/Qwen3.5-2B",
+      name: readOption(argv, "--name") ?? (engine === "foundation" ? "Foundation chat model" : "Local Tuned Tensor Spec"),
+      engine,
+      baseModel: engine === "foundation" ? undefined : (readOption(argv, "--model") ?? "Qwen/Qwen3.5-2B"),
       force: hasFlag(argv, "--force"),
     });
     const configPath = profile
@@ -936,7 +966,8 @@ async function main(argv: string[]): Promise<void> {
       path: outputPath,
       id: spec.id,
       name: spec.name,
-      base_model: spec.base_model,
+      engine: spec.engine ?? "adapter",
+      base_model: isFoundationSpecFile(spec) ? null : spec.base_model,
       config_path: configPath ?? null,
     });
     return;
@@ -944,7 +975,21 @@ async function main(argv: string[]): Promise<void> {
 
   if (command === "validate") {
     const inputPath = resolve(cli.positionals[0] ?? DEFAULT_LOCAL_SPEC_PATH);
-    const input = await loadCliBehaviorSpec(inputPath);
+    const loaded = await loadLocalRunInput(inputPath);
+    if (loaded.kind === "foundation-spec") {
+      assertFoundationSpecReady(loaded.spec);
+      printJson({
+        ok: true,
+        input_path: loaded.path,
+        engine: "foundation",
+        pipeline: "tt pipeline run --spec",
+      });
+      return;
+    }
+    if (loaded.kind !== "spec") {
+      throw new Error(`TT Local CLI expects a tunedtensor.json behavior spec, not a full run request: ${loaded.path}`);
+    }
+    const input = loaded;
     assertLocalRunInputReady(input.request);
     const configSelection = await configSelectionFromArgv(argv, inputPath);
     const validated = await validateLocalFineTuneInput({

@@ -18,6 +18,8 @@ export const CLOUD_SPEC_KEYS = [
 export const LOCAL_ONLY_SPEC_KEYS = [
   "hyperparameters",
   "dataset_prebuilt",
+  "engine",
+  "foundation",
 ] as const;
 
 export const LOCAL_SPEC_KEYS = [

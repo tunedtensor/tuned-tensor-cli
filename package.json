@@ -1,6 +1,6 @@
 {
   "name": "@tuned-tensor/cli",
-  "version": "0.13.1-beta.1",
+  "version": "0.13.1-beta.2",
   "description": "Local TT agent and CUDA fine-tuning CLI for Tuned Tensor workflows",
   "repository": {
     "type": "git",
@@ -17,7 +17,7 @@
     "test": "npm run test:cli && npm run test:local-runtime && npm run test:python",
     "test:cli": "vitest run",
     "test:local-runtime": "node --import tsx --test \"test/local-runtime/**/*.test.ts\"",
-    "test:python": "python3 -m unittest discover -s training/local-runner/tests -p 'test_*.py'",
+    "test:python": "python3 -m unittest discover -s training/local-runner/tests -p 'test_*.py' && uv run --frozen --project training/foundation python -m unittest discover -s training/foundation/tests -p 'test_*.py'",
     "test:watch": "vitest"
   },
   "files": [
@@ -25,6 +25,9 @@
     "training/local-runner/pyproject.toml",
     "training/local-runner/uv.lock",
     "training/local-runner/src/*.py",
+    "training/foundation/pyproject.toml",
+    "training/foundation/uv.lock",
+    "training/foundation/src/*.py",
     "docs/local-runtime",
     "examples/local-runtime/*.json",
     "examples/local-runtime/*.jsonl"
@@ -44,7 +47,7 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.84.1",
     "@earendil-works/pi-coding-agent": "0.84.1",
-    "@tuned-tensor/pipeline-contract": "1.0.0",
+    "@tuned-tensor/pipeline-contract": "1.1.0",
     "chalk": "^5.6.2",
     "cli-table3": "^0.6.5",
     "commander": "^14.0.3",

@@ -1,0 +1,251 @@
+from __future__ import annotations
+
+import stat
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from typing import Any, cast
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+import torch
+
+import evaluate
+import rl
+import train_tokenizer as tokenizer_entrypoint
+from common import write_json
+from data import (
+    IGNORE_INDEX,
+    decoded_byte_count,
+    encode_ids,
+    encode_sft_example,
+    format_chat,
+    format_prompt,
+    numeric_reward,
+    parse_numeric_answer,
+    train_tokenizer,
+)
+from model import FoundationGPT, derived_heads, derived_width, generate, model_config_from_depth, save_model
+
+
+class FoundationOutputTests(unittest.TestCase):
+    def test_json_outputs_are_private(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "metrics.json"
+            write_json(path, {"ok": True})
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+    def test_tokenizer_entrypoint_writes_a_private_artifact_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "tokenizer"
+            config = root / "config.json"
+            config.write_text(
+                '{"output_dir":"%s","vocab_size":64,"max_chars":2000,'
+                '"system_prompt":"Answer briefly.","examples":['
+                '{"input":"hello","output":"world"}]}' % output,
+                encoding="utf-8",
+            )
+
+            tokenizer_entrypoint.main(["--config", str(config)])
+
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE((output / "tokenizer.json").stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE((output / "metrics.json").stat().st_mode), 0o600)
+
+    def test_model_writer_writes_a_private_artifact_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "model"
+            model = FoundationGPT(model_config_from_depth(1, vocab_size=64, sequence_length=16))
+            model.lm_head.weight = torch.nn.Parameter(model.lm_head.weight.detach().clone())
+
+            save_model(model, output)
+
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE((output / "model.safetensors").stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE((output / "config.json").stat().st_mode), 0o600)
+
+
+class FoundationEntrypointTests(unittest.TestCase):
+    def test_source_directory_does_not_shadow_python_tokenize_module(self) -> None:
+        source_dir = Path(__file__).resolve().parents[1] / "src"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import tokenize; assert hasattr(tokenize, 'open'), tokenize.__file__",
+            ],
+            cwd=source_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
+class FoundationModelTests(unittest.TestCase):
+    def test_depth_derives_width_and_heads(self) -> None:
+        self.assertEqual(derived_width(2), 64)
+        self.assertEqual(derived_heads(2), 8)
+        config = model_config_from_depth(2, vocab_size=128, sequence_length=16)
+        model = FoundationGPT(config)
+        logits = model(torch.zeros(2, 8, dtype=torch.long))
+        self.assertEqual(tuple(logits.shape), (2, 8, 128))
+
+    def test_generation_stops_when_every_row_emits_the_stop_token(self) -> None:
+        class FakeModel:
+            config = {"sequence_length": 8}
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def eval(self) -> None:
+                return None
+
+            def __call__(self, tokens: torch.Tensor) -> torch.Tensor:
+                logits = torch.zeros(tokens.size(0), tokens.size(1), 8)
+                next_id = 7 if self.calls == 0 else 5
+                logits[:, -1, next_id] = 1
+                self.calls += 1
+                return logits
+
+        model = FakeModel()
+        prompt = torch.tensor([[1, 2]], dtype=torch.long)
+
+        output = generate(model, prompt, max_new_tokens=8, stop_token_id=5)
+
+        self.assertEqual(output.tolist(), [[1, 2, 7, 5]])
+        self.assertEqual(model.calls, 2)
+
+
+class FoundationEvaluationTests(unittest.TestCase):
+    def test_chat_evaluation_stops_at_the_tokenizer_end_token(self) -> None:
+        class FakeEncoding:
+            ids = [1, 2]
+
+        class FakeTokenizer:
+            def encode(self, _text: str) -> FakeEncoding:
+                return FakeEncoding()
+
+            def token_to_id(self, _token: str) -> int:
+                return 5
+
+            def decode(self, ids: list[int]) -> str:
+                return "0" if ids == [7, 5] else "0 extra"
+
+        class FakeModel:
+            config = {"sequence_length": 8}
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def eval(self) -> None:
+                return None
+
+            def __call__(self, tokens: torch.Tensor) -> torch.Tensor:
+                logits = torch.zeros(tokens.size(0), tokens.size(1), 8)
+                next_id = 7 if self.calls == 0 else 5
+                logits[:, -1, next_id] = 1
+                self.calls += 1
+                return logits
+
+        metrics = cast(
+            dict[str, Any],
+            evaluate.evaluate_chat(
+                cast(FoundationGPT, FakeModel()),
+                cast(Any, FakeTokenizer()),
+                "Return one digit.",
+                [{"input": "parity digits 1 0", "output": "0"}],
+                torch.device("cpu"),
+            ),
+        )
+
+        self.assertEqual(metrics["correct"], 1)
+        self.assertEqual(metrics["accuracy"], 1.0)
+        self.assertEqual(metrics["predictions"][0]["actual"], "0")
+
+
+class FoundationTokenizerTests(unittest.TestCase):
+    def test_whitespace_bpe_round_trips_words(self) -> None:
+        tokenizer = train_tokenizer("hello world hello there hello world\n" * 32, vocab_size=64)
+        encoded = tokenizer.encode("hello world")
+        self.assertGreater(len(encoded.ids), 0)
+        self.assertIn("hello", tokenizer.decode(encoded.ids))
+
+    def test_byte_count_sums_every_target_row(self) -> None:
+        class FakeTokenizer:
+            def decode(self, ids: list[int]) -> str:
+                return "a" if ids[0] == 1 else "éé"
+
+        self.assertEqual(decoded_byte_count(FakeTokenizer(), [[1, 9], [2, 9]]), 5)
+
+
+class FoundationSftMaskTests(unittest.TestCase):
+    def test_assistant_targets_are_shifted_for_next_token_prediction(self) -> None:
+        system_prompt = "You are helpful."
+        user = "hello"
+        assistant = "world"
+        tokenizer = train_tokenizer(
+            "<|system|> You are helpful. <|user|> hello <|assistant|> world <｜end｜>\n" * 16,
+            vocab_size=96,
+        )
+        input_ids, labels = encode_sft_example(
+            tokenizer,
+            system_prompt,
+            user,
+            assistant,
+            32,
+        )
+        prefix_ids = encode_ids(tokenizer, format_prompt(system_prompt, user))
+        full_ids = encode_ids(tokenizer, format_chat(system_prompt, user, assistant))
+        first_assistant_target = len(prefix_ids) - 1
+
+        self.assertEqual(len(input_ids), 32)
+        self.assertEqual(len(labels), 32)
+        self.assertEqual(input_ids[: len(full_ids) - 1], full_ids[:-1])
+        self.assertTrue(all(label == IGNORE_INDEX for label in labels[:first_assistant_target]))
+        self.assertEqual(labels[first_assistant_target], full_ids[len(prefix_ids)])
+        self.assertEqual(
+            labels[first_assistant_target:first_assistant_target + len(full_ids) - len(prefix_ids)],
+            full_ids[len(prefix_ids):],
+        )
+
+
+class FoundationRlRewardTests(unittest.TestCase):
+    def test_zero_reward_penalizes_the_sampled_completion(self) -> None:
+        token_log_probs = torch.tensor([-0.25], requires_grad=True)
+
+        loss = rl.policy_gradient_loss(token_log_probs, reward=0.0)
+        loss.backward()
+
+        self.assertGreater(float(token_log_probs.grad.item()), 0.0)
+
+    def test_rollout_fits_prompt_and_completion_inside_model_context(self) -> None:
+        prompt, completion_tokens = rl.bounded_rollout(list(range(40)), 16)
+        self.assertEqual(prompt, list(range(32, 40)))
+        self.assertEqual(completion_tokens, 8)
+        self.assertLessEqual(len(prompt) + completion_tokens, 16)
+
+    def test_rollout_samples_from_the_policy_distribution(self) -> None:
+        model = FoundationGPT(model_config_from_depth(1, vocab_size=16, sequence_length=8))
+        prompt = torch.tensor([[1, 2]], dtype=torch.long)
+        chosen = torch.tensor([[7]], dtype=torch.long)
+
+        with patch.object(rl.torch, "multinomial", return_value=chosen) as sample:
+            rollout = rl.sample_rollout(model, prompt, max_new_tokens=2)
+
+        self.assertEqual(rollout.tolist(), [[1, 2, 7, 7]])
+        self.assertEqual(sample.call_count, 2)
+
+    def test_parses_the_last_number_and_rewards_exact_matches(self) -> None:
+        self.assertEqual(parse_numeric_answer("2 + 2 = 4."), 4.0)
+        self.assertEqual(numeric_reward("The answer is 4", "4"), 1.0)
+        self.assertEqual(numeric_reward("The answer is 5", "4"), 0.0)
+        self.assertEqual(numeric_reward("no digits", "4"), 0.0)
+
+
+if __name__ == "__main__":
+    unittest.main()

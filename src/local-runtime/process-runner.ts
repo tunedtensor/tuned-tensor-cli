@@ -29,6 +29,27 @@ type BundledPythonEntrypoint =
   | "serve.py"
   | "-c";
 
+const foundationProject = join(packageRoot, "training/foundation");
+const foundationRuntimeHash = (() => {
+  const hash = createHash("sha256");
+  for (const name of ["pyproject.toml", "uv.lock"]) {
+    hash.update(readFileSync(join(foundationProject, name)));
+  }
+  return hash.digest("hex").slice(0, 20);
+})();
+export const FOUNDATION_PYTHON_ENVIRONMENT = join(
+  resolve(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache")),
+  "tuned-tensor-local",
+  "uv-foundation",
+  foundationRuntimeHash,
+);
+export type FoundationPythonEntrypoint =
+  | "train_tokenizer.py"
+  | "pretrain.py"
+  | "finetune.py"
+  | "evaluate.py"
+  | "rl.py";
+
 /** Build a command for the one locked Python runtime shipped with TT Local. */
 export function buildBundledPythonCommand(
   entrypoint: BundledPythonEntrypoint,
@@ -61,6 +82,38 @@ export function withBundledPythonEnvironment(
   return {
     ...env,
     UV_PROJECT_ENVIRONMENT: BUNDLED_PYTHON_ENVIRONMENT,
+  };
+}
+
+/** Build a command for the locked from-scratch foundation runtime. */
+export function buildFoundationPythonCommand(
+  entrypoint: FoundationPythonEntrypoint,
+  args: string[] = [],
+): { command: "uv"; commandArgs: string[]; displayCommand: string[] } {
+  const commandArgs = [
+    "run",
+    "--frozen",
+    "--quiet",
+    "--project",
+    foundationProject,
+    "python",
+    join(foundationProject, "src", entrypoint),
+    ...args,
+  ];
+  return {
+    command: "uv",
+    commandArgs,
+    displayCommand: ["uv", ...commandArgs],
+  };
+}
+
+/** Keep the foundation virtualenv outside a possibly read-only npm install. */
+export function withFoundationPythonEnvironment(
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    UV_PROJECT_ENVIRONMENT: FOUNDATION_PYTHON_ENVIRONMENT,
   };
 }
 

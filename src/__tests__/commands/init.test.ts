@@ -57,6 +57,23 @@ describe("init command", () => {
     expect(content.base_model).toBe("Qwen/Qwen3.5-2B");
   });
 
+  it("creates a foundation spec without a base model", async () => {
+    const program = buildProgram();
+    await program.parseAsync([
+      "node", "tt", "init",
+      "--file", "test-init-spec.json",
+      "--engine", "foundation",
+      "--name", "Tiny GPT",
+    ]);
+
+    const content = JSON.parse(readFileSync(TEST_FILE, "utf-8"));
+    expect(content.engine).toBe("foundation");
+    expect(content.name).toBe("Tiny GPT");
+    expect(content.base_model).toBeUndefined();
+    expect(content.foundation.depth).toBe(2);
+    expect(content.examples).toHaveLength(2);
+  });
+
   it("returns one JSON document when creating a project", async () => {
     setJsonMode(true);
     const program = buildProgram();

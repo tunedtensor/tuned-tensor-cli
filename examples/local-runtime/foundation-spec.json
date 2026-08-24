@@ -1,0 +1,31 @@
+{
+  "engine": "foundation",
+  "name": "Foundation smoke chat",
+  "description": "Tiny from-scratch tokenizer, pretrain, chat SFT, and eval.",
+  "system_prompt": "You are a helpful assistant.",
+  "guidelines": [
+    "Answer the user request directly."
+  ],
+  "constraints": [],
+  "examples": [
+    {
+      "input": "Say hello in one sentence.",
+      "output": "Hello — how can I help you today?"
+    },
+    {
+      "input": "What is 2 + 2?",
+      "output": "2 + 2 = 4."
+    }
+  ],
+  "foundation": {
+    "vocab_size": 256,
+    "max_chars": 20000,
+    "depth": 2,
+    "pretrain_steps": 2,
+    "finetune_steps": 2,
+    "rl_steps": 0,
+    "batch_size": 2,
+    "sequence_length": 64,
+    "nproc_per_node": 1
+  }
+}

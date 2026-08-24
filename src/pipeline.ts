@@ -1,4 +1,5 @@
 import {
+  canonicalFoundationPipeline,
   canonicalPipeline as canonicalPortablePipeline,
   parsePipeline,
   pipelineDocumentSchema,
@@ -20,7 +21,9 @@ export {
   PIPELINE_STEP_CAPABILITIES,
   PIPELINE_STEP_USES,
   PIPELINE_TARGETS,
+  canonicalFoundationPipeline,
   canonicalJson,
+  isFoundationPipeline,
   parsePipeline,
   pipelineDocumentSchema,
   pipelineHash,
@@ -60,7 +63,101 @@ export interface ExecutionPlan {
 function stepReferences(step: PipelineStep): PipelineArtifactReference[] {
   if (step.uses === "evaluate") return step.with.model === "base" ? [] : [step.with.model];
   if (step.uses === "compare") return [step.with.before, step.with.after];
+  if (step.uses === "pretrain") return [step.with.tokenizer];
+  if (step.uses === "finetune" || step.uses === "rl") return [step.with.model];
   return [];
+}
+
+/** Hyperparameters copied from a foundation `tunedtensor.json` into a Pipeline v1 DAG. */
+export interface FoundationPipelineHyperparameters {
+  vocab_size: number;
+  max_chars: number;
+  depth: number;
+  pretrain_steps: number;
+  finetune_steps: number;
+  rl_steps: number;
+  batch_size: number;
+  sequence_length: number;
+  nproc_per_node: number;
+}
+
+/** Build the local foundation DAG from spec hyperparameters, including optional RL. */
+export function pipelineFromFoundationHyperparameters(
+  name: string,
+  hp: FoundationPipelineHyperparameters,
+): Pipeline {
+  const lastTrainId = hp.rl_steps > 0 ? "rl" : "sft";
+  const steps: Pipeline["steps"] = [
+    {
+      id: "tokenize",
+      uses: "tokenize",
+      target: "local",
+      with: { vocabSize: hp.vocab_size, maxChars: hp.max_chars },
+    },
+    {
+      id: "pretrain",
+      uses: "pretrain",
+      target: "local",
+      with: {
+        tokenizer: { from: "tokenize.tokenizer" },
+        depth: hp.depth,
+        steps: hp.pretrain_steps,
+        batchSize: hp.batch_size,
+        sequenceLength: hp.sequence_length,
+        nprocPerNode: hp.nproc_per_node,
+      },
+    },
+    {
+      id: "bpb",
+      uses: "evaluate",
+      target: "local",
+      with: { model: { from: "pretrain.model" }, evaluator: "bpb" },
+    },
+    {
+      id: "sft",
+      uses: "finetune",
+      target: "local",
+      with: {
+        model: { from: "pretrain.model" },
+        steps: hp.finetune_steps,
+        batchSize: hp.batch_size,
+      },
+    },
+    {
+      id: "chat",
+      uses: "evaluate",
+      target: "local",
+      with: { model: { from: "sft.model" }, evaluator: "chat" },
+    },
+  ];
+  if (hp.rl_steps > 0) {
+    steps.push(
+      {
+        id: "rl",
+        uses: "rl",
+        target: "local",
+        with: { model: { from: "sft.model" }, steps: hp.rl_steps },
+      },
+      {
+        id: "chat_rl",
+        uses: "evaluate",
+        target: "local",
+        with: { model: { from: "rl.model" }, evaluator: "chat" },
+      },
+    );
+  }
+  steps.push({
+    id: "infer",
+    uses: "evaluate",
+    target: "local",
+    with: { model: { from: `${lastTrainId}.model` }, evaluator: "inference" },
+  });
+  return {
+    version: 1,
+    name,
+    runtime: { engine: "foundation" },
+    steps,
+  };
 }
 
 function producerId(reference: PipelineArtifactReference): string {

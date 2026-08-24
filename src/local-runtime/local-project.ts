@@ -5,16 +5,22 @@ import { homedir } from "node:os";
 import { mkdir } from "node:fs/promises";
 import {
   fineTuneRunRequestSchema,
+  isFoundationSpecFile,
+  localAdapterSpecFileSchema,
   localBehaviorSpecFileSchema,
+  localFoundationSpecFileSchema,
   type FineTuneRunRequest,
+  type LocalAdapterSpecFile,
   type LocalBehaviorSpecFile,
+  type LocalFoundationSpecFile,
 } from "./contracts.js";
 
 export const DEFAULT_LOCAL_SPEC_PATH = "tunedtensor.json";
 
 export interface CreateLocalSpecArgs {
   name: string;
-  baseModel: string;
+  baseModel?: string;
+  engine?: "adapter" | "foundation";
   outputPath: string;
   force?: boolean;
 }
@@ -31,12 +37,10 @@ export interface RunRequestFromSpecOptions {
   runId?: string;
 }
 
-export interface LocalRunInput {
-  kind: "request" | "spec";
-  path: string;
-  request: FineTuneRunRequest;
-  spec?: LocalBehaviorSpecFile;
-}
+export type LocalRunInput =
+  | { kind: "request"; path: string; request: FineTuneRunRequest }
+  | { kind: "spec"; path: string; request: FineTuneRunRequest; spec: LocalAdapterSpecFile }
+  | { kind: "foundation-spec"; path: string; spec: LocalFoundationSpecFile };
 
 function resolveLocalReference(value: unknown, baseDirectory: string): unknown {
   if (typeof value !== "string" || !value || isAbsolute(value) || /^[a-z][a-z0-9+.-]*:/i.test(value)) {
@@ -75,7 +79,48 @@ export async function initLocalSpecFile(args: CreateLocalSpecArgs): Promise<Loca
   if (!args.force && await exists(args.outputPath)) {
     throw new Error(`Refusing to overwrite existing file: ${args.outputPath}`);
   }
-  const spec = localBehaviorSpecFileSchema.parse({
+  if (args.engine === "foundation") {
+    const spec = localFoundationSpecFileSchema.parse({
+      engine: "foundation",
+      id: randomUUID(),
+      name: args.name,
+      description: "From-scratch tokenizer, pretrain, chat SFT, and eval.",
+      system_prompt: "You are a helpful assistant.",
+      guidelines: [
+        "Answer the user request directly.",
+      ],
+      constraints: [],
+      examples: [
+        {
+          input: "Replace this with representative chat input.",
+          output: "Replace this with the expected assistant reply.",
+        },
+        {
+          input: "Replace this with a different chat input.",
+          output: "Replace this with the expected assistant reply.",
+        },
+      ],
+      foundation: {
+        depth: 2,
+        pretrain_steps: 2,
+        finetune_steps: 2,
+        rl_steps: 0,
+        vocab_size: 256,
+        max_chars: 20_000,
+        sequence_length: 64,
+        batch_size: 2,
+        nproc_per_node: 1,
+      },
+    });
+    await mkdir(dirname(args.outputPath), { recursive: true });
+    await writeFile(args.outputPath, `${JSON.stringify(spec, null, 2)}\n`, "utf8");
+    return spec;
+  }
+
+  if (!args.baseModel) {
+    throw new Error("Adapter specs require --model.");
+  }
+  const spec = localAdapterSpecFileSchema.parse({
     id: randomUUID(),
     name: args.name,
     description: "",
@@ -126,17 +171,24 @@ export async function initLocalRunnerConfigFile(args: CreateLocalRunnerConfigArg
   return config;
 }
 
-export function generatedPlaceholderIssues(request: FineTuneRunRequest): string[] {
+function placeholderIssues(
+  systemPrompt: string,
+  examples: Array<{ input: string; output: string }>,
+): string[] {
   const issues: string[] = [];
-  if (/describe the behavior this local model should learn/i.test(request.spec_snapshot.system_prompt)) {
+  if (/describe the behavior this local model should learn/i.test(systemPrompt)) {
     issues.push("system_prompt still contains the generated placeholder");
   }
-  request.spec_snapshot.examples.forEach((example, index) => {
+  examples.forEach((example, index) => {
     if (/replace this with/i.test(example.input) || /replace this with/i.test(example.output)) {
       issues.push(`examples[${index}] still contains generated placeholder text`);
     }
   });
   return issues;
+}
+
+export function generatedPlaceholderIssues(request: FineTuneRunRequest): string[] {
+  return placeholderIssues(request.spec_snapshot.system_prompt, request.spec_snapshot.examples);
 }
 
 export function assertLocalRunInputReady(request: FineTuneRunRequest): void {
@@ -146,12 +198,29 @@ export function assertLocalRunInputReady(request: FineTuneRunRequest): void {
   }
 }
 
+export function foundationPlaceholderIssues(spec: LocalFoundationSpecFile): string[] {
+  return placeholderIssues(spec.system_prompt, spec.examples);
+}
+
+export function assertFoundationSpecReady(spec: LocalFoundationSpecFile): void {
+  const issues = foundationPlaceholderIssues(spec);
+  if (issues.length > 0) {
+    throw new Error(`Edit the generated foundation spec before training: ${issues.join("; ")}.`);
+  }
+}
+
 export function runRequestFromLocalSpec(
   spec: LocalBehaviorSpecFile,
   options: RunRequestFromSpecOptions = {},
 ): FineTuneRunRequest {
+  if (isFoundationSpecFile(spec)) {
+    throw new Error(
+      "Foundation specs cannot be converted into a LoRA run request. Use `tt pipeline run --spec`.",
+    );
+  }
   const {
     id,
+    engine: _engine,
     hyperparameters,
     dataset_prebuilt: datasetPrebuilt,
     ...specSnapshot
@@ -197,6 +266,9 @@ export async function loadLocalRunInput(
     return { kind: "request", path, request: request.data };
   }
   const spec = localBehaviorSpecFileSchema.parse(raw);
+  if (isFoundationSpecFile(spec)) {
+    return { kind: "foundation-spec", path, spec };
+  }
   return {
     kind: "spec",
     path,

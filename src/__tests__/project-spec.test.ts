@@ -82,4 +82,44 @@ describe("project spec projections", () => {
     ).toEqual(["project_note"]);
     expect(hasLocalOnlySpecFields({ name: "Cloud only" })).toBe(false);
   });
+
+  it("keeps foundation hyperparameters local-only and omits them from cloud projection", () => {
+    const foundationSpec = {
+      engine: "foundation",
+      name: "Tiny GPT",
+      system_prompt: "You are a helpful assistant.",
+      guidelines: ["Answer directly."],
+      constraints: [],
+      examples: [
+        { input: "Hello", output: "Hi there." },
+        { input: "Thanks", output: "You're welcome." },
+      ],
+      foundation: {
+        depth: 2,
+        pretrain_steps: 2,
+        finetune_steps: 2,
+        rl_steps: 0,
+        vocab_size: 256,
+        max_chars: 20_000,
+        sequence_length: 64,
+        batch_size: 2,
+        nproc_per_node: 1,
+      },
+      project_note: "keep this in the project file",
+    };
+
+    const cloud = projectCloudSpec(foundationSpec);
+    expect(cloud.body.engine).toBeUndefined();
+    expect(cloud.body.foundation).toBeUndefined();
+    expect(cloud.body.base_model).toBeUndefined();
+    expect(cloud.droppedKeys).toEqual(expect.arrayContaining(["engine", "foundation", "project_note"]));
+
+    const local = projectLocalSpec(foundationSpec);
+    expect(local.body).toMatchObject({
+      engine: "foundation",
+      name: "Tiny GPT",
+      foundation: foundationSpec.foundation,
+    });
+    expect(() => localBehaviorSpecFileSchema.parse(local.body)).not.toThrow();
+  });
 });

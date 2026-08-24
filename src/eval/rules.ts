@@ -22,19 +22,29 @@ export function validateSpec(spec: LocalSpec): ValidationResult {
       : "Spec is missing a system_prompt",
   });
 
+  const isFoundation = spec.engine === "foundation";
   checks.push({
-    name: "Has base model",
-    passed: Boolean(spec.base_model?.trim()),
-    message: spec.base_model?.trim()
-      ? undefined
-      : "Spec is missing a base_model",
+    name: isFoundation ? "Has foundation engine" : "Has base model",
+    passed: isFoundation
+      ? spec.foundation != null && typeof spec.foundation === "object"
+      : Boolean(spec.base_model?.trim()),
+    message: isFoundation
+      ? (spec.foundation != null ? undefined : "Foundation spec is missing a foundation block")
+      : spec.base_model?.trim()
+        ? undefined
+        : "Spec is missing a base_model",
   });
 
   const exCount = spec.examples?.length ?? 0;
+  const minExamples = isFoundation ? 2 : 1;
   checks.push({
     name: "Has examples",
-    passed: exCount > 0,
-    message: exCount > 0 ? `${exCount} example(s)` : "Add at least one example",
+    passed: exCount >= minExamples,
+    message: exCount >= minExamples
+      ? `${exCount} example(s)`
+      : isFoundation
+        ? "Add at least two chat examples"
+        : "Add at least one example",
   });
 
   checks.push({
