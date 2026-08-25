@@ -130,6 +130,23 @@ roots, existing targets, and unsupported spec fields. Known CLI commands such
 as `runs list`, `doctor`, and `models list` still execute directly. Prefix a
 command with `:` when you want to make that intent explicit.
 
+The agent can describe the built-in adapter and foundation pipeline stages,
+including optional foundation RL, and returns the exact `tt pipeline` commands
+for initialization, validation, planning, dry-run, and execution. It can also
+search public Hugging Face model or dataset metadata for foundation and
+fine-tuning discovery. A Hub search sends only the search query to
+`huggingface.co`; it uses no Hugging Face token, downloads nothing, and omits
+model-card and dataset-card text. Search results are discovery metadata, not a
+guarantee that a model or dataset is compatible with a TT workflow.
+
+For educational questions about how or why training works, the agent can read
+the exact Python implementation shipped with the running TT build. The source
+tool is limited to named foundation components (tokenizer, pretraining, model,
+data, SFT, RL, evaluation, and common helpers) and adapter components (training,
+data, model contract, and evaluation); it cannot read arbitrary paths. Answers
+separate behavior directly visible in the code from inferred rationale and
+include the inspected package-relative path and source hash.
+
 Agent conversations are durable and local under
 `~/.config/tuned-tensor/agent/threads` (or the XDG config equivalent), with
 user-only directory/file permissions. Persistence normally retains up to 100

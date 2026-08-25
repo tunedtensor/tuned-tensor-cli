@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## [0.13.1-beta.3] - 2026-08-25
+
+### Added
+
+- The conversational agent can describe the shipped adapter and foundation
+  pipeline DAGs, optional foundation RL stages, and exact `tt pipeline`
+  commands from the built-in workflow tool instead of relying on model memory.
+- A read-only `search_hugging_face` agent tool searches public Hugging Face
+  model or dataset metadata for foundation and fine-tuning discovery. Searches
+  are bounded, unauthenticated, download nothing, and exclude model-card and
+  dataset-card text.
+- A bounded `inspect_training_source` tool lets the agent ground educational
+  explanations in the exact foundation or adapter Python source shipped with
+  the running build. It exposes only a fixed component list, not arbitrary
+  filesystem access, and returns the source path and SHA-256 with the code.
+
 ## [0.13.1-beta.2] - 2026-08-24
 
 ### Added
