@@ -91,11 +91,19 @@ describe("local agent conversation client", () => {
     expect(created[0]?.messages).toEqual([]);
     expect(created[0]?.tools.map((candidate) => candidate.name)).toEqual([
       "describe_pipeline",
+      "search_hugging_face",
+      "inspect_training_source",
       "validate_pipeline",
       "prepare_create_local_spec",
     ]);
     expect(created[0]?.systemPrompt).toMatch(/workspace-scoped local spec/i);
     expect(created[0]?.systemPrompt).toMatch(/no hosted account/i);
+    expect(created[0]?.systemPrompt).toMatch(/adapter.*foundation.*describe_pipeline/is);
+    expect(created[0]?.systemPrompt).toContain("search_hugging_face");
+    expect(created[0]?.systemPrompt).toMatch(/models or datasets/i);
+    expect(created[0]?.systemPrompt).toMatch(/Hugging Face.*never include secrets or private data/is);
+    expect(created[0]?.systemPrompt).toContain("inspect_training_source");
+    expect(created[0]?.systemPrompt).toMatch(/observed behavior.*inferred rationale/is);
     expect(JSON.stringify(created[0])).not.toContain(TT_SECRET);
 
     await client.runTurn(thread.id, "Continue", () => {});
