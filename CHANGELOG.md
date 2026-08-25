@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.13.1-beta.3] - 2026-08-25
+
 ### Added
 
 - The conversational agent can describe the shipped adapter and foundation
