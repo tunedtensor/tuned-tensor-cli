@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.13.1-beta.4] - 2026-08-26
+
 ### Changed
 
 - Renamed the bundled adapter training project from `training/local-runner` to
@@ -21,6 +23,13 @@
   cancellation-marker files are kept user-only (`0700`/`0600`) under the new
   shared state root. Preserved stores are repaired before use, and symbolic
   links or unsupported filesystem entries are refused rather than followed.
+
+### Fixed
+
+- A run is marked completed only after its canonical report has been stored;
+  missing or failed report copies leave the run nonterminal for a safe retry.
+- When cancellation wins during completion, partially persisted model and
+  report state is removed so a cancelled adapter cannot remain serveable.
 
 ## [0.13.1-beta.3] - 2026-08-25
 
