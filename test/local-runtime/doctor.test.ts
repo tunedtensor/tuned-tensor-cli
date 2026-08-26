@@ -22,7 +22,7 @@ test("doctor probes the locked uv runtime with one cache contract and mandatory 
   for (const plan of plans) {
     assert.equal(plan.command, "uv");
     assert.ok(plan.args.includes("--project"));
-    assert.ok(plan.args.some((value) => value.endsWith("training/local-runner")));
+    assert.ok(plan.args.some((value) => value.endsWith("training/adapter")));
     assert.equal(plan.env.HF_HOME, "/tmp/tt-hf-home");
     assert.equal(plan.env.HF_HUB_CACHE, "/tmp/tt-hf-home/hub");
     assert.ok(plan.env.UV_PROJECT_ENVIRONMENT);

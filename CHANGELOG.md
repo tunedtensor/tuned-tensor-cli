@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+
+- Renamed the bundled adapter training project from `training/local-runner` to
+  `training/adapter` so it sits beside `training/foundation`.
+
 ## [0.13.1-beta.3] - 2026-08-25
 
 ### Added

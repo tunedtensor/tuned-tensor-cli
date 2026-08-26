@@ -502,7 +502,7 @@ async function packageVersion(): Promise<string> {
 }
 
 async function runtimeFingerprint(): Promise<string> {
-  const bundledProject = resolve(packageRoot, "training/local-runner");
+  const bundledProject = resolve(packageRoot, "training/adapter");
   return hashJson({
     tt_local_version: await packageVersion(),
     node_version: process.version,
@@ -851,8 +851,8 @@ function stageFingerprintPath(prepared: PreparedRun, stage: FingerprintedStage):
 }
 
 async function runnerFileFingerprints(): Promise<Record<string, string | null>> {
-  const project = resolve(packageRoot, "training/local-runner");
-  const bundledSource = resolve(packageRoot, "training/local-runner/src");
+  const project = resolve(packageRoot, "training/adapter");
+  const bundledSource = resolve(packageRoot, "training/adapter/src");
   const pythonSources = (await readdir(bundledSource, { withFileTypes: true }))
     .filter((entry) => entry.isFile() && entry.name.endsWith(".py"))
     .map((entry) => resolve(bundledSource, entry.name));

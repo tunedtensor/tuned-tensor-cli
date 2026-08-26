@@ -514,7 +514,7 @@ test("stored models are verified before a serving launch plan is produced", asyn
     const launchPlan = JSON.parse(launch.stdout) as { ok: boolean; url: string; command: string[] };
     assert.equal(launchPlan.ok, true);
     assert.equal(launchPlan.url, "http://127.0.0.1:8000");
-    assert.ok(launchPlan.command.some((part) => part.endsWith("training/local-runner/src/serve.py")));
+    assert.ok(launchPlan.command.some((part) => part.endsWith("training/adapter/src/serve.py")));
 
     const aliasLaunch = runCli(["models", "serve", modelId, "--print-command"], root);
     assert.equal(aliasLaunch.status, 0, aliasLaunch.stderr);

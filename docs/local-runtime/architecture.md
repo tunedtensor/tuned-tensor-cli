@@ -42,7 +42,7 @@ resource defaults, data contract, and real CUDA acceptance test.
 
 TT Local currently ships two such methods:
 
-- **Adapter** (`training/local-runner`): certified Transformers checkpoints and
+- **Adapter** (`training/adapter`): certified Transformers checkpoints and
   PEFT LoRA SFT. Driven by `tt run` and adapter pipelines.
 - **Foundation** (`training/foundation`): a from-scratch BPE tokenizer and GPT
   with no Transformers/PEFT. Driven only by `tt pipeline` from a foundation

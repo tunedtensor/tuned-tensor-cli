@@ -8,7 +8,7 @@ import { forwardStreamLines, reportInBackground, type LocalRunReporter } from ".
 import { localRuntimePackageRoot } from "./package-root.js";
 
 const packageRoot = localRuntimePackageRoot(import.meta.url);
-const bundledProject = join(packageRoot, "training/local-runner");
+const bundledProject = join(packageRoot, "training/adapter");
 const bundledRuntimeHash = (() => {
   const hash = createHash("sha256");
   for (const name of ["pyproject.toml", "uv.lock"]) {

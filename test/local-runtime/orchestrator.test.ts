@@ -726,7 +726,7 @@ test("config resolves data paths and rejects runner overrides", async () => {
     assert.equal("project" in config.evaluation.inference, false);
 
     await writeFile(configPath, `${JSON.stringify({
-      training: { project: "training/local-runner" },
+      training: { project: "training/adapter" },
     })}\n`, "utf8");
     await assert.rejects(loadLocalRunnerConfig(configPath), /Unrecognized key.*training/);
 

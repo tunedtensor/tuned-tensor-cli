@@ -11,7 +11,7 @@ export function localRuntimePackageRoot(moduleUrl: string): string {
   ];
   const root = candidates.find((candidate) =>
     existsSync(resolve(candidate, "package.json"))
-    && existsSync(resolve(candidate, "training/local-runner")),
+    && existsSync(resolve(candidate, "training/adapter")),
   );
   if (!root) {
     throw new Error("Unable to locate the bundled Tuned Tensor local runtime assets.");
