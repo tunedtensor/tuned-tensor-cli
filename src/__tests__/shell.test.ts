@@ -243,8 +243,8 @@ function fakeContext(cwd: string): ShellContext {
     projectName: cwd.split("/").filter(Boolean).at(-1) ?? cwd,
     local: {
       configPath: `${cwd}/local-runner.json`,
-      artifactRoot: `${cwd}/.tt-local/artifacts`,
-      storeRoot: `${cwd}/.tt-local/store`,
+      artifactRoot: `${cwd}/.tuned-tensor/artifacts`,
+      storeRoot: `${cwd}/.tuned-tensor/store`,
       activeModelId: "model_abc123",
     },
     warnings: [],
@@ -513,7 +513,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
 
   it("lists, searches, and changes the TT agent model through /model", async () => {
     const configRoot = mkdtempSync(join(tmpdir(), "tt-shell-model-"));
-    process.env.XDG_CONFIG_HOME = configRoot;
+    process.env.TUNED_TENSOR_HOME = configRoot;
     const stdout: string[] = [];
     const stderr: string[] = [];
     const models = [
@@ -604,14 +604,14 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       expect(output).toContain("Agent model: anthropic/claude-haiku-4-5 (thinking off)");
       expect(output).toContain("thinking set to off for this model");
     } finally {
-      delete process.env.XDG_CONFIG_HOME;
+      delete process.env.TUNED_TENSOR_HOME;
       rmSync(configRoot, { recursive: true, force: true });
     }
   });
 
   it("notes when /model <provider> truncates a long catalog", async () => {
     const configRoot = mkdtempSync(join(tmpdir(), "tt-shell-model-trunc-"));
-    process.env.XDG_CONFIG_HOME = configRoot;
+    process.env.TUNED_TENSOR_HOME = configRoot;
     const stdout: string[] = [];
     const models = Array.from({ length: 21 }, (_, index) => ({
       id: `model-${String(index + 1).padStart(2, "0")}`,
@@ -649,14 +649,14 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       expect(output).not.toContain("anthropic/model-21");
       expect(output).toMatch(/… 1 more — \/model <query> to search/);
     } finally {
-      delete process.env.XDG_CONFIG_HOME;
+      delete process.env.TUNED_TENSOR_HOME;
       rmSync(configRoot, { recursive: true, force: true });
     }
   });
 
   it("saves a provider API key through /login without putting the secret on the command line", async () => {
     const configRoot = mkdtempSync(join(tmpdir(), "tt-shell-login-"));
-    process.env.XDG_CONFIG_HOME = configRoot;
+    process.env.TUNED_TENSOR_HOME = configRoot;
     const stdout: string[] = [];
     const stderr: string[] = [];
     const keys: Array<{ provider: string; apiKey: string }> = [];
@@ -716,7 +716,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       expect(stderr.join("")).toBe("");
       expect(keys).toEqual([{ provider: "openai", apiKey: "sk-test-openai" }]);
       expect(stdout.join("")).toContain("Saved openai credentials");
-      expect(JSON.parse(readFileSync(join(configRoot, "tuned-tensor", "agent", "auth.json"), "utf-8")))
+      expect(JSON.parse(readFileSync(join(configRoot, "agent", "auth.json"), "utf-8")))
         .toEqual({ openai: { type: "api_key", key: "sk-test-openai" } });
 
       stdout.length = 0;
@@ -734,7 +734,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
         { provider: "openai", apiKey: "sk-test-openai" },
         { provider: "anthropic", apiKey: "sk-test-openai" },
       ]);
-      expect(JSON.parse(readFileSync(join(configRoot, "tuned-tensor", "agent", "auth.json"), "utf-8")))
+      expect(JSON.parse(readFileSync(join(configRoot, "agent", "auth.json"), "utf-8")))
         .toEqual({
           openai: { type: "api_key", key: "sk-test-openai" },
           anthropic: { type: "api_key", key: "sk-test-openai" },
@@ -752,7 +752,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       expect(prompts[0]).toBe("Provider: ");
       expect(prompts).not.toContain("OpenRouter API key: ");
     } finally {
-      delete process.env.XDG_CONFIG_HOME;
+      delete process.env.TUNED_TENSOR_HOME;
       rmSync(configRoot, { recursive: true, force: true });
     }
   });

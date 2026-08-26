@@ -6,6 +6,12 @@
 
 - Renamed the bundled adapter training project from `training/local-runner` to
   `training/adapter` so it sits beside `training/foundation`.
+- Laptop and project state now live under one `.tuned-tensor` folder:
+  `~/.tuned-tensor/` for config, agent auth/threads, run metadata, and uv
+  caches, and `.tuned-tensor/` in the project for artifacts. `TUNED_TENSOR_HOME`
+  relocates the laptop parent. Existing `~/.tuned-tensor-local` stores and
+  `~/.cache/tuned-tensor-local` uv environments are still used when the new
+  paths are absent.
 
 ## [0.13.1-beta.3] - 2026-08-25
 

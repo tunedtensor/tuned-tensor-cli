@@ -1,7 +1,7 @@
 import { appendFile, copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
+import { defaultStoreRoot } from "../paths.js";
 import type { FineTuneRunRequest, RunReport, SpecSnapshot, TrainingReport } from "./contracts.js";
 
 export type LocalRunStatus =
@@ -115,7 +115,7 @@ export interface LocalStore {
 }
 
 export function defaultLocalHome(): string {
-  return resolve(process.env.TT_LOCAL_HOME ?? join(homedir(), ".tuned-tensor-local"));
+  return defaultStoreRoot();
 }
 
 export function localStorePaths(root: string) {

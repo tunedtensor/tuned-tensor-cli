@@ -1,6 +1,11 @@
 import { readFile, readdir, stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import {
+  DEFAULT_ARTIFACT_ROOT,
+  defaultStoreRoot,
+  expandUserPath,
+  getTunedTensorHome,
+} from "./paths.js";
 
 export type TargetSource = "default-local";
 
@@ -84,25 +89,13 @@ function stringField(
 function expandPath(
   value: string,
   baseDirectory: string,
-  homeDirectory: string,
-): string {
-  if (value === "~") return homeDirectory;
-  if (value.startsWith("~/")) return resolve(homeDirectory, value.slice(2));
-  return isAbsolute(value) ? resolve(value) : resolve(baseDirectory, value);
-}
-
-function environmentHome(env: Readonly<NodeJS.ProcessEnv>): string {
-  return env.HOME ? resolve(env.HOME) : homedir();
-}
-
-function configPath(
   env: Readonly<NodeJS.ProcessEnv>,
-  homeDirectory: string,
 ): string {
-  const configHome = env.XDG_CONFIG_HOME
-    ? resolve(env.XDG_CONFIG_HOME)
-    : join(homeDirectory, ".config");
-  return join(configHome, "tuned-tensor", "config.json");
+  return expandUserPath(value, env, baseDirectory);
+}
+
+function configPath(env: Readonly<NodeJS.ProcessEnv>): string {
+  return join(getTunedTensorHome(env), "config.json");
 }
 
 function agentSelectionFrom(
@@ -189,7 +182,6 @@ export async function discoverShellContext(
 ): Promise<ShellContext> {
   const env = options.env ?? process.env;
   const cwd = resolve(options.cwd ?? process.cwd());
-  const homeDirectory = environmentHome(env);
   const warnings: string[] = [];
 
   const specPath = join(cwd, "tunedtensor.json");
@@ -227,15 +219,13 @@ export async function discoverShellContext(
   const configuredArtifactRoot = stringField(localConfigJson.value, "artifactRoot");
   const configuredStoreRoot = stringField(localConfigJson.value, "storeRoot");
   const artifactRoot = configuredArtifactRoot
-    ? expandPath(configuredArtifactRoot, localConfigDirectory, homeDirectory)
-    : resolve(cwd, ".tt-local", "artifacts");
+    ? expandPath(configuredArtifactRoot, localConfigDirectory, env)
+    : resolve(cwd, DEFAULT_ARTIFACT_ROOT);
   const storeRoot = configuredStoreRoot
-    ? expandPath(configuredStoreRoot, localConfigDirectory, homeDirectory)
-    : env.TT_LOCAL_HOME
-      ? expandPath(env.TT_LOCAL_HOME, cwd, homeDirectory)
-      : join(homeDirectory, ".tuned-tensor-local");
+    ? expandPath(configuredStoreRoot, localConfigDirectory, env)
+    : defaultStoreRoot(env);
 
-  const storedConfigPath = configPath(env, homeDirectory);
+  const storedConfigPath = configPath(env);
   const storedConfigJson = await readJsonObject(storedConfigPath);
   if (storedConfigJson.invalid) {
     warnings.push("The Tuned Tensor config could not be parsed.");

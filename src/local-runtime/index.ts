@@ -105,8 +105,9 @@ Global options:
   -V, --version                    Show the installed version
 
 The run command writes local artifacts under config.artifactRoot, defaulting to
-.tt-local/artifacts. The file-backed local store defaults to
-~/.tuned-tensor-local unless config.storeRoot or TT_LOCAL_HOME is set.`);
+.tuned-tensor/artifacts. The file-backed local store defaults to
+~/.tuned-tensor/store unless config.storeRoot, TT_LOCAL_HOME, or
+TUNED_TENSOR_HOME is set.`);
 }
 
 interface CliOptionDefinition {

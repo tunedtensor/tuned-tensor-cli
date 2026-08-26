@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createWriteStream, readFileSync, type WriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { pythonEnvironmentPath } from "../paths.js";
 import { forwardStreamLines, reportInBackground, type LocalRunReporter } from "./run-reporter.js";
 import { localRuntimePackageRoot } from "./package-root.js";
 
@@ -16,12 +16,7 @@ const bundledRuntimeHash = (() => {
   }
   return hash.digest("hex").slice(0, 20);
 })();
-export const BUNDLED_PYTHON_ENVIRONMENT = join(
-  resolve(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache")),
-  "tuned-tensor-local",
-  "uv",
-  bundledRuntimeHash,
-);
+export const BUNDLED_PYTHON_ENVIRONMENT = pythonEnvironmentPath("uv", bundledRuntimeHash);
 type BundledPythonEntrypoint =
   | "train.py"
   | "evaluate.py"
@@ -37,12 +32,7 @@ const foundationRuntimeHash = (() => {
   }
   return hash.digest("hex").slice(0, 20);
 })();
-export const FOUNDATION_PYTHON_ENVIRONMENT = join(
-  resolve(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache")),
-  "tuned-tensor-local",
-  "uv-foundation",
-  foundationRuntimeHash,
-);
+export const FOUNDATION_PYTHON_ENVIRONMENT = pythonEnvironmentPath("uv-foundation", foundationRuntimeHash);
 export type FoundationPythonEntrypoint =
   | "train_tokenizer.py"
   | "pretrain.py"

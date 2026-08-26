@@ -46,7 +46,7 @@ describe("extractPassthroughOptions", () => {
 describe("unified command routing", () => {
   it("configures the local agent and exposes agent model status without secret flags", async () => {
     const configRoot = mkdtempSync(join(tmpdir(), "tt-agent-cli-"));
-    process.env.XDG_CONFIG_HOME = configRoot;
+    process.env.TUNED_TENSOR_HOME = configRoot;
     const stdout = new PassThrough();
     let output = "";
     stdout.setEncoding("utf8");
@@ -70,14 +70,14 @@ describe("unified command routing", () => {
       expect(agent.commands.find((command) => command.name() === "configure")?.options.map((option) => option.long))
         .not.toEqual(expect.arrayContaining(["--api-key", "--token", "--secret"]));
     } finally {
-      delete process.env.XDG_CONFIG_HOME;
+      delete process.env.TUNED_TENSOR_HOME;
       rmSync(configRoot, { recursive: true, force: true });
     }
   });
 
   it("reports a selected model whose provider is not authenticated", async () => {
     const configRoot = mkdtempSync(join(tmpdir(), "tt-agent-status-"));
-    process.env.XDG_CONFIG_HOME = configRoot;
+    process.env.TUNED_TENSOR_HOME = configRoot;
     const stdout = new PassThrough();
     let output = "";
     stdout.setEncoding("utf8");
@@ -106,7 +106,7 @@ describe("unified command routing", () => {
         authenticated: false,
       });
     } finally {
-      delete process.env.XDG_CONFIG_HOME;
+      delete process.env.TUNED_TENSOR_HOME;
       rmSync(configRoot, { recursive: true, force: true });
     }
   });
@@ -329,7 +329,7 @@ describe("unified command routing", () => {
 
   it("uses the local agent client and never calls remote /agent endpoints", async () => {
     const configRoot = mkdtempSync(join(tmpdir(), "tt-agent-local-"));
-    process.env.XDG_CONFIG_HOME = configRoot;
+    process.env.TUNED_TENSOR_HOME = configRoot;
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const modelRuntime = {
       getProviders: () => [{ id: "openai" }],
@@ -369,14 +369,14 @@ describe("unified command routing", () => {
       });
       expect(fetchSpy.mock.calls.some(([url]) => String(url).includes("/agent/"))).toBe(false);
     } finally {
-      delete process.env.XDG_CONFIG_HOME;
+      delete process.env.TUNED_TENSOR_HOME;
       rmSync(configRoot, { recursive: true, force: true });
     }
   });
 
   it("retries agent client creation after configuring mid-session", async () => {
     const configRoot = mkdtempSync(join(tmpdir(), "tt-agent-reconfigure-"));
-    process.env.XDG_CONFIG_HOME = configRoot;
+    process.env.TUNED_TENSOR_HOME = configRoot;
     const { updateConfig } = await import("../config.js");
     const stderr = new PassThrough();
     let errors = "";
@@ -422,7 +422,7 @@ describe("unified command routing", () => {
       });
       expect(createPiAgent).toHaveBeenCalledTimes(1);
     } finally {
-      delete process.env.XDG_CONFIG_HOME;
+      delete process.env.TUNED_TENSOR_HOME;
       rmSync(configRoot, { recursive: true, force: true });
     }
   });

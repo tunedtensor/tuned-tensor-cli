@@ -34,7 +34,7 @@ describe("discoverShellContext", () => {
     const root = await temporaryRoot();
     const project = join(root, "support adapter");
     const home = join(root, "home");
-    const configDirectory = join(home, ".config", "tuned-tensor");
+    const configDirectory = join(home, ".tuned-tensor");
     const storeRoot = join(project, "state");
     const runId = "11111111-1111-4111-8111-111111111111";
     const fullKey = `tt_${"s".repeat(48)}`;
@@ -92,7 +92,7 @@ describe("discoverShellContext", () => {
   it("surfaces the configured agent provider and model", async () => {
     const root = await temporaryRoot();
     const home = join(root, "home");
-    const configDirectory = join(home, ".config", "tuned-tensor");
+    const configDirectory = join(home, ".tuned-tensor");
     await mkdir(configDirectory, { recursive: true });
     await writeFile(join(configDirectory, "config.json"), JSON.stringify({
       agent: { provider: "anthropic", model: "claude-sonnet-4-5", thinking: "high" },
@@ -115,7 +115,7 @@ describe("discoverShellContext", () => {
   it("prefers agent environment overrides over stored config", async () => {
     const root = await temporaryRoot();
     const home = join(root, "home");
-    const configDirectory = join(home, ".config", "tuned-tensor");
+    const configDirectory = join(home, ".tuned-tensor");
     await mkdir(configDirectory, { recursive: true });
     await writeFile(join(configDirectory, "config.json"), JSON.stringify({
       agent: { provider: "anthropic", model: "claude-sonnet-4-5" },
@@ -163,7 +163,7 @@ describe("discoverShellContext", () => {
     });
 
     expect(context.spec).toBeUndefined();
-    expect(existsSync(join(project, ".tt-local"))).toBe(false);
+    expect(existsSync(join(project, ".tuned-tensor"))).toBe(false);
     expect(existsSync(home)).toBe(false);
   });
 

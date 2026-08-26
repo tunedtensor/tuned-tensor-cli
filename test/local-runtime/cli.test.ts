@@ -63,7 +63,7 @@ async function withTemporaryProject(
 
 function assertNoWorkCreated(root: string): void {
   assert.equal(existsSync(join(root, "store")), false, "CLI help/error created a local store");
-  assert.equal(existsSync(join(root, ".tt-local")), false, "CLI help/error created artifacts");
+  assert.equal(existsSync(join(root, ".tuned-tensor")), false, "CLI help/error created artifacts");
 }
 
 test("top-level help and version are available without loading project state", async () => {

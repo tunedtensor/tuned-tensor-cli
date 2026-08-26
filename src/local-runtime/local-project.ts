@@ -4,6 +4,10 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { homedir } from "node:os";
 import { mkdir } from "node:fs/promises";
 import {
+  DEFAULT_ARTIFACT_ROOT,
+  DEFAULT_PROJECT_STORE_ROOT,
+} from "../paths.js";
+import {
   fineTuneRunRequestSchema,
   isFoundationSpecFile,
   localAdapterSpecFileSchema,
@@ -154,8 +158,8 @@ export async function initLocalRunnerConfigFile(args: CreateLocalRunnerConfigArg
     throw new Error(`Refusing to overwrite existing file: ${args.outputPath}`);
   }
   const config = {
-    artifactRoot: ".tt-local/artifacts",
-    storeRoot: ".tt-local/store",
+    artifactRoot: DEFAULT_ARTIFACT_ROOT,
+    storeRoot: DEFAULT_PROJECT_STORE_ROOT,
     evaluation: {
       inference: {
         device: "cuda",

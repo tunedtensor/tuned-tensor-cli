@@ -21,13 +21,13 @@ function errorResponse(code: string, message: string, status: number) {
 }
 
 beforeEach(() => {
-  process.env.XDG_CONFIG_HOME = EMPTY_CONFIG_DIR;
+  process.env.TUNED_TENSOR_HOME = EMPTY_CONFIG_DIR;
   process.env.TUNED_TENSOR_API_KEY = FAKE_KEY;
   process.env.TUNED_TENSOR_URL = "https://test.tunedtensor.com";
 });
 
 afterEach(() => {
-  delete process.env.XDG_CONFIG_HOME;
+  delete process.env.TUNED_TENSOR_HOME;
   delete process.env.TUNED_TENSOR_API_KEY;
   delete process.env.TUNED_TENSOR_URL;
 });

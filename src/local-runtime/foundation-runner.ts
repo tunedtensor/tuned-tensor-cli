@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { DEFAULT_FOUNDATION_RUNS_DIR } from "../paths.js";
 import type { LocalFoundationSpecFile } from "./contracts.js";
 import type { ExecutionPlan } from "../pipeline.js";
 import {
@@ -223,7 +224,7 @@ export async function runFoundationPipeline(args: {
 }): Promise<FoundationPipelineResult> {
   assertFoundationPlanSupported(args.spec, args.plan);
   const outputDir = resolve(
-    args.outputDir ?? join(dirname(resolve(args.specPath)), ".tt-foundation-runs", randomUUID()),
+    args.outputDir ?? join(dirname(resolve(args.specPath)), DEFAULT_FOUNDATION_RUNS_DIR, randomUUID()),
   );
   await mkdir(outputDir, { recursive: true, mode: 0o700 });
   await chmod(outputDir, 0o700);

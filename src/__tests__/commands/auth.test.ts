@@ -15,7 +15,7 @@ const TEST_DIR = join(tmpdir(), `tt-test-auth-${process.pid}`);
 beforeEach(() => {
   setJsonMode(false);
   rmSync(TEST_DIR, { recursive: true, force: true });
-  process.env.XDG_CONFIG_HOME = TEST_DIR;
+  process.env.TUNED_TENSOR_HOME = TEST_DIR;
   delete process.env.TUNED_TENSOR_API_KEY;
   delete process.env.TUNED_TENSOR_URL;
 });
@@ -24,7 +24,7 @@ afterEach(() => {
   setJsonMode(false);
   vi.restoreAllMocks();
   rmSync(TEST_DIR, { recursive: true, force: true });
-  delete process.env.XDG_CONFIG_HOME;
+  delete process.env.TUNED_TENSOR_HOME;
 });
 
 function buildProgram() {
