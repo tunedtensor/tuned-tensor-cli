@@ -54,7 +54,7 @@ test("serving launches the bundled text-only Qwen adapter with safe model settin
   assert.equal(launch.command, "uv");
   assert.ok(launch.commandArgs.includes("--project"));
   assert.ok(launch.commandArgs.some((value) =>
-    value.endsWith("training/local-runner/src/serve.py")
+    value.endsWith("training/adapter/src/serve.py")
   ));
   assert.equal(launch.env.TT_MODEL_ARTIFACT, "/tmp/model.tar.gz");
   assert.equal(launch.env.TT_BASE_MODEL, "Qwen/Qwen3.5-2B");

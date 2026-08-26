@@ -13,12 +13,12 @@ import {
 } from "../agent-model.js";
 import { FEATURED_AGENT_PROVIDERS, recommendAgentModels } from "../agent-control.js";
 
-const originalConfigHome = process.env.XDG_CONFIG_HOME;
+const originalConfigHome = process.env.TUNED_TENSOR_HOME;
 const originalPiAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 afterEach(() => {
-  if (originalConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalConfigHome;
+  if (originalConfigHome === undefined) delete process.env.TUNED_TENSOR_HOME;
+  else process.env.TUNED_TENSOR_HOME = originalConfigHome;
   if (originalPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
   else process.env.PI_CODING_AGENT_DIR = originalPiAgentDir;
 });
@@ -42,12 +42,12 @@ function runtime(overrides: Partial<AgentModelRuntime> = {}): AgentModelRuntime 
 
 function isolatedConfigHome(): string {
   const root = mkdtempSync(join(tmpdir(), "tt-agent-runtime-"));
-  process.env.XDG_CONFIG_HOME = root;
+  process.env.TUNED_TENSOR_HOME = root;
   return root;
 }
 
 function ttModelsPath(xdg: string): string {
-  return join(xdg, "tuned-tensor", "agent", "models.json");
+  return join(xdg, "agent", "models.json");
 }
 
 function writeTtModels(xdg: string, contents: string): string {
@@ -196,7 +196,7 @@ describe("local agent model resolution", () => {
   it("reads API keys and OAuth tokens from auth.json for thread redaction", () => {
     const xdg = isolatedConfigHome();
     try {
-      const authPath = join(xdg, "tuned-tensor", "agent", "auth.json");
+      const authPath = join(xdg, "agent", "auth.json");
       mkdirSync(dirname(authPath), { recursive: true });
       writeFileSync(authPath, JSON.stringify({
         openai: { type: "api_key", key: "sk-login-openai-key" },
@@ -219,7 +219,7 @@ describe("local agent model resolution", () => {
     const xdg = isolatedConfigHome();
     try {
       expect(readStoredProviderSecrets()).toEqual([]);
-      const authPath = join(xdg, "tuned-tensor", "agent", "auth.json");
+      const authPath = join(xdg, "agent", "auth.json");
       mkdirSync(dirname(authPath), { recursive: true });
       writeFileSync(authPath, "{ not json");
       expect(readStoredProviderSecrets()).toEqual([]);

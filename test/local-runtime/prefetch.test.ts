@@ -380,7 +380,7 @@ def snapshot_download(**kwargs):
     const command = [
       "run",
       "python",
-      resolve("training/local-runner/src/prefetch.py"),
+      resolve("training/adapter/src/prefetch.py"),
       "--input",
       inputPath,
       "--output",
@@ -456,7 +456,7 @@ def snapshot_download(**kwargs):
     const command = [
       "run",
       "python",
-      resolve("training/local-runner/src/prefetch.py"),
+      resolve("training/adapter/src/prefetch.py"),
       "--input",
       inputPath,
       "--output",

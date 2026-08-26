@@ -34,10 +34,10 @@ const TRAINING_SOURCE_FILES = {
     common: "training/foundation/src/common.py",
   },
   adapter: {
-    train: "training/local-runner/src/train.py",
-    data: "training/local-runner/src/sft_data.py",
-    model_contract: "training/local-runner/src/model_contract.py",
-    evaluate: "training/local-runner/src/evaluate.py",
+    train: "training/adapter/src/train.py",
+    data: "training/adapter/src/sft_data.py",
+    model_contract: "training/adapter/src/model_contract.py",
+    evaluate: "training/adapter/src/evaluate.py",
   },
 } as const;
 const UUID_PATTERN = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";

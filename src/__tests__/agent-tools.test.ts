@@ -335,7 +335,7 @@ describe("Tuned Tensor agent tools", () => {
     expect(adapter.details).toMatchObject({
       engine: "adapter",
       component: "train",
-      path: "training/local-runner/src/train.py",
+      path: "training/adapter/src/train.py",
       sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
       source: expect.stringContaining("def main("),
     });

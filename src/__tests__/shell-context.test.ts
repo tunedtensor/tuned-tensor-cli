@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   rm,
+  stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -34,7 +37,7 @@ describe("discoverShellContext", () => {
     const root = await temporaryRoot();
     const project = join(root, "support adapter");
     const home = join(root, "home");
-    const configDirectory = join(home, ".config", "tuned-tensor");
+    const configDirectory = join(home, ".tuned-tensor");
     const storeRoot = join(project, "state");
     const runId = "11111111-1111-4111-8111-111111111111";
     const fullKey = `tt_${"s".repeat(48)}`;
@@ -63,6 +66,13 @@ describe("discoverShellContext", () => {
       spec_name: "Support Adapter",
       updated_at: "2026-07-26T10:00:00.000Z",
     }));
+    await Promise.all([
+      chmod(storeRoot, 0o775),
+      chmod(join(storeRoot, "runs"), 0o775),
+      chmod(join(storeRoot, "runs", runId), 0o775),
+      chmod(join(storeRoot, "active-model.json"), 0o664),
+      chmod(join(storeRoot, "runs", runId, "state.json"), 0o664),
+    ]);
 
     const context = await discoverShellContext({
       cwd: project,
@@ -87,12 +97,38 @@ describe("discoverShellContext", () => {
     });
     expect(context).not.toHaveProperty("cloud");
     expect(JSON.stringify(context)).not.toContain(fullKey);
+    if (process.platform !== "win32") {
+      expect((await stat(storeRoot)).mode & 0o777).toBe(0o700);
+      expect((await stat(join(storeRoot, "runs", runId))).mode & 0o777).toBe(0o700);
+      expect((await stat(join(storeRoot, "active-model.json"))).mode & 0o777).toBe(0o600);
+      expect((await stat(join(storeRoot, "runs", runId, "state.json"))).mode & 0o777).toBe(0o600);
+    }
   });
+
+  it.skipIf(process.platform === "win32")(
+    "refuses symbolic links in preserved store state before shell discovery reads them",
+    async () => {
+      const root = await temporaryRoot();
+      const project = join(root, "project");
+      const storeRoot = join(project, "state");
+      const runId = "11111111-1111-4111-8111-111111111111";
+      await mkdir(join(storeRoot, "runs", runId), { recursive: true });
+      await writeFile(join(project, "local-runner.json"), JSON.stringify({ storeRoot: "state" }));
+      const externalPath = join(root, "external-state.json");
+      await writeFile(externalPath, "not json\n");
+      await symlink(externalPath, join(storeRoot, "runs", runId, "state.json"));
+
+      await expect(discoverShellContext({
+        cwd: project,
+        env: { HOME: join(root, "home") },
+      })).rejects.toThrow(/symbolic link/i);
+    },
+  );
 
   it("surfaces the configured agent provider and model", async () => {
     const root = await temporaryRoot();
     const home = join(root, "home");
-    const configDirectory = join(home, ".config", "tuned-tensor");
+    const configDirectory = join(home, ".tuned-tensor");
     await mkdir(configDirectory, { recursive: true });
     await writeFile(join(configDirectory, "config.json"), JSON.stringify({
       agent: { provider: "anthropic", model: "claude-sonnet-4-5", thinking: "high" },
@@ -112,10 +148,32 @@ describe("discoverShellContext", () => {
       .toContain("Agent model    anthropic/claude-sonnet-4-5 (thinking high)");
   });
 
+  it("discovers agent selection from the legacy XDG config when the new config is absent", async () => {
+    const root = await temporaryRoot();
+    const home = join(root, "home");
+    const xdgHome = join(root, "xdg");
+    const legacyConfigDirectory = join(xdgHome, "tuned-tensor");
+    await mkdir(legacyConfigDirectory, { recursive: true });
+    await writeFile(join(legacyConfigDirectory, "config.json"), JSON.stringify({
+      agent: { provider: "openrouter", model: "legacy-model", thinking: "medium" },
+    }));
+
+    const context = await discoverShellContext({
+      cwd: root,
+      env: { HOME: home, XDG_CONFIG_HOME: xdgHome },
+    });
+
+    expect(context.agent).toEqual({
+      provider: "openrouter",
+      model: "legacy-model",
+      thinking: "medium",
+    });
+  });
+
   it("prefers agent environment overrides over stored config", async () => {
     const root = await temporaryRoot();
     const home = join(root, "home");
-    const configDirectory = join(home, ".config", "tuned-tensor");
+    const configDirectory = join(home, ".tuned-tensor");
     await mkdir(configDirectory, { recursive: true });
     await writeFile(join(configDirectory, "config.json"), JSON.stringify({
       agent: { provider: "anthropic", model: "claude-sonnet-4-5" },
@@ -163,7 +221,7 @@ describe("discoverShellContext", () => {
     });
 
     expect(context.spec).toBeUndefined();
-    expect(existsSync(join(project, ".tt-local"))).toBe(false);
+    expect(existsSync(join(project, ".tuned-tensor"))).toBe(false);
     expect(existsSync(home)).toBe(false);
   });
 

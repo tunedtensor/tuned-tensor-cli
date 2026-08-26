@@ -41,12 +41,12 @@ const roots: string[] = [];
 function temporaryConfigRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "tt-agent-control-"));
   roots.push(root);
-  process.env.XDG_CONFIG_HOME = root;
+  process.env.TUNED_TENSOR_HOME = root;
   return root;
 }
 
 afterEach(() => {
-  delete process.env.XDG_CONFIG_HOME;
+  delete process.env.TUNED_TENSOR_HOME;
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -157,7 +157,7 @@ describe("loginAgentProvider", () => {
     await expect(loginAgentProvider(runtime, "OpenRouter", "  sk-or-test  "))
       .resolves.toEqual({ provider: "openrouter" });
     expect(keys).toEqual([{ provider: "openrouter", apiKey: "sk-or-test" }]);
-    const authPath = join(configRoot, "tuned-tensor", "agent", "auth.json");
+    const authPath = join(configRoot, "agent", "auth.json");
     expect(JSON.parse(readFileSync(authPath, "utf-8"))).toEqual({
       openrouter: { type: "api_key", key: "sk-or-test" },
     });
@@ -168,7 +168,7 @@ describe("loginAgentProvider", () => {
     const configRoot = temporaryConfigRoot();
     await expect(loginAgentProvider(makeRuntime(), "openai", "sk-live-openai"))
       .resolves.toEqual({ provider: "openai" });
-    expect(JSON.parse(readFileSync(join(configRoot, "tuned-tensor", "agent", "auth.json"), "utf-8")))
+    expect(JSON.parse(readFileSync(join(configRoot, "agent", "auth.json"), "utf-8")))
       .toEqual({ openai: { type: "api_key", key: "sk-live-openai" } });
   });
 
@@ -179,7 +179,7 @@ describe("loginAgentProvider", () => {
       .rejects.toThrow(/unknown provider "missing".*\/login <id> or \/model <id>/i);
     await expect(loginAgentProvider(runtime, "anthropic", "   "))
       .rejects.toThrow(/cannot be empty/i);
-    expect(() => readFileSync(join(configRoot, "tuned-tensor", "agent", "auth.json"), "utf-8"))
+    expect(() => readFileSync(join(configRoot, "agent", "auth.json"), "utf-8"))
       .toThrow(/ENOENT/);
   });
 });

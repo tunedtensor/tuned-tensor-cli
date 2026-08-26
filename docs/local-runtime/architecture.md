@@ -42,7 +42,7 @@ resource defaults, data contract, and real CUDA acceptance test.
 
 TT Local currently ships two such methods:
 
-- **Adapter** (`training/local-runner`): certified Transformers checkpoints and
+- **Adapter** (`training/adapter`): certified Transformers checkpoints and
   PEFT LoRA SFT. Driven by `tt run` and adapter pipelines.
 - **Foundation** (`training/foundation`): a from-scratch BPE tokenizer and GPT
   with no Transformers/PEFT. Driven only by `tt pipeline` from a foundation
@@ -113,9 +113,9 @@ The runner config controls only:
 
 The training project, Python entrypoints, working directory, and child
 environment are internal and fixed. Every stage uses the locked `uv` project
-included in the npm package. The mutable virtual environment lives in the
-user cache, keyed by the project and lockfile content, so a read-only global
-npm install remains runnable.
+included in the npm package. The mutable virtual environment lives in
+`~/.tuned-tensor/cache`, keyed by the project and lockfile content, so a
+read-only global npm install remains runnable.
 
 Schemas are strict. Misspelled or obsolete fields fail validation instead of
 silently reverting to defaults. Training itself is CUDA-only and fails fast

@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## [0.13.1-beta.4] - 2026-08-26
+
+### Changed
+
+- Renamed the bundled adapter training project from `training/local-runner` to
+  `training/adapter` so it sits beside `training/foundation`.
+- Laptop and project state now live under one `.tuned-tensor` folder:
+  `~/.tuned-tensor/` for config, agent auth/threads, run metadata, and uv
+  caches, and `.tuned-tensor/` in the project for artifacts. `TUNED_TENSOR_HOME`
+  relocates the laptop parent. Existing `~/.tuned-tensor-local` stores and
+  `~/.cache/tuned-tensor-local` uv environments are still used when the new
+  paths are absent. Existing XDG config and agent state are likewise retained
+  until their new paths exist, so upgrades keep provider auth, custom models,
+  model selection, and conversation threads.
+
+### Security
+
+- Local run-store directories and their JSON, JSONL, copied report, and
+  cancellation-marker files are kept user-only (`0700`/`0600`) under the new
+  shared state root. Preserved stores are repaired before use, and symbolic
+  links or unsupported filesystem entries are refused rather than followed.
+
+### Fixed
+
+- A run is marked completed only after its canonical report has been stored;
+  missing or failed report copies leave the run nonterminal for a safe retry.
+- When cancellation wins during completion, partially persisted model and
+  report state is removed so a cancelled adapter cannot remain serveable.
+
 ## [0.13.1-beta.3] - 2026-08-25
 
 ### Added

@@ -1,6 +1,6 @@
 {
-  "artifactRoot": ".tt-local/dry-artifacts",
-  "storeRoot": ".tt-local/dry-store",
+  "artifactRoot": ".tuned-tensor/dry-artifacts",
+  "storeRoot": ".tuned-tensor/dry-store",
   "dryRun": true,
   "evaluation": {
     "inference": {

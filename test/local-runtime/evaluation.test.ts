@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -417,6 +417,50 @@ test("baseline cache reuses a report only for identical stable inputs", async ()
     assert.equal(first.cached, undefined);
     assert.equal(second.cached, true);
     assert.equal(await readFile(counter, "utf8"), "1");
+    if (process.platform !== "win32") {
+      const cacheRoot = join(config.storeRoot!, "cache", "baseline-evals");
+      const [cacheFile] = await readdir(cacheRoot);
+      assert.equal((await stat(config.storeRoot!)).mode & 0o777, 0o700);
+      assert.equal((await stat(cacheRoot)).mode & 0o777, 0o700);
+      assert.equal((await stat(join(cacheRoot, cacheFile!))).mode & 0o777, 0o600);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("baseline cache refuses preserved symbolic links before reading", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-evaluation-cache-symlink-"));
+  try {
+    await writeFakeUv(root);
+    const config = configFor(root, {
+      answers: { hello: "hi" },
+      baselineCache: true,
+    });
+    const common = {
+      kind: "baseline" as const,
+      modelId: "Qwen/Qwen3.5-2B",
+      baseModelId: "Qwen/Qwen3.5-2B",
+      baseModelRevision: QWEN_3_5_2B_REVISION,
+      examples: [{ input: "hello", output: "hi" }],
+      system: "Answer.",
+      config,
+    };
+    await evaluateExamples({ ...common, outputPath: join(root, "first.json") });
+    const cacheRoot = join(config.storeRoot!, "cache", "baseline-evals");
+    const [cacheFile] = await readdir(cacheRoot);
+    const cachePath = join(cacheRoot, cacheFile!);
+    const externalPath = join(root, "external-cache.json");
+    await writeFile(externalPath, "not json");
+    await unlink(cachePath);
+    await symlink(externalPath, cachePath);
+
+    await assert.rejects(
+      evaluateExamples({ ...common, outputPath: join(root, "second.json") }),
+      /symbolic link/i,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

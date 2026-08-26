@@ -17,7 +17,7 @@ const TEST_DIR = join(tmpdir(), `tt-test-config-${process.pid}`);
 
 beforeEach(async () => {
   rmSync(TEST_DIR, { recursive: true, force: true });
-  process.env.XDG_CONFIG_HOME = TEST_DIR;
+  process.env.TUNED_TENSOR_HOME = TEST_DIR;
   delete process.env.TUNED_TENSOR_URL;
   delete process.env.TUNED_TENSOR_API_KEY;
   configModule = await import("../config.js");
@@ -25,7 +25,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   rmSync(TEST_DIR, { recursive: true, force: true });
-  delete process.env.XDG_CONFIG_HOME;
+  delete process.env.TUNED_TENSOR_HOME;
   delete process.env.TUNED_TENSOR_AGENT_PROVIDER;
   delete process.env.TUNED_TENSOR_AGENT_MODEL;
   delete process.env.TUNED_TENSOR_AGENT_THINKING;
@@ -47,7 +47,7 @@ describe("config", () => {
     });
 
     it("reads existing config", () => {
-      const dir = join(TEST_DIR, "tuned-tensor");
+      const dir = TEST_DIR;
       mkdirSync(dir, { recursive: true });
       writeFileSync(
         join(dir, "config.json"),
@@ -57,7 +57,7 @@ describe("config", () => {
     });
 
     it("returns empty object for malformed JSON", () => {
-      const dir = join(TEST_DIR, "tuned-tensor");
+      const dir = TEST_DIR;
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "config.json"), "not json");
       expect(configModule.readConfig()).toEqual({});
@@ -67,14 +67,14 @@ describe("config", () => {
   describe("writeConfig", () => {
     it("creates config dir and file", () => {
       configModule.writeConfig({ api_key: "tt_abc" });
-      const path = join(TEST_DIR, "tuned-tensor", "config.json");
+      const path = join(TEST_DIR, "config.json");
       expect(existsSync(path)).toBe(true);
       expect(JSON.parse(readFileSync(path, "utf-8"))).toEqual({
         api_key: "tt_abc",
       });
       if (process.platform !== "win32") {
         expect(
-          statSync(join(TEST_DIR, "tuned-tensor")).mode & 0o777,
+          statSync(TEST_DIR).mode & 0o777,
         ).toBe(0o700);
         expect(statSync(path).mode & 0o777).toBe(0o600);
       }
@@ -105,7 +105,7 @@ describe("config", () => {
 
   describe("getAgentConfigDir", () => {
     it("places agent files under the TT config directory", () => {
-      expect(configModule.getAgentConfigDir()).toBe(join(TEST_DIR, "tuned-tensor", "agent"));
+      expect(configModule.getAgentConfigDir()).toBe(join(TEST_DIR, "agent"));
     });
   });
 
@@ -171,7 +171,7 @@ describe("config", () => {
         thinking: "high",
       });
       expect(readFileSync(
-        join(TEST_DIR, "tuned-tensor", "config.json"),
+        join(TEST_DIR, "config.json"),
         "utf8",
       )).not.toContain("api_key");
     });

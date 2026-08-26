@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -69,6 +69,35 @@ test("rejects multiple local train steps before execution", () => {
       { id: "train_b", uses: "train", target: "local" },
     ],
   }), /at most one train/i);
+});
+
+test("refuses a preserved symlinked run directory before reading its workflow lock", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-pipeline-lock-symlink-"));
+  try {
+    const runId = "85858585-8585-4858-8858-858585858585";
+    const config = configFixture(root);
+    const externalRun = join(root, "external-run");
+    await mkdir(join(config.storeRoot!, "runs"), { recursive: true });
+    await mkdir(externalRun);
+    await writeFile(join(externalRun, "workflow.lock"), JSON.stringify({
+      pid: process.pid,
+      created_at: new Date().toISOString(),
+    }));
+    await symlink(externalRun, join(config.storeRoot!, "runs", runId));
+
+    await assert.rejects(
+      runLocalPipeline({
+        request: requestFixture(runId),
+        config,
+        pipeline: canonicalLocalPipeline(),
+      }),
+      /symbolic link/i,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("runs a reordered partial local pipeline and finishes without a synthetic full report", async () => {

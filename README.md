@@ -148,8 +148,9 @@ separate behavior directly visible in the code from inferred rationale and
 include the inspected package-relative path and source hash.
 
 Agent conversations are durable and local under
-`~/.config/tuned-tensor/agent/threads` (or the XDG config equivalent), with
-user-only directory/file permissions. Persistence normally retains up to 100
+`~/.tuned-tensor/agent/threads` (or `$TUNED_TENSOR_HOME/agent/threads`), with
+user-only directory/file permissions. Existing XDG agent state remains in use
+until the new agent directory exists. Persistence normally retains up to 100
 recent threads; unsettled safety records are never pruned even when that exceeds
 the cap. Each thread is limited to 1 MB, 200 messages, and 200 actions; one-way
 action claims are capped at 1,000. Use `/new` to start one, `/threads` to

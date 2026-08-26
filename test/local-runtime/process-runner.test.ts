@@ -20,7 +20,7 @@ import {
 
 const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
-test("uv bundled local runner paths resolve relative to the package", () => {
+test("uv bundled adapter paths resolve relative to the package", () => {
   const command = buildBundledPythonCommand("train.py");
 
   assert.deepEqual(command.commandArgs, [
@@ -28,9 +28,9 @@ test("uv bundled local runner paths resolve relative to the package", () => {
     "--frozen",
     "--quiet",
     "--project",
-    join(repoRoot, "training/local-runner"),
+    join(repoRoot, "training/adapter"),
     "python",
-    join(repoRoot, "training/local-runner/src/train.py"),
+    join(repoRoot, "training/adapter/src/train.py"),
   ]);
 });
 
@@ -41,7 +41,7 @@ test("uv Python probes use the same locked project", () => {
     "--frozen",
     "--quiet",
     "--project",
-    join(repoRoot, "training/local-runner"),
+    join(repoRoot, "training/adapter"),
     "python",
     "-c",
     "print('ok')",

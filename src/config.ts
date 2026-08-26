@@ -5,8 +5,10 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { getConfigDir } from "./paths.js";
+
+export { getAgentConfigDir, getConfigDir } from "./paths.js";
 
 export interface Config {
   api_key?: string;
@@ -32,19 +34,7 @@ export interface AgentSelection {
   thinking: AgentThinkingLevel;
 }
 
-const CONFIG_DIR_NAME = "tuned-tensor";
 const CONFIG_FILE_NAME = "config.json";
-
-export function getConfigDir(): string {
-  const xdg = process.env.XDG_CONFIG_HOME;
-  const base = xdg || join(homedir(), ".config");
-  return join(base, CONFIG_DIR_NAME);
-}
-
-/** Provider auth, custom models, and local conversation state. */
-export function getAgentConfigDir(): string {
-  return join(getConfigDir(), "agent");
-}
 
 function getConfigPath(): string {
   return join(getConfigDir(), CONFIG_FILE_NAME);

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_ARTIFACT_ROOT } from "../paths.js";
 import { canonicalizeTrainingModel } from "./model-registry.js";
 
 /**
@@ -281,7 +282,7 @@ const evaluationConfigSchema = z.object({
 
 export const localRunnerConfigSchema = z.object({
   storeRoot: z.string().optional(),
-  artifactRoot: z.string().default(".tt-local/artifacts"),
+  artifactRoot: z.string().default(DEFAULT_ARTIFACT_ROOT),
   dryRun: z.boolean().default(false),
   paths: z.object({
     baseModel: z.string().optional(),

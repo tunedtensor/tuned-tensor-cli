@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -145,6 +145,177 @@ test("local store persists runs, events, reports, specs, and model records", asy
 
     assert.equal((await store.listRuns())[0]?.id, runId);
     assert.match(await readFile(join(artifactDir, "progress.jsonl"), "utf8"), /Training/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local store keeps shared state directories and files private", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-store-permissions-test-"));
+  try {
+    const sharedRoot = join(root, ".tuned-tensor");
+    const store = createLocalStore(join(sharedRoot, "store"));
+    await store.startRun({
+      request: requestFixture(),
+      artifactDir: join(root, "artifacts", runId),
+    });
+    await store.cancelRun(runId);
+
+    if (process.platform !== "win32") {
+      assert.equal((await stat(sharedRoot)).mode & 0o777, 0o700);
+      assert.equal((await stat(store.root)).mode & 0o777, 0o700);
+      assert.equal((await stat(join(store.root, "runs"))).mode & 0o777, 0o700);
+      assert.equal((await stat(join(store.root, "runs", runId, "state.json"))).mode & 0o777, 0o600);
+      assert.equal((await stat(join(store.root, "runs", runId, "progress.jsonl"))).mode & 0o777, 0o600);
+      assert.equal((await stat(join(store.root, "runs", runId, "cancel.requested"))).mode & 0o777, 0o600);
+      assert.equal((await stat(join(store.root, "specs", specId, "spec.json"))).mode & 0o777, 0o600);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local store repairs preserved state permissions before reading it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-store-repair-permissions-test-"));
+  try {
+    const store = createLocalStore(join(root, ".tuned-tensor-local"));
+    await store.startRun({
+      request: requestFixture(),
+      artifactDir: join(root, "artifacts", runId),
+    });
+    const directories = [
+      store.root,
+      join(store.root, "runs"),
+      join(store.root, "runs", runId),
+      join(store.root, "specs", specId),
+    ];
+    const files = [
+      join(store.root, "runs", runId, "state.json"),
+      join(store.root, "runs", runId, "progress.jsonl"),
+      join(store.root, "specs", specId, "spec.json"),
+    ];
+    await Promise.all(directories.map((path) => chmod(path, 0o775)));
+    await Promise.all(files.map((path) => chmod(path, 0o664)));
+
+    await createLocalStore(store.root).getRun(runId);
+
+    if (process.platform !== "win32") {
+      for (const path of directories) assert.equal((await stat(path)).mode & 0o777, 0o700);
+      for (const path of files) assert.equal((await stat(path)).mode & 0o777, 0o600);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local store refuses preserved symbolic links instead of following them", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-store-symlink-test-"));
+  try {
+    const store = createLocalStore(join(root, ".tuned-tensor-local"));
+    await store.startRun({
+      request: requestFixture(),
+      artifactDir: join(root, "artifacts", runId),
+    });
+    const statePath = join(store.root, "runs", runId, "state.json");
+    const externalPath = join(root, "external-state.json");
+    await writeFile(externalPath, await readFile(statePath));
+    await unlink(statePath);
+    await symlink(externalPath, statePath);
+
+    await assert.rejects(
+      createLocalStore(store.root).getRun(runId),
+      /symbolic link/i,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("completeRun repairs the store before reading a preserved request", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-store-complete-symlink-test-"));
+  try {
+    const store = createLocalStore(join(root, ".tuned-tensor-local"));
+    const artifactDir = join(root, "artifacts", runId);
+    await store.startRun({ request: requestFixture(), artifactDir });
+    const requestPath = join(store.root, "runs", runId, "request.json");
+    const externalPath = join(root, "external-request.json");
+    await writeFile(externalPath, "not json\n");
+    await unlink(requestPath);
+    await symlink(externalPath, requestPath);
+
+    await assert.rejects(
+      createLocalStore(store.root).completeRun(
+        reportFixture(join(artifactDir, "run-report.json")),
+        artifactDir,
+        join(artifactDir, "run-report.json"),
+      ),
+      /symbolic link/i,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("completeRun leaves a run nonterminal when storing its report fails", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-store-complete-report-"));
+  try {
+    const store = createLocalStore(join(root, "store"));
+    const artifactDir = join(root, "artifacts", runId);
+    await store.startRun({ request: requestFixture(), artifactDir });
+    const reportDirectory = join(root, "report-directory");
+    await mkdir(reportDirectory);
+
+    await assert.rejects(
+      store.completeRun(reportFixture(reportDirectory), artifactDir, reportDirectory),
+    );
+    assert.notEqual((await store.getRun(runId)).status, "completed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("completeRun leaves a run nonterminal when its report source is missing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-store-complete-missing-report-"));
+  try {
+    const store = createLocalStore(join(root, "store"));
+    const artifactDir = join(root, "artifacts", runId);
+    const reportPath = join(artifactDir, "missing-report.json");
+    await store.startRun({ request: requestFixture(), artifactDir });
+
+    await assert.rejects(
+      store.completeRun(reportFixture(reportPath), artifactDir, reportPath),
+      /report.*not found/i,
+    );
+    assert.notEqual((await store.getRun(runId)).status, "completed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cancellation preservation removes partially persisted model and report state", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-store-cancel-cleanup-"));
+  try {
+    const store = createLocalStore(join(root, "store"));
+    const artifactDir = join(root, "artifacts", runId);
+    await store.startRun({ request: requestFixture(), artifactDir });
+    const modelDir = join(store.paths.modelsDir, `local-${runId}`);
+    const storedReport = join(store.paths.runsDir, runId, "run-report.json");
+    await mkdir(modelDir, { recursive: true });
+    await writeFile(join(modelDir, "model.json"), "{}\n");
+    await writeFile(storedReport, "{}\n");
+    await store.cancelRun(runId);
+
+    await store.completeRun(
+      reportFixture(join(artifactDir, "run-report.json")),
+      artifactDir,
+      join(artifactDir, "run-report.json"),
+    );
+    await assert.rejects(stat(modelDir));
+    await assert.rejects(stat(storedReport));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

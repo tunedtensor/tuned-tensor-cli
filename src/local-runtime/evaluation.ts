@@ -16,7 +16,12 @@ import {
   withBundledPythonEnvironment,
 } from "./process-runner.js";
 import type { LocalRunReporter } from "./run-reporter.js";
-import { defaultLocalHome } from "./store.js";
+import {
+  createLocalStore,
+  defaultLocalHome,
+  hardenExistingLocalStore,
+  writePrivateJsonAtomic,
+} from "./store.js";
 import { localRuntimePackageRoot } from "./package-root.js";
 import {
   minimalMachineLearningEnvironment,
@@ -468,12 +473,16 @@ function baselineInputsAreStable(args: {
     : Boolean(args.baseModelRevision);
 }
 
-function baselineCachePath(config: LocalRunnerConfig, key: string): string {
-  const root = config.storeRoot ? resolve(config.storeRoot) : defaultLocalHome();
-  return join(root, "cache", "baseline-evals", `${key}.json`);
+function baselineStoreRoot(config: LocalRunnerConfig): string {
+  return config.storeRoot ? resolve(config.storeRoot) : defaultLocalHome();
 }
 
-async function readBaselineCache(path: string): Promise<EvalReport | null> {
+function baselineCachePath(config: LocalRunnerConfig, key: string): string {
+  return join(baselineStoreRoot(config), "cache", "baseline-evals", `${key}.json`);
+}
+
+async function readBaselineCache(config: LocalRunnerConfig, path: string): Promise<EvalReport | null> {
+  await hardenExistingLocalStore(baselineStoreRoot(config));
   try {
     return evalReportSchema.parse(JSON.parse(await readFile(path, "utf8")));
   } catch {
@@ -650,7 +659,7 @@ export async function evaluateExamples(args: {
       })
     : null;
   if (cacheKey) {
-    const cached = await readBaselineCache(baselineCachePath(args.config, cacheKey));
+    const cached = await readBaselineCache(args.config, baselineCachePath(args.config, cacheKey));
     if (cached) {
       const report = evalReportSchema.parse({
         ...cached,
@@ -704,7 +713,8 @@ export async function evaluateExamples(args: {
     logUri: inference ? fileUri(`${args.outputPath}.inference.log`) : undefined,
   });
   if (cacheKey) {
-    await writeJson(
+    await createLocalStore(baselineStoreRoot(args.config)).ensure();
+    await writePrivateJsonAtomic(
       baselineCachePath(args.config, cacheKey),
       { ...report, cache_key: cacheKey },
     );

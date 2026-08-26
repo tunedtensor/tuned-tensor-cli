@@ -1,6 +1,6 @@
 {
-  "artifactRoot": ".tt-local/artifacts",
-  "storeRoot": ".tt-local/store",
+  "artifactRoot": ".tuned-tensor/artifacts",
+  "storeRoot": ".tuned-tensor/store",
   "paths": {
     "modelCache": "~/.cache/huggingface"
   },
