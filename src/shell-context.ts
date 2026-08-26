@@ -4,8 +4,9 @@ import {
   DEFAULT_ARTIFACT_ROOT,
   defaultStoreRoot,
   expandUserPath,
-  getTunedTensorHome,
+  getConfigDir,
 } from "./paths.js";
+import { hardenExistingLocalStore } from "./local-runtime/store.js";
 
 export type TargetSource = "default-local";
 
@@ -95,7 +96,7 @@ function expandPath(
 }
 
 function configPath(env: Readonly<NodeJS.ProcessEnv>): string {
-  return join(getTunedTensorHome(env), "config.json");
+  return join(getConfigDir(env), "config.json");
 }
 
 function agentSelectionFrom(
@@ -175,7 +176,8 @@ async function readLatestRun(storeRoot: string): Promise<ShellLatestRun | undefi
 
 /**
  * Discover lightweight shell context without contacting the network, probing
- * the host, or creating project/store directories.
+ * the host, or creating project/store directories. Existing local-store
+ * permissions are repaired before its state is read.
  */
 export async function discoverShellContext(
   options: DiscoverShellContextOptions = {},
@@ -232,6 +234,7 @@ export async function discoverShellContext(
   }
   const agent = agentSelectionFrom(env, storedConfigJson.value?.agent);
 
+  await hardenExistingLocalStore(storeRoot);
   const [activeModelId, latestRun] = await Promise.all([
     readActiveModelId(storeRoot),
     readLatestRun(storeRoot),

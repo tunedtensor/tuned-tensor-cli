@@ -1,8 +1,8 @@
-import { appendFile, readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { appendFile, chmod, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { writeJsonAtomic } from "./artifacts.js";
 import { runReportSchema } from "./contracts.js";
-import type { LocalModelRecord, LocalStore } from "./store.js";
+import { hardenExistingLocalStore, type LocalModelRecord, type LocalStore } from "./store.js";
 
 export interface ActiveModelPointer {
   schema_version: 1;
@@ -27,6 +27,7 @@ function historyPath(store: LocalStore): string {
 }
 
 async function readPointer(store: LocalStore): Promise<ActiveModelPointer | null> {
+  if (!await hardenExistingLocalStore(store.root)) return null;
   try {
     const value = JSON.parse(await readFile(pointerPath(store), "utf8")) as ActiveModelPointer;
     if (
@@ -43,6 +44,24 @@ async function readPointer(store: LocalStore): Promise<ActiveModelPointer | null
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
+}
+
+async function writePrivatePointer(path: string, pointer: ActiveModelPointer): Promise<void> {
+  const temporary = `${path}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(pointer, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  await rename(temporary, path);
+  await chmod(path, 0o600);
+}
+
+async function appendPrivateHistory(path: string, pointer: ActiveModelPointer): Promise<void> {
+  await appendFile(path, `${JSON.stringify(pointer)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  await chmod(path, 0o600);
 }
 
 async function assertModelCanActivate(
@@ -74,8 +93,8 @@ async function publishPointer(
   pointer: ActiveModelPointer,
 ): Promise<ActiveModelPointer> {
   await store.ensure();
-  await writeJsonAtomic(pointerPath(store), pointer);
-  await appendFile(historyPath(store), `${JSON.stringify(pointer)}\n`, "utf8");
+  await writePrivatePointer(pointerPath(store), pointer);
+  await appendPrivateHistory(historyPath(store), pointer);
   return pointer;
 }
 

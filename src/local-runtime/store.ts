@@ -1,4 +1,4 @@
-import { appendFile, copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, chmod, copyFile, lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { defaultStoreRoot } from "../paths.js";
@@ -137,11 +137,66 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
+async function ensurePrivateDirectory(path: string): Promise<void> {
+  await mkdir(path, { recursive: true, mode: 0o700 });
+  const metadata = await lstat(path);
+  if (metadata.isSymbolicLink()) {
+    throw new Error(`Refusing symbolic link in local store: ${path}`);
+  }
+  if (!metadata.isDirectory()) {
+    throw new Error(`Expected local store directory: ${path}`);
+  }
+  await chmod(path, 0o700);
+}
+
+async function hardenPrivateTree(path: string): Promise<void> {
+  const metadata = await lstat(path);
+  if (metadata.isSymbolicLink()) {
+    throw new Error(`Refusing symbolic link in local store: ${path}`);
+  }
+  if (metadata.isDirectory()) {
+    await chmod(path, 0o700);
+    for (const entry of await readdir(path)) {
+      await hardenPrivateTree(join(path, entry));
+    }
+    return;
+  }
+  if (metadata.isFile()) {
+    await chmod(path, 0o600);
+    return;
+  }
+  throw new Error(`Refusing unsupported filesystem entry in local store: ${path}`);
+}
+
+/** Repair an existing store without creating one when it is absent. */
+export async function hardenExistingLocalStore(root: string): Promise<boolean> {
+  const resolvedRoot = resolve(root);
+  let metadata;
+  try {
+    metadata = await lstat(resolvedRoot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  if (metadata.isSymbolicLink()) {
+    throw new Error(`Refusing symbolic link in local store: ${resolvedRoot}`);
+  }
+  if (!metadata.isDirectory()) {
+    throw new Error(`Expected local store directory: ${resolvedRoot}`);
+  }
+  await hardenPrivateTree(resolvedRoot);
+  return true;
+}
+
+export async function writePrivateJsonAtomic(path: string, value: unknown): Promise<void> {
+  await ensurePrivateDirectory(dirname(path));
   const tmp = `${path}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
   await rename(tmp, path);
+  await chmod(path, 0o600);
 }
 
 async function readJson<T>(path: string): Promise<T> {
@@ -149,8 +204,18 @@ async function readJson<T>(path: string): Promise<T> {
 }
 
 async function appendJsonl(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await appendFile(path, `${JSON.stringify(value)}\n`, "utf8");
+  await ensurePrivateDirectory(dirname(path));
+  await appendFile(path, `${JSON.stringify(value)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  await chmod(path, 0o600);
+}
+
+async function writePrivateText(path: string, value: string): Promise<void> {
+  await ensurePrivateDirectory(dirname(path));
+  await writeFile(path, value, { encoding: "utf8", mode: 0o600 });
+  await chmod(path, 0o600);
 }
 
 async function readJsonl<T>(path: string): Promise<T[]> {
@@ -163,8 +228,9 @@ async function readJsonl<T>(path: string): Promise<T[]> {
 
 async function copyIfExists(from: string, to: string): Promise<void> {
   if (!(await exists(from))) return;
-  await mkdir(dirname(to), { recursive: true });
+  await ensurePrivateDirectory(dirname(to));
   await copyFile(from, to);
+  await chmod(to, 0o600);
 }
 
 async function childDirectoryNames(path: string): Promise<string[]> {
@@ -226,17 +292,29 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
   const specPath = (id: string) => join(specDir(id), "spec.json");
   const modelPath = (id: string) => join(paths.modelsDir, id, "model.json");
 
-  async function ensure() {
+  let ensurePromise: Promise<void> | undefined;
+
+  async function ensureOnce(): Promise<void> {
+    await ensurePrivateDirectory(paths.root);
     await Promise.all([
-      mkdir(paths.specsDir, { recursive: true }),
-      mkdir(paths.runsDir, { recursive: true }),
-      mkdir(paths.modelsDir, { recursive: true }),
-      mkdir(paths.datasetsDir, { recursive: true }),
+      ensurePrivateDirectory(paths.specsDir),
+      ensurePrivateDirectory(paths.runsDir),
+      ensurePrivateDirectory(paths.modelsDir),
+      ensurePrivateDirectory(paths.datasetsDir),
     ]);
+    await hardenExistingLocalStore(paths.root);
+  }
+
+  async function ensure(): Promise<void> {
+    ensurePromise ??= ensureOnce().catch((error: unknown) => {
+      ensurePromise = undefined;
+      throw error;
+    });
+    await ensurePromise;
   }
 
   async function writeRunState(state: LocalRunState): Promise<LocalRunState> {
-    await writeJsonAtomic(runStatePath(state.id), state);
+    await writePrivateJsonAtomic(runStatePath(state.id), state);
     return state;
   }
 
@@ -291,8 +369,8 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
 
   async function importSpecRecord(specId: string, spec: SpecSnapshot): Promise<LocalSpecRecord> {
     await ensure();
-    await mkdir(specDir(specId), { recursive: true });
-    await writeJsonAtomic(specPath(specId), spec);
+    await ensurePrivateDirectory(specDir(specId));
+    await writePrivateJsonAtomic(specPath(specId), spec);
     const record = await readSpecRecord(specId);
     if (!record) throw new Error(`Failed to persist spec: ${specId}`);
     return record;
@@ -338,6 +416,10 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
   async function preserveCancellationRequestState(runId: string): Promise<LocalRunState> {
     const previous = await getRun(runId);
     if (isTerminalRunState(previous)) return previous;
+    await Promise.all([
+      rm(join(paths.modelsDir, `local-${previous.id}`), { recursive: true, force: true }),
+      rm(runReportPath(previous.id), { force: true }),
+    ]);
     if (previous.status === "cancelled" && previous.current_stage === "cancel_requested") return previous;
     const requested: LocalRunState = {
       ...previous,
@@ -360,6 +442,7 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
   }
 
   async function getRun(id: string): Promise<LocalRunState> {
+    await ensure();
     return readJson<LocalRunState>(runStatePath(await resolveRunId(id)));
   }
 
@@ -388,7 +471,7 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
       metrics: args.training.metrics,
       created_at: existingModel?.created_at ?? args.createdAt ?? now,
     };
-    await writeJsonAtomic(modelPath(model.id), model);
+    await writePrivateJsonAtomic(modelPath(model.id), model);
     const alreadyRegistered = previous.model_id === modelId;
     const state: LocalRunState = {
       ...previous,
@@ -443,7 +526,7 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
         updated_at: now,
         started_at: now,
       };
-      await writeJsonAtomic(runRequestPath(request.run_id), request);
+      await writePrivateJsonAtomic(runRequestPath(request.run_id), request);
       await writeRunState(state);
       await appendRunEvent(state, { stage: "queued", status: "queued", message: "Run queued." });
       return state;
@@ -461,7 +544,7 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
         );
       }
       await importSpecRecord(request.behavior_spec_id, request.spec_snapshot);
-      await writeJsonAtomic(runRequestPath(request.run_id), request);
+      await writePrivateJsonAtomic(runRequestPath(request.run_id), request);
       const state: LocalRunState = {
         ...previous,
         artifact_dir: artifactDir ?? previous.artifact_dir,
@@ -507,6 +590,7 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
     },
 
     async completeRun(report, artifactDir, reportPath) {
+      await ensure();
       if (await exists(cancellationPath(report.run_id))) {
         return preserveCancellationRequestState(report.run_id);
       }
@@ -533,11 +617,17 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
         completed_at: completedAt,
         updated_at: completedAt,
       };
+      if (!await exists(reportPath)) {
+        throw new Error(`Run report not found: ${reportPath}`);
+      }
+      await copyIfExists(reportPath, runReportPath(report.run_id));
+      if (await exists(cancellationPath(report.run_id))) {
+        return preserveCancellationRequestState(report.run_id);
+      }
       await writeRunState(state);
       if (await exists(cancellationPath(report.run_id))) {
         return preserveCancellationRequestState(report.run_id);
       }
-      await copyIfExists(reportPath, runReportPath(report.run_id));
       await appendRunEvent(state, {
         stage: "completed",
         status: "completed",
@@ -594,7 +684,7 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
       if (isTerminalRunState(state) || (state.status === "cancelled" && state.current_stage === "cancel_requested")) {
         return;
       }
-      await writeFile(cancellationPath(state.id), `${new Date().toISOString()}\n`, "utf8");
+      await writePrivateText(cancellationPath(state.id), `${new Date().toISOString()}\n`);
       const latest = await getRun(state.id);
       if (isTerminalRunState(latest)) {
         if (latest.status !== "cancelled") await rm(cancellationPath(state.id), { force: true });

@@ -11,7 +11,16 @@
   caches, and `.tuned-tensor/` in the project for artifacts. `TUNED_TENSOR_HOME`
   relocates the laptop parent. Existing `~/.tuned-tensor-local` stores and
   `~/.cache/tuned-tensor-local` uv environments are still used when the new
-  paths are absent.
+  paths are absent. Existing XDG config and agent state are likewise retained
+  until their new paths exist, so upgrades keep provider auth, custom models,
+  model selection, and conversation threads.
+
+### Security
+
+- Local run-store directories and their JSON, JSONL, copied report, and
+  cancellation-marker files are kept user-only (`0700`/`0600`) under the new
+  shared state root. Preserved stores are repaired before use, and symbolic
+  links or unsupported filesystem entries are refused rather than followed.
 
 ## [0.13.1-beta.3] - 2026-08-25
 

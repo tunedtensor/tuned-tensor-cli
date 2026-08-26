@@ -784,6 +784,7 @@ async function acquireWorkflowLock(lockPath: string, description: string): Promi
 }
 
 async function acquireRunLock(store: LocalStore, runId: string): Promise<() => Promise<void>> {
+  await store.ensure();
   return acquireWorkflowLock(resolve(store.paths.runsDir, runId, "workflow.lock"), `Run ${runId}`);
 }
 

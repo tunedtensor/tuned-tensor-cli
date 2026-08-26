@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -150,6 +150,10 @@ test("activation requires a passing general regression gate and rollback restore
     assert.equal((await getActiveModel(passing.store)).model, null);
     const activated = await activateModel(passing.store, passing.modelId);
     assert.equal(activated.model_id, passing.modelId);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(join(passing.store.root, "active-model.json"))).mode & 0o777, 0o600);
+      assert.equal((await stat(join(passing.store.root, "activation-history.jsonl"))).mode & 0o777, 0o600);
+    }
     assert.equal((await getActiveModel(passing.store)).model?.id, passing.modelId);
     const reactivated = await activateModel(passing.store, passing.modelId);
     assert.equal(reactivated.previous_model_id, null);
@@ -161,6 +165,33 @@ test("activation requires a passing general regression gate and rollback restore
     const rolledBack = await rollbackActiveModel(passing.store);
     assert.equal(rolledBack.model_id, null);
     assert.equal((await getActiveModel(passing.store)).model, null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("active-model reads refuse preserved symbolic links", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-active-model-symlink-"));
+  try {
+    const passing = await persistFixture(
+      root,
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      true,
+    );
+    await activateModel(passing.store, passing.modelId);
+    const pointerPath = join(passing.store.root, "active-model.json");
+    const externalPath = join(root, "external-pointer.json");
+    await writeFile(externalPath, "not json\n");
+    await unlink(pointerPath);
+    await symlink(externalPath, pointerPath);
+
+    await assert.rejects(
+      getActiveModel(createLocalStore(passing.store.root)),
+      /symbolic link/i,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

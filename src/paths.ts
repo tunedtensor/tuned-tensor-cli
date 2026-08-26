@@ -32,12 +32,29 @@ export function getTunedTensorHome(env: NodeJS.ProcessEnv = process.env): string
   return join(envHome(env), TUNED_TENSOR_DIR);
 }
 
+function legacyConfigDir(env: NodeJS.ProcessEnv): string {
+  const configHome = env.XDG_CONFIG_HOME?.trim()
+    ? resolve(env.XDG_CONFIG_HOME)
+    : join(envHome(env), ".config");
+  return join(configHome, "tuned-tensor");
+}
+
 export function getConfigDir(env: NodeJS.ProcessEnv = process.env): string {
-  return getTunedTensorHome(env);
+  const next = getTunedTensorHome(env);
+  if (env.TUNED_TENSOR_HOME?.trim()) return next;
+  const legacy = legacyConfigDir(env);
+  if (!existsSync(join(next, "config.json")) && existsSync(join(legacy, "config.json"))) {
+    return legacy;
+  }
+  return next;
 }
 
 export function getAgentConfigDir(env: NodeJS.ProcessEnv = process.env): string {
-  return join(getTunedTensorHome(env), "agent");
+  const next = join(getTunedTensorHome(env), "agent");
+  if (env.TUNED_TENSOR_HOME?.trim()) return next;
+  const legacy = join(legacyConfigDir(env), "agent");
+  if (!existsSync(next) && existsSync(legacy)) return legacy;
+  return next;
 }
 
 export function defaultStoreRoot(env: NodeJS.ProcessEnv = process.env): string {

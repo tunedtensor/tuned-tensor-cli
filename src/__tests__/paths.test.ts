@@ -15,6 +15,7 @@ import {
 const originalHome = process.env.TUNED_TENSOR_HOME;
 const originalLocalHome = process.env.TT_LOCAL_HOME;
 const originalUserHome = process.env.HOME;
+const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
 
 afterEach(() => {
   if (originalHome === undefined) delete process.env.TUNED_TENSOR_HOME;
@@ -23,6 +24,8 @@ afterEach(() => {
   else process.env.TT_LOCAL_HOME = originalLocalHome;
   if (originalUserHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalUserHome;
+  if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
 });
 
 describe("tuned tensor paths", () => {
@@ -71,5 +74,25 @@ describe("tuned tensor paths", () => {
 
     expect(defaultStoreRoot()).toBe(legacy);
     rmSync(userHome, { recursive: true, force: true });
+  });
+
+  it("reuses legacy XDG config and agent state when the new paths do not exist", () => {
+    const userHome = join(tmpdir(), `tt-paths-xdg-user-${process.pid}`);
+    const xdgHome = join(tmpdir(), `tt-paths-xdg-config-${process.pid}`);
+    const legacyConfig = join(xdgHome, "tuned-tensor");
+    const legacyAgent = join(legacyConfig, "agent");
+    rmSync(userHome, { recursive: true, force: true });
+    rmSync(xdgHome, { recursive: true, force: true });
+    mkdirSync(legacyAgent, { recursive: true });
+    writeFileSync(join(legacyConfig, "config.json"), "{}\n");
+    delete process.env.TUNED_TENSOR_HOME;
+    process.env.HOME = userHome;
+    process.env.XDG_CONFIG_HOME = xdgHome;
+
+    expect(getConfigDir()).toBe(legacyConfig);
+    expect(getAgentConfigDir()).toBe(legacyAgent);
+
+    rmSync(userHome, { recursive: true, force: true });
+    rmSync(xdgHome, { recursive: true, force: true });
   });
 });
