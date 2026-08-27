@@ -596,6 +596,13 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
       }
       const request = await readJson<FineTuneRunRequest>(runRequestPath(report.run_id));
       const completedAt = report.created_at ?? new Date().toISOString();
+      if (!await exists(reportPath)) {
+        throw new Error(`Run report not found: ${reportPath}`);
+      }
+      await copyIfExists(reportPath, runReportPath(report.run_id));
+      if (await exists(cancellationPath(report.run_id))) {
+        return preserveCancellationRequestState(report.run_id);
+      }
       const model = await registerModelRecord({
         request,
         training: report.training,
@@ -617,10 +624,6 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
         completed_at: completedAt,
         updated_at: completedAt,
       };
-      if (!await exists(reportPath)) {
-        throw new Error(`Run report not found: ${reportPath}`);
-      }
-      await copyIfExists(reportPath, runReportPath(report.run_id));
       if (await exists(cancellationPath(report.run_id))) {
         return preserveCancellationRequestState(report.run_id);
       }

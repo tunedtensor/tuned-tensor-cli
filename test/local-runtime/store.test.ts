@@ -272,7 +272,10 @@ test("completeRun leaves a run nonterminal when storing its report fails", async
     await assert.rejects(
       store.completeRun(reportFixture(reportDirectory), artifactDir, reportDirectory),
     );
-    assert.notEqual((await store.getRun(runId)).status, "completed");
+    const failedRun = await store.getRun(runId);
+    assert.notEqual(failedRun.status, "completed");
+    assert.equal(failedRun.model_id, undefined);
+    assert.deepEqual(await store.listModels(), []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -290,7 +293,10 @@ test("completeRun leaves a run nonterminal when its report source is missing", a
       store.completeRun(reportFixture(reportPath), artifactDir, reportPath),
       /report.*not found/i,
     );
-    assert.notEqual((await store.getRun(runId)).status, "completed");
+    const failedRun = await store.getRun(runId);
+    assert.notEqual(failedRun.status, "completed");
+    assert.equal(failedRun.model_id, undefined);
+    assert.deepEqual(await store.listModels(), []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
