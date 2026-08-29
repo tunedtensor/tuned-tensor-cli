@@ -11,7 +11,7 @@ import {
   validatePipeline,
   type Pipeline,
 } from "../pipeline.js";
-import { isJsonMode, printJson, printSuccess } from "../output.js";
+import { isJsonMode, printJson, printSuccess, printWarning } from "../output.js";
 import {
   assertFoundationSpecReady,
   assertLocalRunInputReady,
@@ -20,6 +20,8 @@ import {
 } from "../local-runtime/local-project.js";
 import { loadLocalRunnerConfig, runLocalPipeline, type LocalPipeline } from "../local-runtime/orchestrator.js";
 import { runFoundationPipeline } from "../local-runtime/foundation-runner.js";
+import { warningsFromSnapshot } from "../local-runtime/capability.js";
+import { readHardwareSnapshot } from "../local-runtime/hardware-snapshot.js";
 
 const DEFAULT_PIPELINE_FILE = "tunedtensor.pipeline.json";
 const DEFAULT_SPEC_FILE = "tunedtensor.json";
@@ -85,13 +87,42 @@ async function resolvePipelineDocument(options: { file: string; spec?: string })
   );
 }
 
-function outputPlan(plan: unknown): void {
-  if (isJsonMode()) return printJson(plan);
+function outputPlan(plan: unknown, hostWarnings: string[] = []): void {
+  if (isJsonMode()) {
+    return printJson(hostWarnings.length ? { ...plan as object, host_warnings: hostWarnings } : plan);
+  }
   const typed = plan as { steps: Array<{ id: string; uses: string; target: string; transfers: Array<{ from: string; from_target: string; to_target: string }> }> };
   for (const step of typed.steps) {
     console.log(`${step.id.padEnd(16)} ${step.uses.padEnd(10)} ${step.target}`);
     for (const transfer of step.transfers) console.log(`  transfer ${transfer.from}: ${transfer.from_target} -> ${transfer.to_target}`);
   }
+  for (const warning of hostWarnings) printWarning(warning);
+}
+
+async function hostWarningsForPipeline(document: unknown, specPath?: string): Promise<string[]> {
+  const snapshot = await readHardwareSnapshot();
+  if (!snapshot) return [];
+  let engine: "adapter" | "foundation" = "adapter";
+  let baseModel: string | undefined;
+  try {
+    if (isFoundationPipeline(parsePipeline(document))) engine = "foundation";
+  } catch {
+    // Use the spec below when the document is not a portable pipeline yet.
+  }
+  if (specPath && existsSync(specPath)) {
+    try {
+      const input = await loadLocalRunInput(specPath);
+      if (input.kind === "foundation-spec") {
+        engine = "foundation";
+      } else if (input.kind === "spec") {
+        engine = "adapter";
+        baseModel = input.request.spec_snapshot.base_model;
+      }
+    } catch {
+      // Spec parse errors are reported by the existing validate/run paths.
+    }
+  }
+  return warningsFromSnapshot(snapshot.capabilities, { engine, baseModel });
 }
 
 export function registerPipelineCommands(parent: Command): void {
@@ -136,11 +167,14 @@ export function registerPipelineCommands(parent: Command): void {
     .option("-f, --file <path>", "Pipeline file", DEFAULT_PIPELINE_FILE)
     .option("--spec <path>", "Local behavior spec used to detect leftover engine mismatches", DEFAULT_SPEC_FILE)
     .action(async (options: { file: string; spec?: string }) => {
-      const errors = validatePipeline(await resolvePipelineDocument(options));
-      const result = { valid: errors.length === 0, errors };
+      const document = await resolvePipelineDocument(options);
+      const errors = validatePipeline(document);
+      const host_warnings = await hostWarningsForPipeline(document, options.spec);
+      const result = { valid: errors.length === 0, errors, ...(host_warnings.length ? { host_warnings } : {}) };
       if (isJsonMode()) return printJson(result);
       if (errors.length) throw new Error(`Invalid pipeline:\n- ${errors.join("\n- ")}`);
       printSuccess("Pipeline is valid.");
+      for (const warning of host_warnings) printWarning(warning);
     });
 
   pipeline.command("plan")
@@ -150,7 +184,9 @@ export function registerPipelineCommands(parent: Command): void {
     .option("--only <ids>", "Comma-separated step IDs to include")
     .option("--skip <ids>", "Comma-separated step IDs to omit")
     .action(async (options: { file: string; spec?: string; only?: string; skip?: string }) => {
-      outputPlan(createExecutionPlan(await resolvePipelineDocument(options) as Pipeline, { only: parseList(options.only), skip: parseList(options.skip) }));
+      const document = await resolvePipelineDocument(options);
+      const plan = createExecutionPlan(document as Pipeline, { only: parseList(options.only), skip: parseList(options.skip) });
+      outputPlan(plan, await hostWarningsForPipeline(document, options.spec));
     });
 
   pipeline.command("run")
@@ -164,11 +200,19 @@ export function registerPipelineCommands(parent: Command): void {
     .action(async (options: { file: string; spec: string; config?: string; dryRun?: boolean; only?: string; skip?: string }) => {
       const document = await resolvePipelineDocument(options);
       const plan = createExecutionPlan(document as Pipeline, { only: parseList(options.only), skip: parseList(options.skip) });
+      const hostWarnings = await hostWarningsForPipeline(document, options.spec);
       if (options.dryRun) {
-        if (isJsonMode()) return printJson({ dry_run: true, ...plan });
+        if (isJsonMode()) {
+          return printJson({
+            dry_run: true,
+            ...plan,
+            ...(hostWarnings.length ? { host_warnings: hostWarnings } : {}),
+          });
+        }
         console.log("Dry run only — no execution, artifact transfer, or credit reservation will occur.");
-        return outputPlan(plan);
+        return outputPlan(plan, hostWarnings);
       }
+      for (const warning of hostWarnings) printWarning(warning);
       const remote = plan.steps.find((step) => step.target !== "local");
       if (remote) {
         throw new Error(`Step "${remote.id}" targets cloud execution. This CLI is local-only; rewrite that step to local or use --dry-run.`);

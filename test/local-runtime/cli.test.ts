@@ -38,6 +38,7 @@ function runCli(args: string[], cwd: string, env: NodeJS.ProcessEnv = {}): CliRe
       env: {
         ...process.env,
         TT_LOCAL_HOME: storeRoot,
+        TUNED_TENSOR_HOME: join(cwd, "tt-home"),
         ...env,
       },
     },
@@ -97,7 +98,8 @@ test("command and nested-command help never execute work", async () => {
   await withTemporaryProject(async (root) => {
     await writeFile(join(root, ".env"), "TT_LOCAL_HELP_MUST_NOT_LOAD=true\n", "utf8");
     const cases = [
-      { args: ["run", "--help"], usage: "tt run" },
+      { args: ["doctor", "--help"], usage: "tt doctor" },
+      { args: ["hardware", "--help"], usage: "tt hardware" },
       { args: ["serve", "--help"], usage: "tt serve" },
       { args: ["models", "prefetch", "--help"], usage: "tt models prefetch" },
       { args: ["models", "verify-base", "--help"], usage: "tt models verify-base" },

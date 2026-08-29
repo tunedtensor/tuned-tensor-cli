@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- `tt hardware` inventories this machine (CPU, RAM, disk, NVIDIA GPU, and
+  optionally the bundled torch/uv stack) and reports what certified adapter
+  models and the foundation engine can train, LoRA fine-tune, or infer.
+  The report is cached at `~/.tuned-tensor/hardware.json` for `tt status`,
+  `/status`, `/context`, pipeline plan/validate warnings, and the local
+  agent. The agent calls `examine_hardware` when you ask it to examine this
+  host or decide what can run here.
+
 ## [0.13.1-beta.4] - 2026-08-26
 
 ### Changed

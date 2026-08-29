@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { Value } from "typebox/value";
 import {
   boundedToolJson,
@@ -160,6 +160,47 @@ describe("Tuned Tensor agent tools", () => {
         run: "tt pipeline run --file tunedtensor.pipeline.json --spec tunedtensor.json",
       },
     });
+  });
+
+  it("examine_hardware inventories the host and persists a snapshot", async () => {
+    const root = mkdtempSync(join(tmpdir(), "tt-examine-hardware-"));
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "uv"), "#!/bin/sh\necho uv 0.test\n");
+    writeFileSync(join(bin, "nvidia-smi"), `#!/bin/sh
+if echo "$*" | grep -q query-gpu; then
+  echo "0, NVIDIA GeForce RTX 4090, 560.00, 24576, 20000, 8.9"
+  exit 0
+fi
+echo RTX
+exit 0
+`);
+    chmodSync(join(bin, "uv"), 0o755);
+    chmodSync(join(bin, "nvidia-smi"), 0o755);
+    const previousPath = process.env.PATH;
+    const previousHome = process.env.TUNED_TENSOR_HOME;
+    try {
+      process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`;
+      process.env.TUNED_TENSOR_HOME = join(root, "home");
+      const output = await tool("examine_hardware", fakeApi(), root).execute(
+        "hw-1",
+        { quick: true },
+      );
+      expect(tool("examine_hardware", fakeApi()).description).toMatch(/examine.*hardware|GPU|VRAM/i);
+      expect(output.details).toMatchObject({
+        quick: true,
+        capabilities: {
+          cuda_available: true,
+        },
+      });
+      expect(existsSync(join(root, "home", "hardware.json"))).toBe(true);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousHome === undefined) delete process.env.TUNED_TENSOR_HOME;
+      else process.env.TUNED_TENSOR_HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("searches public Hugging Face models with a bounded metadata projection", async () => {
@@ -346,7 +387,7 @@ describe("Tuned Tensor agent tools", () => {
       "list_specs", "get_spec", "list_runs", "get_run", "diagnose_run",
       "report_run", "estimate_run", "list_datasets", "get_dataset",
       "list_models", "get_model", "get_balance", "list_transactions",
-      "describe_pipeline", "search_hugging_face", "inspect_training_source", "validate_pipeline",
+      "examine_hardware", "describe_pipeline", "search_hugging_face", "inspect_training_source", "validate_pipeline",
       "prepare_create_spec", "prepare_update_spec", "prepare_pipeline_run",
     ]);
   });
@@ -358,6 +399,7 @@ describe("Tuned Tensor agent tools", () => {
         localOnly: true,
         workspaceRoot: workspace,
       }).map((candidate) => candidate.name)).toEqual([
+        "examine_hardware",
         "describe_pipeline",
         "search_hugging_face",
         "inspect_training_source",

@@ -16,6 +16,9 @@ import {
   LocalProjectSpecSchema,
   prepareLocalSpecProject,
 } from "./local-spec-workspace.js";
+import { assessHardware } from "./local-runtime/hardware.js";
+import { readHardwareSnapshot } from "./local-runtime/hardware-snapshot.js";
+import { warningsFromSnapshot } from "./local-runtime/capability.js";
 
 
 const MAX_TOOL_OUTPUT = 32_000;
@@ -400,11 +403,36 @@ export function createTunedTensorTools(
     })),
   ];
   const localReads: AgentTool[] = [
+    define(
+      "examine_hardware",
+      "Examine hardware",
+      "Examine this machine's CPU, RAM, disk, NVIDIA GPU, and bundled Python/CUDA stack, then report what Tuned Tensor can train, LoRA fine-tune, or infer. Call this when the user asks to inspect, examine, or check the system, hardware, GPU, VRAM, CUDA, or what model / pipeline / foundation depth this host can run. Equivalent to `tt hardware`. Does not start training. Defaults to a quick probe (`nvidia-smi` + Node); set `full: true` only if the user wants the bundled torch/uv runtime check.",
+      Type.Object({
+        full: Type.Optional(Type.Boolean()),
+        quick: Type.Optional(Type.Boolean()),
+      }, { additionalProperties: false }),
+      async (p) => {
+        const quick = p.full === true ? false : p.quick !== false;
+        return await assessHardware({
+          quick,
+          cwd: options.workspaceRoot,
+        });
+      },
+    ),
     define("describe_pipeline", "Describe pipeline", "Describe the built-in adapter or foundation workflow and exact TT commands. This never executes anything.", Type.Object({
       engine: Type.Optional(Type.Union([Type.Literal("adapter"), Type.Literal("foundation")])),
       target: Type.Optional(Type.Union([Type.Literal("local"), Type.Literal("cloud")])),
     }, { additionalProperties: false }), async (p) => {
       const engine = p.engine ?? "adapter";
+      const snapshot = await readHardwareSnapshot();
+      const host = snapshot
+        ? {
+          collected_at: snapshot.collected_at,
+          summary: snapshot.summary,
+          stale: snapshot.stale,
+          warnings: warningsFromSnapshot(snapshot.capabilities, { engine }),
+        }
+        : undefined;
       if (engine === "foundation") {
         return {
           version: 1,
@@ -422,6 +450,7 @@ export function createTunedTensorTools(
             dry_run: "tt pipeline run --dry-run --file tunedtensor.pipeline.json --spec tunedtensor.json",
             run: "tt pipeline run --file tunedtensor.pipeline.json --spec tunedtensor.json",
           },
+          ...(host ? { host } : {}),
         };
       }
       return {
@@ -435,6 +464,7 @@ export function createTunedTensorTools(
           dry_run: "tt pipeline run --dry-run --file tunedtensor.pipeline.json --spec tunedtensor.json",
           run: "tt pipeline run --file tunedtensor.pipeline.json --spec tunedtensor.json",
         },
+        ...(host ? { host } : {}),
       };
     }),
     define(

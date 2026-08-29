@@ -15,10 +15,16 @@ certifies `Qwen/Qwen3.5-2B` at snapshot
 Run on the Spark:
 
 ```bash
+tt hardware
 nvidia-smi
 node --version
 uv --version
 ```
+
+`tt hardware` sizes certified adapter models and the foundation engine against
+this GPU. Spark unified memory should show Nemotron and Muse Glimmer as
+trainable; consumer cards typically only fit Qwen LoRA. `tt status` and the
+shell agent reuse the cached report.
 
 TT Local requires Node 22+, `uv`, working CUDA PyTorch, and enough free space
 for the Hugging Face cache plus run artifacts.

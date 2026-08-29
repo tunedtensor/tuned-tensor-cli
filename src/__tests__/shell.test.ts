@@ -109,6 +109,7 @@ describe("isCatalogCommand", () => {
   it("recognizes existing CLI grammar without treating conversation as commands", () => {
     expect(isCatalogCommand(["runs", "list"])).toBe(true);
     expect(isCatalogCommand(["doctor"])).toBe(true);
+    expect(isCatalogCommand(["hardware"])).toBe(true);
     expect(isCatalogCommand(["local", "runs", "list"])).toBe(true);
     expect(isCatalogCommand(["local", "doctor"])).toBe(true);
     expect(isCatalogCommand(["show", "my", "latest", "run"])).toBe(false);
@@ -506,7 +507,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     const output = stdout.join("");
     expect(output).toContain("TT commands matching");
     expect(output).not.toContain("Cloud endpoint");
-    expect(output).toContain("Host checks");
+    expect(output).toContain("Host           not inventoried");
     expect(clear).toHaveBeenCalledTimes(1);
     expect(run).not.toHaveBeenCalled();
   });

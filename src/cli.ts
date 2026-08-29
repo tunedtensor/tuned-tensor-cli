@@ -354,6 +354,7 @@ export function createProgram(
     `
 Examples:
   tt                     Open the conversational terminal (TTY only)
+  tt hardware
   tt doctor tunedtensor.json
   tt run tunedtensor.json --dry-run
   tt runs list

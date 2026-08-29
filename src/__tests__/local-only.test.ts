@@ -22,6 +22,7 @@ describe("local-only CLI surface", () => {
         "info",
         "init",
         "doctor",
+        "hardware",
         "validate",
         "run",
         "serve",
@@ -67,6 +68,7 @@ describe("local-only CLI surface", () => {
       "prepare_create_spec",
     ]));
     expect(names).toEqual(expect.arrayContaining([
+      "examine_hardware",
       "describe_pipeline",
       "validate_pipeline",
       "prepare_create_local_spec",
