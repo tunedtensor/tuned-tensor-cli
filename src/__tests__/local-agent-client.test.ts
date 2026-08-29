@@ -90,6 +90,7 @@ describe("local agent conversation client", () => {
     expect((await client.getThread(thread.id)).thread.title).toBe("Inspect specs");
     expect(created[0]?.messages).toEqual([]);
     expect(created[0]?.tools.map((candidate) => candidate.name)).toEqual([
+      "examine_hardware",
       "describe_pipeline",
       "search_hugging_face",
       "inspect_training_source",
@@ -104,6 +105,8 @@ describe("local agent conversation client", () => {
     expect(created[0]?.systemPrompt).toMatch(/Hugging Face.*never include secrets or private data/is);
     expect(created[0]?.systemPrompt).toContain("inspect_training_source");
     expect(created[0]?.systemPrompt).toMatch(/observed behavior.*inferred rationale/is);
+    expect(created[0]?.systemPrompt).toContain("examine_hardware");
+    expect(created[0]?.systemPrompt).toMatch(/examine this host.*GPU/is);
     expect(JSON.stringify(created[0])).not.toContain(TT_SECRET);
 
     await client.runTurn(thread.id, "Continue", () => {});

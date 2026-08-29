@@ -23,6 +23,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   { path: "init", description: "Create a local behaviour-spec project.", group: "Workflow", modes: LOCAL },
   { path: "validate", description: "Validate a local fine-tuning project.", group: "Workflow", modes: LOCAL },
   { path: "doctor", description: "Check the local host and run prerequisites.", group: "Workflow", modes: LOCAL },
+  { path: "hardware", description: "Inventory this host and report train, fine-tune, and inference limits.", group: "Inspect", modes: LOCAL },
   { path: "run", description: "Run the local fine-tuning and evaluation workflow.", group: "Workflow", modes: LOCAL },
   { path: "pipeline init", description: "Write a canonical v1 pipeline recipe.", group: "Workflow", modes: LOCAL },
   { path: "pipeline validate", description: "Validate a pipeline without executing it.", group: "Workflow", modes: LOCAL },

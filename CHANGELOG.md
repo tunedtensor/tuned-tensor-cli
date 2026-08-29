@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## [0.13.1-beta.5] - 2026-08-29
+
+### Added
+
+- `tt hardware` inventories this machine (CPU, RAM, disk, NVIDIA GPU, and
+  optionally the bundled torch/uv stack) and reports what certified adapter
+  models and the foundation engine can train, LoRA fine-tune, or infer.
+  The report is cached at `~/.tuned-tensor/hardware.json` for `tt status`,
+  `/status`, `/context`, pipeline plan/validate warnings, and the local
+  agent. The agent calls `examine_hardware` when you ask it to examine this
+  host or decide what can run here.
+
+### Fixed
+
+- A quick inventory (`tt doctor`, `tt hardware --quick`, or
+  `examine_hardware` with `quick: true`) does not replace a fresh full
+  `tt hardware` snapshot, so nvidia-smi-only probes cannot flip CUDA after
+  torch already reported it unavailable.
+- nvidia-smi inventory no longer queries unused `compute_cap`, retries
+  simpler CSV fields, and never treats the weekday timestamp header as the
+  GPU name.
+- A failed bundled Python probe marks adapter and foundation train/finetune
+  as not possible. `examine_hardware` defaults to the same full probe as
+  `tt hardware`.
+
 ## [0.13.1-beta.4] - 2026-08-26
 
 ### Changed

@@ -265,7 +265,35 @@ describe("context helpers", () => {
     const statusText = formatShellStatus(context).join("\n");
     expect(contextText).not.toContain("Cloud auth");
     expect(contextText).not.toContain("Cloud endpoint");
-    expect(statusText).toContain("Host checks    not run (use doctor)");
+    expect(statusText).toContain("Host           not inventoried (run tt hardware)");
     expect(statusText).not.toContain("nvidia-smi");
+  });
+
+  it("reads a cached hardware snapshot without probing the GPU", async () => {
+    const root = await temporaryRoot();
+    const home = join(root, "home");
+    const configDirectory = join(home, ".tuned-tensor");
+    await mkdir(configDirectory, { recursive: true });
+    await writeFile(join(configDirectory, "hardware.json"), JSON.stringify({
+      version: 1,
+      collected_at: "2026-08-29T12:00:00.000Z",
+      quick: true,
+      inventory: { collected_at: "2026-08-29T12:00:00.000Z", quick: true },
+      capabilities: {
+        cuda_available: true,
+        gpu: { name: "NVIDIA GB10", memory_total_bytes: 137438953472 },
+        adapters: [],
+        foundation: { train: { status: "ready" } },
+      },
+      summary: "GPU NVIDIA GB10, 128 GiB unified, CUDA yes. Adapter: Qwen train ready",
+    }));
+
+    const context = await discoverShellContext({
+      cwd: root,
+      env: { HOME: home },
+    });
+    expect(context.host?.gpuName).toBe("NVIDIA GB10");
+    expect(formatShellStatus(context).join("\n")).toContain("Qwen train ready");
+    expect(formatShellStatus(context).join("\n")).not.toContain("nvidia-smi");
   });
 });

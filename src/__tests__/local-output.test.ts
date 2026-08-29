@@ -195,6 +195,41 @@ describe("human local rendering", () => {
     expect(errors).toContain("needs attention");
   });
 
+  it("renders hardware capability as a host summary and workload table", () => {
+    renderLocalOutput(payload({
+      args: ["hardware"],
+      hasJson: true,
+      json: {
+        summary: "GPU NVIDIA GB10, 128 GiB unified, CUDA yes",
+        quick: true,
+        capabilities: {
+          cuda_available: true,
+          gpu: { name: "NVIDIA GB10", memory_total_bytes: 137438953472 },
+          adapters: [{
+            id: "Qwen/Qwen3.5-2B",
+            train: { status: "ready" },
+            finetune: { status: "ready" },
+            inference: { status: "ready" },
+          }],
+          foundation: {
+            default_depth: 2,
+            suggested_max_depth: 48,
+            train: { status: "ready" },
+            finetune: { status: "ready" },
+            inference: { status: "ready" },
+            serve: { reason: "tt serve cannot host foundation checkpoints yet" },
+          },
+          notes: [],
+        },
+      },
+    }));
+
+    const logs = vi.mocked(console.log).mock.calls.flat().join("\n");
+    expect(logs).toContain("Qwen/Qwen3.5-2B");
+    expect(logs).toContain("ready");
+    expect(logs).toContain("NVIDIA GB10");
+  });
+
   it("keeps process completion distinct from a failed regression gate", () => {
     renderLocalOutput(payload({
       args: ["run"],

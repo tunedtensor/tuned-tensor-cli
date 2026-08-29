@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createProgram } from "../cli.js";
@@ -261,5 +261,56 @@ describe("pipeline commands", () => {
     const program = createProgram("test");
     program.exitOverride();
     await expect(program.parseAsync(["node", "tt", "pipeline", "run"])).rejects.toBeDefined();
+  });
+
+  it("attaches host_warnings from a cached hardware snapshot", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tt-pipeline-host-"));
+    const home = join(dir, "home");
+    mkdirSync(join(home, ".tuned-tensor"), { recursive: true });
+    writeFileSync(join(home, ".tuned-tensor", "hardware.json"), JSON.stringify({
+      version: 1,
+      collected_at: new Date().toISOString(),
+      quick: true,
+      inventory: { collected_at: new Date().toISOString(), quick: true },
+      capabilities: {
+        cuda_available: false,
+        adapters: [{
+          id: "Qwen/Qwen3.5-2B",
+          train: { status: "not_possible", reason: "LoRA training requires CUDA" },
+          finetune: { status: "not_possible", reason: "LoRA training requires CUDA" },
+          inference: { status: "ready", reason: "CPU inference" },
+        }],
+        foundation: {
+          train: { status: "not_possible", reason: "CUDA required" },
+          finetune: { status: "not_possible", reason: "CUDA required" },
+        },
+      },
+      summary: "CUDA no",
+    }));
+    const file = join(dir, "pipeline.json");
+    const spec = join(dir, "tunedtensor.json");
+    writeFileSync(spec, JSON.stringify({
+      name: "Support",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Classify.",
+      examples: [{ input: "a", output: "b" }],
+    }));
+    const previousHome = process.env.TUNED_TENSOR_HOME;
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      process.env.TUNED_TENSOR_HOME = join(home, ".tuned-tensor");
+      const program = createProgram("test");
+      program.exitOverride();
+      await program.parseAsync(["node", "tt", "pipeline", "init", "--file", file]);
+      await program.parseAsync(["node", "tt", "--json", "pipeline", "plan", "--file", file, "--spec", spec]);
+      const output = JSON.parse(log.mock.calls.at(-1)?.[0] as string);
+      expect(output.host_warnings?.some((warning: string) => /Qwen\/Qwen3.5-2B train is not_possible/i.test(warning))).toBe(true);
+    } finally {
+      if (previousHome === undefined) delete process.env.TUNED_TENSOR_HOME;
+      else process.env.TUNED_TENSOR_HOME = previousHome;
+      rmSync(dir, { recursive: true, force: true });
+    }
+    expect(warn).toBeDefined();
   });
 });

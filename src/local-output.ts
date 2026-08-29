@@ -368,11 +368,63 @@ function renderServePlan(value: Record<string, unknown>): void {
   ]);
 }
 
+function renderHardware(value: Record<string, unknown>): void {
+  const capabilities = record(value.capabilities);
+  const gpu = record(capabilities?.gpu) ?? record(record(value.inventory)?.gpus);
+  const inventory = record(value.inventory);
+  const python = record(inventory?.python);
+  printSuccess(text(value.summary) ?? "Host inventory collected");
+  printDetail([
+    ["GPU", text(gpu?.name) ?? "none"],
+    ["GPU memory", displayBytes(gpu?.memory_total_bytes)],
+    ["CUDA", text(capabilities?.cuda_available) ?? "unknown"],
+    ["Node", text(record(inventory?.node)?.version)],
+    ["uv", text(record(inventory?.uv)?.version) ?? text(record(inventory?.uv)?.message)],
+    ["Torch", text(python?.torch)],
+    ["Probe", value.quick === true ? "quick" : "full"],
+  ]);
+  const adapters = rows(capabilities?.adapters);
+  const foundation = record(capabilities?.foundation);
+  const foundationRow = foundation
+    ? [[
+      `foundation (depth ${text(foundation.default_depth) ?? "2"}; max ${text(foundation.suggested_max_depth) ?? "—"})`,
+      text(record(foundation.train)?.status) ?? "—",
+      text(record(foundation.finetune)?.status) ?? "—",
+      text(record(foundation.inference)?.status) ?? "—",
+    ]]
+    : [];
+  printTable(
+    ["Target", "Train", "Fine-tune", "Inference"],
+    [
+      ...adapters.map((adapter) => [
+        text(adapter.id) ?? "unknown",
+        text(record(adapter.train)?.status) ?? "—",
+        text(record(adapter.finetune)?.status) ?? "—",
+        text(record(adapter.inference)?.status) ?? "—",
+      ]),
+      ...foundationRow,
+    ],
+  );
+  if (foundation) {
+    printDetail([
+      ["Foundation serve", text(record(foundation.serve)?.reason) ?? "cannot host yet"],
+    ]);
+  }
+  const notes = Array.isArray(capabilities?.notes)
+    ? capabilities.notes.filter((note): note is string => typeof note === "string")
+    : [];
+  for (const note of notes) printWarning(note);
+}
+
 function renderKnownJson(args: string[], value: unknown): boolean {
   const command = args[0];
   const subcommand = args[1];
   if (command === "doctor" && isRecord(value)) {
     renderDoctor(value);
+    return true;
+  }
+  if (command === "hardware" && isRecord(value)) {
+    renderHardware(value);
     return true;
   }
   if (command === "init" && isRecord(value)) {

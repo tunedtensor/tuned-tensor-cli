@@ -6,6 +6,11 @@ import {
   expandUserPath,
   getConfigDir,
 } from "./paths.js";
+import {
+  formatHostStatusLine,
+  readHardwareSnapshot,
+  type LoadedHardwareSnapshot,
+} from "./local-runtime/hardware-snapshot.js";
 import { hardenExistingLocalStore } from "./local-runtime/store.js";
 
 export type TargetSource = "default-local";
@@ -40,12 +45,22 @@ export interface ShellAgentContext {
   thinking?: string;
 }
 
+export interface ShellHostContext {
+  collectedAt: string;
+  stale: boolean;
+  summary: string;
+  line: string;
+  cuda?: boolean;
+  gpuName?: string;
+}
+
 export interface ShellContext {
   cwd: string;
   projectName: string;
   spec?: ShellSpecContext;
   local: ShellLocalContext;
   agent?: ShellAgentContext;
+  host?: ShellHostContext;
   warnings: string[];
 }
 
@@ -179,6 +194,18 @@ async function readLatestRun(storeRoot: string): Promise<ShellLatestRun | undefi
  * the host, or creating project/store directories. Existing local-store
  * permissions are repaired before its state is read.
  */
+function hostFromSnapshot(snapshot: LoadedHardwareSnapshot | undefined): ShellHostContext | undefined {
+  if (!snapshot) return undefined;
+  return {
+    collectedAt: snapshot.collected_at,
+    stale: snapshot.stale,
+    summary: snapshot.summary,
+    line: formatHostStatusLine(snapshot),
+    cuda: snapshot.capabilities.cuda_available,
+    gpuName: snapshot.capabilities.gpu?.name,
+  };
+}
+
 export async function discoverShellContext(
   options: DiscoverShellContextOptions = {},
 ): Promise<ShellContext> {
@@ -235,9 +262,10 @@ export async function discoverShellContext(
   const agent = agentSelectionFrom(env, storedConfigJson.value?.agent);
 
   await hardenExistingLocalStore(storeRoot);
-  const [activeModelId, latestRun] = await Promise.all([
+  const [activeModelId, latestRun, hardware] = await Promise.all([
     readActiveModelId(storeRoot),
     readLatestRun(storeRoot),
+    readHardwareSnapshot(env),
   ]);
 
   return {
@@ -252,6 +280,7 @@ export async function discoverShellContext(
       latestRun,
     },
     agent,
+    host: hostFromSnapshot(hardware),
     warnings,
   };
 }
@@ -284,6 +313,7 @@ export function formatShellContext(context: ShellContext): string[] {
     `Local config   ${context.local.configPath ?? "not found"}`,
     `Artifact root  ${context.local.artifactRoot}`,
     `Store root     ${context.local.storeRoot}`,
+    `Host           ${context.host?.line ?? "not inventoried (run tt hardware)"}`,
   ];
   for (const warning of context.warnings) lines.push(`Warning        ${warning}`);
   return lines;
@@ -298,6 +328,6 @@ export function formatShellStatus(context: ShellContext): string[] {
     `Latest run     ${context.local.latestRun
       ? `${context.local.latestRun.id} (${context.local.latestRun.status ?? "unknown"})`
       : "none"}`,
-    "Host checks    not run (use doctor)",
+    `Host           ${context.host?.line ?? "not inventoried (run tt hardware)"}`,
   ];
 }

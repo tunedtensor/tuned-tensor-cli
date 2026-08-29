@@ -240,14 +240,17 @@ Create a local project on an NVIDIA host:
 
 ```bash
 mkdir support-adapter && cd support-adapter
+tt hardware
 tt init \
   --name "Support Adapter" \
   --model Qwen/Qwen3.5-2B \
   --profile spark
 ```
 
-Edit the generated `tunedtensor.json`, replacing both placeholder examples,
-then preflight and run:
+`tt hardware` reports which certified models this GPU can train, LoRA
+fine-tune, or serve. The shell agent can run the same inventory via its
+`examine_hardware` tool. Edit the generated `tunedtensor.json`, replacing both
+placeholder examples, then preflight and run:
 
 ```bash
 tt doctor tunedtensor.json

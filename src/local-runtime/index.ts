@@ -15,6 +15,7 @@ import {
   validateLocalFineTuneInput,
 } from "./orchestrator.js";
 import { runDoctor } from "./doctor.js";
+import { assessHardware } from "./hardware.js";
 import { assertUsableModelArtifact, defaultBaseModelRevision } from "./model-registry.js";
 import {
   buildLocalBaseModelServerLaunch,
@@ -94,6 +95,7 @@ Commands:
   info                              Show package and runner information
   init [--name "My Local Model"] [--model Qwen/Qwen3.5-2B] [--output tunedtensor.json] [--profile spark] [--force]
   doctor [tunedtensor.json] [--config local-runner.json]
+  hardware [--config local-runner.json] [--quick]
   validate [tunedtensor.json] [--config local-runner.json]
   run [tunedtensor.json] [--config local-runner.json] [--dry-run] [--verbose] [--quiet]
   serve <model-id|active|base> [--config local-runner.json] [--host 127.0.0.1] [--port 8000]
@@ -184,6 +186,15 @@ const COMMAND_DEFINITIONS: Record<string, CliCommandDefinition> = {
     description: "Check the host and optional run input before starting work.",
     options: [CONFIG_OPTION],
     maxPositionals: 1,
+  },
+  hardware: {
+    usage: "tt hardware [--config path] [--quick]",
+    description: "Inventory this host and report what TT can train, fine-tune, or infer.",
+    options: [
+      CONFIG_OPTION,
+      { name: "--quick", description: "Skip the bundled torch/uv runtime probe" },
+    ],
+    maxPositionals: 0,
   },
   validate: {
     usage: "tt validate [tunedtensor.json] [options]",
@@ -926,7 +937,29 @@ async function main(argv: string[]): Promise<void> {
       config_path: configSelection.path ?? null,
       checks,
     });
+    try {
+      await assessHardware({
+        config: configSelection.config,
+        quick: true,
+      });
+    } catch {
+      // Status/context still work without a snapshot; doctor remains the gate.
+      // A quick write fills an empty cache and will not replace a fresh full probe.
+    }
     if (!ok) process.exitCode = 1;
+    return;
+  }
+
+  if (command === "hardware") {
+    const configSelection = await configSelectionFromArgv(argv);
+    const report = await assessHardware({
+      config: configSelection.config,
+      quick: hasFlag(argv, "--quick"),
+    });
+    printJson({
+      ...report,
+      config_path: configSelection.path ?? null,
+    });
     return;
   }
 
