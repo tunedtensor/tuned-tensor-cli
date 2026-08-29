@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.13.1-beta.5] - 2026-08-29
+
 ### Added
 
 - `tt hardware` inventories this machine (CPU, RAM, disk, NVIDIA GPU, and
