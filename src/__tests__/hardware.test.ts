@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { evaluateCapabilities, warningsFromSnapshot } from "../local-runtime/capability.js";
 import { gib } from "../local-runtime/capability-profiles.js";
-import type { HostInventory } from "../local-runtime/host-inventory.js";
+import {
+  parseNvidiaGpus,
+  parseNvidiaTableGpus,
+  type HostInventory,
+} from "../local-runtime/host-inventory.js";
 import { formatHostStatusLine } from "../local-runtime/hardware-snapshot.js";
 
 function inventory(overrides: Partial<HostInventory> = {}): HostInventory {
@@ -93,5 +97,51 @@ describe("hardware capability verdicts", () => {
 
   it("formats a missing snapshot as a status hint", () => {
     expect(formatHostStatusLine(undefined)).toContain("tt hardware");
+  });
+
+  it("marks train impossible when the bundled Python probe failed", () => {
+    const report = evaluateCapabilities(inventory({
+      nvidia_smi: { ok: true, message: "RTX 4090" },
+      gpus: [{
+        index: 0,
+        name: "NVIDIA GeForce RTX 4090",
+        memory_total_bytes: gib(24),
+        unified_memory: false,
+      }],
+      python: { ok: false, message: "uv failed to import torch" },
+    }));
+    const qwen = report.adapters.find((item) => item.id === "Qwen/Qwen3.5-2B")!;
+    expect(qwen.train.status).toBe("not_possible");
+    expect(qwen.train.reason).toMatch(/torch/i);
+    expect(qwen.finetune.status).toBe("not_possible");
+    expect(report.foundation.train.status).toBe("not_possible");
+    expect(qwen.inference.status).toBe("ready");
+  });
+});
+
+describe("nvidia-smi parsers", () => {
+  it("reads index CSV without compute_cap and name-only CSV", () => {
+    expect(parseNvidiaGpus("0, NVIDIA GB10, 580.00, 131072, 120000\n")).toMatchObject([{
+      index: 0,
+      name: "NVIDIA GB10",
+      memory_total_bytes: 131072 * 1024 * 1024,
+      unified_memory: true,
+    }]);
+    expect(parseNvidiaGpus("NVIDIA GeForce RTX 4090, 560.00, 24576, 20000\n")).toMatchObject([{
+      name: "NVIDIA GeForce RTX 4090",
+      memory_total_bytes: 24576 * 1024 * 1024,
+    }]);
+  });
+
+  it("does not treat the weekday nvidia-smi header as a GPU", () => {
+    const table = [
+      "Sat Aug 29 15:30:00 2026",
+      "+-----------------------------------------------------------------------------------------+",
+      "| NVIDIA-SMI 570.86.16              Driver Version: 570.86.16      CUDA Version: 12.8     |",
+      "|   0  NVIDIA GB10                     On  |   00000000:01:00.0 Off |                  N/A |",
+    ].join("\n");
+    expect(parseNvidiaGpus(table)).toEqual([]);
+    expect(parseNvidiaTableGpus(table)).toMatchObject([{ index: 0, name: "NVIDIA GB10" }]);
+    expect(parseNvidiaTableGpus(table)[0]?.name).not.toMatch(/Sat|Aug/);
   });
 });

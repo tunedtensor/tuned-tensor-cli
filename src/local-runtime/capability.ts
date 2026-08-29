@@ -86,6 +86,7 @@ function trainingBlockers(inventory: HostInventory): string[] {
   const blockers: string[] = [];
   if (!inventory.node.ok) blockers.push(`Node ${inventory.node.version} is below 22`);
   if (inventory.uv && !inventory.uv.ok) blockers.push(inventory.uv.message);
+  if (inventory.python && !inventory.python.ok) blockers.push(inventory.python.message);
   return blockers;
 }
 

@@ -169,27 +169,83 @@ function parseMiB(value: string | undefined): number | undefined {
   return Math.round(parsed * 1024 * 1024);
 }
 
-function parseNvidiaGpus(stdout: string): HostGpu[] {
+function isNvidiaSmiDecorativeLine(line: string): boolean {
+  return /^(?:mon|tue|wed|thu|fri|sat|sun)\b/i.test(line)
+    || line.startsWith("+---")
+    || line.startsWith("|");
+}
+
+function gpuFromName(name: string, index: number, extras: Partial<HostGpu> = {}): HostGpu {
+  return {
+    index,
+    name,
+    unified_memory: /spark|gb10/i.test(name),
+    ...extras,
+  };
+}
+
+/**
+ * Parse `nvidia-smi --query-gpu=... --format=csv` rows.
+ * Supports `index,name,...` and `name,driver,...` (no unused compute_cap field).
+ */
+export function parseNvidiaGpus(stdout: string): HostGpu[] {
   const gpus: HostGpu[] = [];
   for (const line of stdout.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)) {
-    if (/^(?:mon|tue|wed|thu|fri|sat|sun)\b/i.test(line) || line.startsWith("+---") || line.startsWith("|")) {
+    if (isNvidiaSmiDecorativeLine(line)) continue;
+    const parts = line.split(",").map((part) => part.trim());
+    if (parts[0] && /^\d+$/.test(parts[0]) && parts.length >= 2) {
+      const name = parts[1] || "NVIDIA GPU";
+      gpus.push(gpuFromName(name, Number(parts[0]), {
+        driver_version: parts[2] || undefined,
+        memory_total_bytes: parseMiB(parts[3]),
+        memory_free_bytes: parseMiB(parts[4]),
+        compute_cap: parts[5] || undefined,
+      }));
       continue;
     }
-    const parts = line.split(",").map((part) => part.trim());
-    if (parts.length < 2) continue;
-    const index = Number(parts[0]);
-    const name = parts[1] ?? "NVIDIA GPU";
-    gpus.push({
-      index: Number.isFinite(index) ? index : gpus.length,
-      name,
-      driver_version: parts[2] || undefined,
-      memory_total_bytes: parseMiB(parts[3]),
-      memory_free_bytes: parseMiB(parts[4]),
-      compute_cap: parts[5] || undefined,
-      unified_memory: /spark|gb10/i.test(name),
-    });
+    if (parts.length >= 2 && parts[0] && !/^(?:NVIDIA-SMI|Fail|Error)/i.test(parts[0])) {
+      const name = parts[0];
+      gpus.push(gpuFromName(name, gpus.length, {
+        driver_version: parts[1] || undefined,
+        memory_total_bytes: parseMiB(parts[2]),
+        memory_free_bytes: parseMiB(parts[3]),
+      }));
+    }
   }
   return gpus;
+}
+
+/** Parse default `nvidia-smi` process-table rows; skip the weekday timestamp header. */
+export function parseNvidiaTableGpus(stdout: string): HostGpu[] {
+  const gpus: HostGpu[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const match = line.match(/^\|\s+(\d+)\s+(.+?)\s+(?:On|Off|N\/A)\s+\|/);
+    if (!match) continue;
+    const name = (match[2] ?? "").trim();
+    if (!name || /^NVIDIA-SMI/i.test(name)) continue;
+    gpus.push(gpuFromName(name, Number(match[1])));
+  }
+  return gpus;
+}
+
+const NVIDIA_CSV_QUERIES: string[][] = [
+  ["--query-gpu=index,name,driver_version,memory.total,memory.free", "--format=csv,noheader,nounits"],
+  ["--query-gpu=name,driver_version,memory.total,memory.free", "--format=csv,noheader,nounits"],
+  ["--query-gpu=name,driver_version", "--format=csv,noheader"],
+];
+
+async function queryNvidiaGpus(env: NodeJS.ProcessEnv): Promise<{ result: CommandResult; gpus: HostGpu[] }> {
+  let last: CommandResult | undefined;
+  for (const args of NVIDIA_CSV_QUERIES) {
+    const result = await runCommand("nvidia-smi", args, { env, timeoutMs: 10_000 });
+    last = result;
+    if (result.code !== 0) continue;
+    const gpus = parseNvidiaGpus(result.stdout);
+    if (gpus.length > 0) return { result, gpus };
+  }
+  const table = await runCommand("nvidia-smi", [], { env, timeoutMs: 10_000 });
+  const gpus = table.code === 0 ? parseNvidiaTableGpus(table.stdout) : [];
+  return { result: table.code === 0 || !last ? table : last, gpus };
 }
 
 async function diskCheck(name: string, path: string): Promise<HostDisk> {
@@ -318,32 +374,11 @@ export async function collectHostInventory(
     diskCheck("store-root", storeRoot),
     diskCheck("model-cache", modelCache),
     runCommand("uv", ["--version"], { env, timeoutMs: 10_000 }),
-    runCommand("nvidia-smi", [
-      "--query-gpu=index,name,driver_version,memory.total,memory.free,compute_cap",
-      "--format=csv,noheader,nounits",
-    ], { env, timeoutMs: 10_000 }),
+    queryNvidiaGpus(env),
   ]);
 
-  let nvidia = nvidiaQueried;
-  let gpus = nvidiaQueried.code === 0 ? parseNvidiaGpus(nvidiaQueried.stdout) : [];
-  if (nvidiaQueried.code !== 0 || gpus.length === 0) {
-    const fallback = await runCommand("nvidia-smi", [], { env, timeoutMs: 10_000 });
-    if (fallback.code === 0) {
-      nvidia = fallback;
-      if (gpus.length === 0) {
-        const nameLine = firstLine(fallback.stdout);
-        if (nameLine) {
-          gpus = [{
-            index: 0,
-            name: nameLine,
-            unified_memory: /spark|gb10/i.test(nameLine),
-          }];
-        }
-      }
-    } else if (nvidiaQueried.code !== 0) {
-      nvidia = fallback;
-    }
-  }
+  const nvidia = nvidiaQueried.result;
+  const gpus = nvidiaQueried.gpus;
 
   const inventory: HostInventory = {
     collected_at: new Date().toISOString(),

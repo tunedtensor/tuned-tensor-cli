@@ -186,7 +186,10 @@ exit 0
         "hw-1",
         { quick: true },
       );
-      expect(tool("examine_hardware", fakeApi()).description).toMatch(/examine.*hardware|GPU|VRAM/i);
+      const description = tool("examine_hardware", fakeApi()).description;
+      expect(description).toMatch(/examine.*hardware|GPU|VRAM/i);
+      expect(description).toMatch(/Equivalent to `tt hardware`/);
+      expect(description).not.toMatch(/Defaults to a quick/);
       expect(output.details).toMatchObject({
         quick: true,
         capabilities: {
@@ -194,6 +197,46 @@ exit 0
         },
       });
       expect(existsSync(join(root, "home", "hardware.json"))).toBe(true);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousHome === undefined) delete process.env.TUNED_TENSOR_HOME;
+      else process.env.TUNED_TENSOR_HOME = previousHome;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("examine_hardware defaults to a full probe like tt hardware", async () => {
+    const root = mkdtempSync(join(tmpdir(), "tt-examine-hardware-full-"));
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "uv"), `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "uv 0.test"
+  exit 0
+fi
+echo "torch missing" >&2
+exit 1
+`);
+    writeFileSync(join(bin, "nvidia-smi"), `#!/bin/sh
+if echo "$*" | grep -q query-gpu; then
+  echo "0, NVIDIA GeForce RTX 4090, 560.00, 24576, 20000"
+  exit 0
+fi
+exit 1
+`);
+    chmodSync(join(bin, "uv"), 0o755);
+    chmodSync(join(bin, "nvidia-smi"), 0o755);
+    const previousPath = process.env.PATH;
+    const previousHome = process.env.TUNED_TENSOR_HOME;
+    try {
+      process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`;
+      process.env.TUNED_TENSOR_HOME = join(root, "home");
+      const output = await tool("examine_hardware", fakeApi(), root).execute("hw-full", {});
+      expect(output.details).toMatchObject({
+        quick: false,
+        inventory: { python: { ok: false } },
+      });
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;

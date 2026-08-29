@@ -944,6 +944,7 @@ async function main(argv: string[]): Promise<void> {
       });
     } catch {
       // Status/context still work without a snapshot; doctor remains the gate.
+      // A quick write fills an empty cache and will not replace a fresh full probe.
     }
     if (!ok) process.exitCode = 1;
     return;

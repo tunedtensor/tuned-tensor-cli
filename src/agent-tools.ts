@@ -406,13 +406,13 @@ export function createTunedTensorTools(
     define(
       "examine_hardware",
       "Examine hardware",
-      "Examine this machine's CPU, RAM, disk, NVIDIA GPU, and bundled Python/CUDA stack, then report what Tuned Tensor can train, LoRA fine-tune, or infer. Call this when the user asks to inspect, examine, or check the system, hardware, GPU, VRAM, CUDA, or what model / pipeline / foundation depth this host can run. Equivalent to `tt hardware`. Does not start training. Defaults to a quick probe (`nvidia-smi` + Node); set `full: true` only if the user wants the bundled torch/uv runtime check.",
+      "Examine this machine's CPU, RAM, disk, NVIDIA GPU, and bundled Python/CUDA stack, then report what Tuned Tensor can train, LoRA fine-tune, or infer. Call this when the user asks to inspect, examine, or check the system, hardware, GPU, VRAM, CUDA, or what model / pipeline / foundation depth this host can run. Equivalent to `tt hardware` (full torch/uv probe). Does not start training. Set `quick: true` to skip the bundled runtime (`nvidia-smi` + Node only).",
       Type.Object({
         full: Type.Optional(Type.Boolean()),
         quick: Type.Optional(Type.Boolean()),
       }, { additionalProperties: false }),
       async (p) => {
-        const quick = p.full === true ? false : p.quick !== false;
+        const quick = p.full === true ? false : p.quick === true;
         return await assessHardware({
           quick,
           cwd: options.workspaceRoot,
