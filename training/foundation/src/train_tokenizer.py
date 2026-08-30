@@ -6,6 +6,7 @@ from data import (
     corpus_hash,
     corpus_manifest,
     example_pairs,
+    instruction_corpus_documents,
     iter_corpus_documents,
     smoke_corpus,
     train_tokenizer,
@@ -20,9 +21,17 @@ def main(argv: list[str] | None = None) -> None:
     corpus_path = config.get("corpus_path")
     if corpus_path:
         manifest_before = corpus_manifest(corpus_path)
-        corpus_sha256, corpus_chars = corpus_documents_hash(iter_corpus_documents(corpus_path, max_chars))
+        system_prompt = str(config.get("system_prompt") or "")
+
+        def documents():
+            return instruction_corpus_documents(
+                system_prompt,
+                iter_corpus_documents(corpus_path, max_chars),
+            )
+
+        corpus_sha256, corpus_chars = corpus_documents_hash(documents())
         tokenizer = train_tokenizer(
-            iter_corpus_documents(corpus_path, max_chars),
+            documents(),
             int(config.get("vocab_size") or 256),
         )
         if corpus_manifest(corpus_path) != manifest_before:

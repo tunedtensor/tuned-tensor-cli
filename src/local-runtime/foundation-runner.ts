@@ -48,6 +48,8 @@ interface ProducedArtifacts {
   report?: string;
 }
 
+const INSTRUCTION_CORPUS_VERSION = 1;
+
 function isRef(value: unknown): value is { from: string } {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
     && typeof (value as { from?: unknown }).from === "string";
@@ -60,9 +62,11 @@ function resumeConfigMatches(
 ): boolean {
   if (JSON.stringify(previous) === JSON.stringify(current)) return true;
   if (!previous || typeof previous !== "object" || Array.isArray(previous)) return false;
+  const legacyInstruction = legacySystemPrompt.trim();
+  if (!legacyInstruction || current.system_prompt !== legacyInstruction) return false;
   const migrated = { ...(previous as Record<string, unknown>) };
   if (migrated.system_prompt !== legacySystemPrompt) return false;
-  migrated.system_prompt = current.system_prompt;
+  migrated.system_prompt = legacyInstruction;
   return JSON.stringify(migrated) === JSON.stringify(current);
 }
 
@@ -324,6 +328,7 @@ export async function runFoundationPipeline(args: {
         vocab_size: fields.vocabSize ?? hp.vocab_size,
         max_chars: hp.tokenizer_max_chars ?? fields.maxChars ?? hp.max_chars,
         corpus_path: hp.corpus_path,
+        ...(hp.corpus_path ? { instruction_corpus_version: INSTRUCTION_CORPUS_VERSION } : {}),
         system_prompt: systemInstruction,
         examples,
       };
@@ -341,6 +346,7 @@ export async function runFoundationPipeline(args: {
         nproc_per_node: fields.nprocPerNode ?? hp.nproc_per_node,
         max_chars: hp.max_chars,
         corpus_path: hp.corpus_path,
+        ...(hp.corpus_path ? { instruction_corpus_version: INSTRUCTION_CORPUS_VERSION } : {}),
         seed: hp.seed,
         learning_rate: hp.learning_rate,
         weight_decay: hp.weight_decay,

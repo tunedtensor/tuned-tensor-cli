@@ -105,6 +105,13 @@ def iter_corpus_documents(path: str | Path, max_chars: int | None = None) -> Ite
                     yield text
 
 
+def instruction_corpus_documents(system_prompt: str, documents: Iterable[str]) -> Iterator[str]:
+    instruction = system_prompt.strip()
+    if instruction:
+        yield instruction
+    yield from documents
+
+
 def corpus_documents_hash(documents: Iterable[str]) -> tuple[str, int]:
     digest = hashlib.sha256()
     chars = 0
@@ -214,9 +221,18 @@ def encode_sft_example(
     full_ids = encode_ids(tokenizer, format_chat(system_prompt, user, assistant))
     model_tokens = sequence_length + 1
     if len(full_ids) > model_tokens:
-        prefix_ids = encode_prompt_ids(tokenizer, system_prompt, user, model_tokens - 1)
         assistant_ids = encode_ids(tokenizer, f"{assistant}{END}")
-        full_ids = prefix_ids + assistant_ids[:model_tokens - len(prefix_ids)]
+        reserved_assistant_tokens = min(2, len(assistant_ids))
+        prefix_ids = encode_prompt_ids(
+            tokenizer,
+            system_prompt,
+            user,
+            model_tokens - reserved_assistant_tokens,
+        )
+        assistant_budget = model_tokens - len(prefix_ids)
+        if len(assistant_ids) > assistant_budget:
+            assistant_ids = assistant_ids[:assistant_budget - 1] + assistant_ids[-1:]
+        full_ids = prefix_ids + assistant_ids
     input_ids = pad_or_trim(full_ids[:-1], sequence_length, pad_id)
     target_ids = full_ids[1:]
     first_assistant_target = max(0, min(len(prefix_ids) - 1, len(target_ids)))

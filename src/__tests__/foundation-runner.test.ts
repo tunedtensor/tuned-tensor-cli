@@ -402,21 +402,33 @@ describe("foundation pipeline runner", () => {
     expect(resumedCalls).toEqual(["pretrain.py"]);
   });
 
-  it("resumes completed beta.6 stages that persisted the raw system prompt", async () => {
+  it("resumes completed beta.6 stages with a semantically identical raw system prompt", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tt-foundation-legacy-resume-"));
     dirs.push(dir);
     const specPath = join(dir, "tunedtensor.json");
     const outputDir = join(dir, "run");
+    const legacyCompatibleSpec: LocalFoundationSpecFile = {
+      ...spec,
+      system_prompt: "  Answer briefly.  ",
+      guidelines: [],
+      constraints: [],
+    };
     const plan = createExecutionPlan(
-      pipelineFromFoundationHyperparameters(spec.name, spec.foundation),
+      pipelineFromFoundationHyperparameters(legacyCompatibleSpec.name, legacyCompatibleSpec.foundation),
       { only: ["tokenize"] },
     );
-    await runFoundationPipeline({ spec, plan, specPath, outputDir, spawnStep: mockSpawn });
+    await runFoundationPipeline({
+      spec: legacyCompatibleSpec,
+      plan,
+      specPath,
+      outputDir,
+      spawnStep: mockSpawn,
+    });
 
     const configPath = join(outputDir, "tokenize", "config.json");
     const completionPath = join(outputDir, "tokenize", "completion.json");
     const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
-    config.system_prompt = spec.system_prompt;
+    config.system_prompt = legacyCompatibleSpec.system_prompt;
     const legacyConfig = `${JSON.stringify(config, null, 2)}\n`;
     await writeFile(configPath, legacyConfig);
     const completion = JSON.parse(await readFile(completionPath, "utf8")) as Record<string, unknown>;
@@ -425,7 +437,7 @@ describe("foundation pipeline runner", () => {
 
     let spawned = false;
     await runFoundationPipeline({
-      spec,
+      spec: legacyCompatibleSpec,
       plan,
       specPath,
       outputDir,
@@ -436,6 +448,89 @@ describe("foundation pipeline runner", () => {
     });
 
     expect(spawned).toBe(false);
+  });
+
+  it("rejects beta.6 corpus-backed stages that did not ingest the instruction", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-legacy-corpus-"));
+    dirs.push(dir);
+    const specPath = join(dir, "tunedtensor.json");
+    const outputDir = join(dir, "run");
+    const corpusPath = join(dir, "corpus.txt");
+    await writeFile(corpusPath, "alpha beta gamma");
+    const corpusSpec: LocalFoundationSpecFile = {
+      ...spec,
+      system_prompt: "Answer briefly.",
+      guidelines: [],
+      constraints: [],
+      foundation: {
+        ...spec.foundation,
+        corpus_path: corpusPath,
+      },
+    };
+    const plan = createExecutionPlan(
+      pipelineFromFoundationHyperparameters(corpusSpec.name, corpusSpec.foundation),
+      { only: ["tokenize"] },
+    );
+    await runFoundationPipeline({ spec: corpusSpec, plan, specPath, outputDir, spawnStep: mockSpawn });
+
+    const configPath = join(outputDir, "tokenize", "config.json");
+    const completionPath = join(outputDir, "tokenize", "completion.json");
+    const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
+    delete config.instruction_corpus_version;
+    config.system_prompt = corpusSpec.system_prompt;
+    const legacyConfig = `${JSON.stringify(config, null, 2)}\n`;
+    await writeFile(configPath, legacyConfig);
+    const completion = JSON.parse(await readFile(completionPath, "utf8")) as Record<string, unknown>;
+    completion.config_sha256 = createHash("sha256").update(legacyConfig).digest("hex");
+    await writeFile(completionPath, `${JSON.stringify(completion, null, 2)}\n`);
+
+    await expect(runFoundationPipeline({
+      spec: corpusSpec,
+      plan,
+      specPath,
+      outputDir,
+      resume: true,
+      spawnStep: mockSpawn,
+    })).rejects.toThrow(/configuration changed/i);
+  });
+
+  it("rejects beta.6 resume when legacy stages ignored current instruction lists", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-legacy-drift-"));
+    dirs.push(dir);
+    const specPath = join(dir, "tunedtensor.json");
+    const outputDir = join(dir, "run");
+    const legacySpec: LocalFoundationSpecFile = {
+      ...spec,
+      guidelines: [],
+      constraints: [],
+    };
+    const plan = createExecutionPlan(
+      pipelineFromFoundationHyperparameters(legacySpec.name, legacySpec.foundation),
+      { only: ["tokenize"] },
+    );
+    await runFoundationPipeline({ spec: legacySpec, plan, specPath, outputDir, spawnStep: mockSpawn });
+
+    const configPath = join(outputDir, "tokenize", "config.json");
+    const completionPath = join(outputDir, "tokenize", "completion.json");
+    const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
+    config.system_prompt = legacySpec.system_prompt;
+    const legacyConfig = `${JSON.stringify(config, null, 2)}\n`;
+    await writeFile(configPath, legacyConfig);
+    const completion = JSON.parse(await readFile(completionPath, "utf8")) as Record<string, unknown>;
+    completion.config_sha256 = createHash("sha256").update(legacyConfig).digest("hex");
+    await writeFile(completionPath, `${JSON.stringify(completion, null, 2)}\n`);
+
+    await expect(runFoundationPipeline({
+      spec: {
+        ...legacySpec,
+        guidelines: ["This instruction was never used by the legacy stage."],
+      },
+      plan,
+      specPath,
+      outputDir,
+      resume: true,
+      spawnStep: mockSpawn,
+    })).rejects.toThrow(/configuration changed/i);
   });
 
   it("reruns downstream stages after an earlier completion manifest is missing", async () => {

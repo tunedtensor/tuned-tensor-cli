@@ -13,12 +13,18 @@
 ### Fixed
 
 - Foundation stages no longer discard spec guidelines and constraints when
-  constructing their training and evaluation configuration.
+  constructing their training and evaluation configuration. Corpus-backed
+  tokenizer and pretraining inputs include the compiled instruction, and token
+  cache identity changes with it.
+- Foundation SFT overflow keeps at least one answer target plus the terminal
+  `END` target while preserving the compiled instruction.
 - Foundation generation preserves the compiled instruction when user input
   exceeds the model context, and fails clearly when the instruction itself
   cannot fit.
-- Runs created by beta.6 with raw per-stage prompts remain resumable after the
-  shared instruction compiler is enabled.
+- Runs created by beta.6 remain resumable when their raw non-empty system
+  prompt is semantically identical and the legacy stage consumed it. Recovery
+  fails closed for corpus-backed tokenizer/pretraining stages and for stages
+  that ignored current guidelines or constraints.
 
 ## [0.13.1-beta.6] - 2026-08-30
 
