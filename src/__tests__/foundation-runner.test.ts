@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,8 +12,8 @@ const spec: LocalFoundationSpecFile = {
   name: "tiny-gpt",
   description: "",
   system_prompt: "Answer briefly.",
-  guidelines: [],
-  constraints: [],
+  guidelines: ["Give the answer directly."],
+  constraints: ["Do not add commentary."],
   examples: [
     { input: "hello", output: "world" },
     { input: "What is 2 + 2?", output: "4" },
@@ -140,6 +141,34 @@ describe("foundation pipeline runner", () => {
     })).rejects.toThrow(/does not implement compare/i);
     expect(spawned).toBe(false);
     await expect(access(outputDir)).rejects.toThrow();
+  });
+
+  it("compiles the shared spec instruction into every foundation stage", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-instruction-"));
+    dirs.push(dir);
+    const recipe = pipelineFromFoundationHyperparameters(spec.name, spec.foundation);
+    const plan = createExecutionPlan(recipe);
+    const instructions: string[] = [];
+
+    await runFoundationPipeline({
+      spec,
+      plan,
+      specPath: join(dir, "tunedtensor.json"),
+      outputDir: join(dir, "run"),
+      spawnStep: async (args) => {
+        const config = JSON.parse(await readFile(args.configPath, "utf8")) as {
+          system_prompt: string;
+        };
+        instructions.push(config.system_prompt);
+        await mockSpawn(args);
+      },
+    });
+
+    expect(instructions).toHaveLength(plan.steps.length);
+    expect(new Set(instructions)).toEqual(new Set([
+      "Answer briefly.\n\nGuidelines:\n- Give the answer directly."
+      + "\n\nConstraints:\n- Do not add commentary.",
+    ]));
   });
 
   it("rejects validation data nested inside the training corpus before creating run state", async () => {
@@ -371,6 +400,42 @@ describe("foundation pipeline runner", () => {
     });
     expect(result.status).toBe("succeeded");
     expect(resumedCalls).toEqual(["pretrain.py"]);
+  });
+
+  it("resumes completed beta.6 stages that persisted the raw system prompt", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-legacy-resume-"));
+    dirs.push(dir);
+    const specPath = join(dir, "tunedtensor.json");
+    const outputDir = join(dir, "run");
+    const plan = createExecutionPlan(
+      pipelineFromFoundationHyperparameters(spec.name, spec.foundation),
+      { only: ["tokenize"] },
+    );
+    await runFoundationPipeline({ spec, plan, specPath, outputDir, spawnStep: mockSpawn });
+
+    const configPath = join(outputDir, "tokenize", "config.json");
+    const completionPath = join(outputDir, "tokenize", "completion.json");
+    const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
+    config.system_prompt = spec.system_prompt;
+    const legacyConfig = `${JSON.stringify(config, null, 2)}\n`;
+    await writeFile(configPath, legacyConfig);
+    const completion = JSON.parse(await readFile(completionPath, "utf8")) as Record<string, unknown>;
+    completion.config_sha256 = createHash("sha256").update(legacyConfig).digest("hex");
+    await writeFile(completionPath, `${JSON.stringify(completion, null, 2)}\n`);
+
+    let spawned = false;
+    await runFoundationPipeline({
+      spec,
+      plan,
+      specPath,
+      outputDir,
+      resume: true,
+      spawnStep: async () => {
+        spawned = true;
+      },
+    });
+
+    expect(spawned).toBe(false);
   });
 
   it("reruns downstream stages after an earlier completion manifest is missing", async () => {

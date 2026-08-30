@@ -4,6 +4,7 @@ import { chmod, lstat, mkdir, open, readdir, readFile, rename, rm } from "node:f
 import { basename, dirname, join, resolve } from "node:path";
 import { DEFAULT_FOUNDATION_RUNS_DIR } from "../paths.js";
 import type { LocalFoundationSpecFile } from "./contracts.js";
+import { buildSystemMessage } from "./dataset.js";
 import { localPathsOverlap } from "./local-project.js";
 import type { ExecutionPlan } from "../pipeline.js";
 import {
@@ -50,6 +51,19 @@ interface ProducedArtifacts {
 function isRef(value: unknown): value is { from: string } {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
     && typeof (value as { from?: unknown }).from === "string";
+}
+
+function resumeConfigMatches(
+  previous: unknown,
+  current: Record<string, unknown>,
+  legacySystemPrompt: string,
+): boolean {
+  if (JSON.stringify(previous) === JSON.stringify(current)) return true;
+  if (!previous || typeof previous !== "object" || Array.isArray(previous)) return false;
+  const migrated = { ...(previous as Record<string, unknown>) };
+  if (migrated.system_prompt !== legacySystemPrompt) return false;
+  migrated.system_prompt = current.system_prompt;
+  return JSON.stringify(migrated) === JSON.stringify(current);
 }
 
 function parseRef(value: { from: string }): { stepId: string; kind: string } {
@@ -270,6 +284,7 @@ export async function runFoundationPipeline(args: {
   const produced = new Map<string, ProducedArtifacts>();
   const steps: FoundationStepResult[] = [];
   const examples = args.spec.examples.map((example) => ({ input: example.input, output: example.output }));
+  const systemInstruction = buildSystemMessage(args.spec);
   const hp = args.spec.foundation;
   let tokenizerDir: string | undefined;
   let modelDir: string | undefined;
@@ -309,7 +324,7 @@ export async function runFoundationPipeline(args: {
         vocab_size: fields.vocabSize ?? hp.vocab_size,
         max_chars: hp.tokenizer_max_chars ?? fields.maxChars ?? hp.max_chars,
         corpus_path: hp.corpus_path,
-        system_prompt: args.spec.system_prompt,
+        system_prompt: systemInstruction,
         examples,
       };
     } else if (step.uses === "pretrain") {
@@ -340,7 +355,7 @@ export async function runFoundationPipeline(args: {
         log_interval_steps: hp.log_interval_steps,
         checkpoint_backup_dir: hp.checkpoint_backup_dir,
         resume: true,
-        system_prompt: args.spec.system_prompt,
+        system_prompt: systemInstruction,
         examples,
       };
     } else if (step.uses === "finetune") {
@@ -353,7 +368,7 @@ export async function runFoundationPipeline(args: {
         steps: fields.steps ?? hp.finetune_steps,
         batch_size: fields.batchSize ?? hp.batch_size,
         sequence_length: hp.sequence_length,
-        system_prompt: args.spec.system_prompt,
+        system_prompt: systemInstruction,
         examples,
       };
     } else if (step.uses === "rl") {
@@ -364,7 +379,7 @@ export async function runFoundationPipeline(args: {
         tokenizer_dir: tokenizerDir,
         output_dir: output,
         steps: fields.steps ?? hp.rl_steps,
-        system_prompt: args.spec.system_prompt,
+        system_prompt: systemInstruction,
         examples,
       };
     } else if (step.uses === "evaluate") {
@@ -378,7 +393,7 @@ export async function runFoundationPipeline(args: {
         sequence_length: hp.sequence_length,
         max_chars: hp.max_chars,
         validation_path: hp.validation_path,
-        system_prompt: args.spec.system_prompt,
+        system_prompt: systemInstruction,
         examples,
       };
     } else {
@@ -393,7 +408,10 @@ export async function runFoundationPipeline(args: {
     if (args.resume) {
       try {
         const previousConfig = JSON.parse(await readFile(configPath, "utf8")) as unknown;
-        if (JSON.stringify(previousConfig) !== JSON.stringify(config)) {
+        // beta.6 persisted only the raw system_prompt. Accept that exact legacy
+        // shape without rewriting completed state; interrupted stages are
+        // rewritten below with the compiled instruction before they run.
+        if (!resumeConfigMatches(previousConfig, config, args.spec.system_prompt)) {
           throw new Error(
             `Foundation step "${step.id}" configuration changed; resume requires the original spec and pipeline.`,
           );

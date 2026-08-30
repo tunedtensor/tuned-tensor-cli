@@ -26,6 +26,7 @@ from data import (
     IGNORE_INDEX,
     decoded_byte_count,
     encode_ids,
+    encode_prompt_ids,
     encode_sft_example,
     format_chat,
     format_prompt,
@@ -103,7 +104,7 @@ class FoundationModelTests(unittest.TestCase):
 
     def test_generation_stops_when_every_row_emits_the_stop_token(self) -> None:
         class FakeModel:
-            config = {"sequence_length": 8}
+            config = {"sequence_length": 256}
 
             def __init__(self) -> None:
                 self.calls = 0
@@ -128,6 +129,52 @@ class FoundationModelTests(unittest.TestCase):
 
 
 class FoundationEvaluationTests(unittest.TestCase):
+    def test_inference_evaluation_formats_the_shared_system_instruction(self) -> None:
+        encoded: list[str] = []
+
+        class FakeTokenizer:
+            def encode(self, text: str) -> Any:
+                encoded.append(text)
+                return type("Encoding", (), {"ids": list(range(len(text)))})()
+
+        class FakeModel:
+            config = {"sequence_length": 256}
+
+            def eval(self) -> None:
+                return None
+
+            def __call__(self, tokens: torch.Tensor) -> torch.Tensor:
+                logits = torch.zeros(tokens.size(0), tokens.size(1), 8)
+                logits[:, -1, 0] = 1
+                return logits
+
+        evaluate.evaluate_inference(
+            cast(FoundationGPT, FakeModel()),
+            cast(Any, FakeTokenizer()),
+            "Answer briefly.\n\nGuidelines:\n- Be direct.",
+            "hello",
+            torch.device("cpu"),
+        )
+
+        self.assertEqual(
+            encoded[0],
+            format_prompt("Answer briefly.\n\nGuidelines:\n- Be direct.", "hello"),
+        )
+
+    def test_bounded_prompt_preserves_the_instruction_and_trims_user_content(self) -> None:
+        class CharacterTokenizer:
+            def encode(self, text: str) -> Any:
+                return type("Encoding", (), {"ids": [ord(char) for char in text]})()
+
+        tokenizer = cast(Any, CharacterTokenizer())
+        instruction = "Keep this instruction."
+        ids = encode_prompt_ids(tokenizer, instruction, "x" * 200, 80)
+        text = "".join(chr(value) for value in ids)
+
+        self.assertTrue(text.startswith(f"<|system|>{instruction}<|end|><|user|>"))
+        self.assertTrue(text.endswith("<|end|><|assistant|>"))
+        self.assertEqual(len(ids), 80)
+
     def test_chat_evaluation_stops_at_the_tokenizer_end_token(self) -> None:
         class FakeEncoding:
             ids = [1, 2]

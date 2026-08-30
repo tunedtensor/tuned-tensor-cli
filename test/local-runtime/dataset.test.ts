@@ -66,6 +66,14 @@ test("uses one non-empty system prompt when the spec provides no prose", () => {
   );
 });
 
+test("ignores blank instruction list entries", () => {
+  assert.equal(buildSystemMessage({
+    system_prompt: "  ",
+    guidelines: ["", "  "],
+    constraints: ["\t"],
+  }), "Follow the demonstrated behavior.");
+});
+
 test("normalizes and reads text-only prebuilt chat JSONL", async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-dataset-"));
   try {

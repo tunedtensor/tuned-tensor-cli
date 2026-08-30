@@ -141,6 +141,52 @@ def encode_ids(tokenizer: Tokenizer, text: str) -> list[int]:
     return list(tokenizer.encode(text).ids)
 
 
+def encode_prompt_ids(
+    tokenizer: Tokenizer,
+    system_prompt: str,
+    user: str,
+    max_tokens: int,
+) -> list[int]:
+    """Keep the complete spec instruction and trim only user content."""
+    full_ids = encode_ids(tokenizer, format_prompt(system_prompt, user))
+    if len(full_ids) <= max_tokens:
+        return full_ids
+    system = system_prompt.strip() or "You are a helpful assistant."
+    prefix_ids = encode_ids(tokenizer, f"{SYSTEM}{system}{END}{USER}")
+    suffix_ids = encode_ids(tokenizer, f"{END}{ASSISTANT}")
+    if len(prefix_ids) + len(suffix_ids) > max_tokens:
+        raise ValueError(
+            "Compiled spec instruction exceeds the foundation model context; "
+            "increase foundation.sequence_length or shorten the spec instruction."
+        )
+    user_ids = encode_ids(tokenizer, user)
+    user_budget = max_tokens - len(prefix_ids) - len(suffix_ids)
+    retained_user_ids = user_ids[-user_budget:] if user_budget > 0 else []
+    return prefix_ids + retained_user_ids + suffix_ids
+
+
+def encode_generation_prompt(
+    tokenizer: Tokenizer,
+    system_prompt: str,
+    user: str,
+    context_length: int,
+    requested_completion_tokens: int,
+) -> tuple[list[int], int]:
+    """Reserve completion space without rejecting an instruction that can fit."""
+    completion_tokens = min(requested_completion_tokens, max(1, context_length // 2))
+    try:
+        prompt_ids = encode_prompt_ids(
+            tokenizer,
+            system_prompt,
+            user,
+            context_length - completion_tokens,
+        )
+    except ValueError:
+        prompt_ids = encode_prompt_ids(tokenizer, system_prompt, user, context_length - 1)
+        completion_tokens = context_length - len(prompt_ids)
+    return prompt_ids, completion_tokens
+
+
 def decode_ids(tokenizer: Tokenizer, ids: list[int]) -> str:
     return tokenizer.decode(ids, skip_special_tokens=False)
 
@@ -168,9 +214,9 @@ def encode_sft_example(
     full_ids = encode_ids(tokenizer, format_chat(system_prompt, user, assistant))
     model_tokens = sequence_length + 1
     if len(full_ids) > model_tokens:
-        overflow = len(full_ids) - model_tokens
-        prefix_ids = prefix_ids[overflow:] if overflow < len(prefix_ids) else []
-        full_ids = full_ids[-model_tokens:]
+        prefix_ids = encode_prompt_ids(tokenizer, system_prompt, user, model_tokens - 1)
+        assistant_ids = encode_ids(tokenizer, f"{assistant}{END}")
+        full_ids = prefix_ids + assistant_ids[:model_tokens - len(prefix_ids)]
     input_ids = pad_or_trim(full_ids[:-1], sequence_length, pad_id)
     target_ids = full_ids[1:]
     first_assistant_target = max(0, min(len(prefix_ids) - 1, len(target_ids)))

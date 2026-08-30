@@ -17,15 +17,22 @@ export const behaviorSpecExampleSchema = z.object({
   output: z.string().min(1),
 }).strict();
 
-export const specSnapshotSchema = z.object({
+/**
+ * Engine-neutral behavior contract shared by adapter and foundation specs.
+ * Both runtimes must compile these fields into the same model instruction.
+ */
+export const behaviorSpecSchema = z.object({
   name: z.string().min(1),
   description: z.string().default(""),
   system_prompt: z.string().default(""),
   guidelines: z.array(z.string()).default([]),
   examples: z.array(behaviorSpecExampleSchema).default([]),
   constraints: z.array(z.string()).default([]),
-  base_model: z.string().transform((value) => canonicalizeTrainingModel(value)),
 }).strict();
+
+export const specSnapshotSchema = behaviorSpecSchema.extend({
+  base_model: z.string().transform((value) => canonicalizeTrainingModel(value)),
+});
 
 export const foundationHyperparametersSchema = z.object({
   vocab_size: z.number().int().min(64).max(65_536).default(256),
@@ -55,17 +62,12 @@ export const foundationHyperparametersSchema = z.object({
   log_interval_steps: z.number().int().min(1).max(1_000_000).optional(),
 }).strict();
 
-export const localFoundationSpecFileSchema = z.object({
+export const localFoundationSpecFileSchema = behaviorSpecSchema.extend({
   engine: z.literal("foundation"),
   id: z.string().uuid().optional(),
-  name: z.string().min(1),
-  description: z.string().default(""),
-  system_prompt: z.string().default(""),
-  guidelines: z.array(z.string()).default([]),
   examples: z.array(behaviorSpecExampleSchema).min(2),
-  constraints: z.array(z.string()).default([]),
   foundation: foundationHyperparametersSchema,
-}).strict();
+});
 
 export const datasetPrebuiltSchema = z.object({
   training: z.string().min(1),
@@ -318,6 +320,7 @@ export const localRunnerConfigSchema = z.object({
 }).strict();
 
 export type BehaviorSpecExample = z.infer<typeof behaviorSpecExampleSchema>;
+export type BehaviorSpec = z.infer<typeof behaviorSpecSchema>;
 export type SpecSnapshot = z.infer<typeof specSnapshotSchema>;
 export type FineTuneHyperparameters = z.infer<typeof fineTuneHyperparametersSchema>;
 export type FineTuneRunRequest = z.infer<typeof fineTuneRunRequestSchema>;

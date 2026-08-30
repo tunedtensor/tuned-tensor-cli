@@ -8,7 +8,7 @@ from tokenizers import Tokenizer
 from torch.nn import functional as F
 
 from common import load_config, write_json
-from data import END, decoded_byte_count, encode_ids, example_pairs, format_prompt, iter_corpus_documents, smoke_corpus, window_tokens
+from data import END, decoded_byte_count, encode_generation_prompt, example_pairs, iter_corpus_documents, smoke_corpus, window_tokens
 from model import bits_per_byte, generate, load_model
 
 
@@ -45,12 +45,19 @@ def evaluate_chat(
     correct = 0
     model.eval()
     for example in examples:
-        prompt_ids = encode_ids(tokenizer, format_prompt(system_prompt, example["input"])) or [0]
+        context_length = int(model.config["sequence_length"])
+        prompt_ids, completion_tokens = encode_generation_prompt(
+            tokenizer,
+            system_prompt,
+            example["input"],
+            context_length,
+            32,
+        )
         tokens = torch.tensor([prompt_ids], dtype=torch.long, device=device)
         generated = generate(
             model,
             tokens,
-            max_new_tokens=32,
+            max_new_tokens=completion_tokens,
             stop_token_id=tokenizer.token_to_id(END),
         )[0].tolist()[len(prompt_ids):]
         text = tokenizer.decode(generated).split(END)[0].strip()
@@ -65,14 +72,27 @@ def evaluate_chat(
     }
 
 
-def evaluate_inference(model, tokenizer: Tokenizer, prompt: str, device: torch.device) -> dict[str, float | int | str]:
-    prompt_ids = encode_ids(tokenizer, prompt) or [0]
-    tokens = torch.tensor([prompt_ids[: min(16, len(prompt_ids))]], dtype=torch.long, device=device)
+def evaluate_inference(
+    model,
+    tokenizer: Tokenizer,
+    system_prompt: str,
+    user_prompt: str,
+    device: torch.device,
+) -> dict[str, float | int | str]:
+    context_length = int(model.config["sequence_length"])
+    prompt_ids, completion_tokens = encode_generation_prompt(
+        tokenizer,
+        system_prompt,
+        user_prompt,
+        context_length,
+        32,
+    )
+    tokens = torch.tensor([prompt_ids], dtype=torch.long, device=device)
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
         torch.cuda.synchronize()
     started = time.perf_counter()
-    generated = generate(model, tokens, max_new_tokens=32)
+    generated = generate(model, tokens, max_new_tokens=completion_tokens)
     if device.type == "cuda":
         torch.cuda.synchronize()
     elapsed = max(time.perf_counter() - started, 1e-6)
@@ -112,7 +132,13 @@ def main(argv: list[str] | None = None) -> None:
         metrics.update(evaluate_chat(model, tokenizer, str(config.get("system_prompt") or ""), examples, device))
     elif evaluator == "inference":
         prompt = examples[0]["input"] if examples else "hello"
-        metrics.update(evaluate_inference(model, tokenizer, prompt, device))
+        metrics.update(evaluate_inference(
+            model,
+            tokenizer,
+            str(config.get("system_prompt") or ""),
+            prompt,
+            device,
+        ))
     else:
         raise SystemExit(f"Unknown foundation evaluator: {evaluator}")
     write_json(output_dir / "metrics.json", metrics)
