@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## [0.13.1-beta.7] - 2026-08-30
+
+### Changed
+
+- Adapter and foundation pipelines now share one behavior-spec contract and
+  compile `system_prompt`, `guidelines`, and `constraints` into the same model
+  instruction.
+
+### Fixed
+
+- Foundation stages no longer discard spec guidelines and constraints when
+  constructing their training and evaluation configuration.
+- Foundation generation preserves the compiled instruction when user input
+  exceeds the model context, and fails clearly when the instruction itself
+  cannot fit.
+- Runs created by beta.6 with raw per-stage prompts remain resumable after the
+  shared instruction compiler is enabled.
+
 ## [0.13.1-beta.6] - 2026-08-30
 
 ### Added
