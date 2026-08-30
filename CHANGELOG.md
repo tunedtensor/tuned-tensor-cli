@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.13.1-beta.6] - 2026-08-30
+
 ### Added
 
 - Foundation pretraining can stream `.txt` and `{"text": ...}` JSONL shards
@@ -21,6 +23,23 @@
 - Foundation `doctor` probes the locked foundation CUDA environment, requires
   BF16 for long-run training, validates configured corpus paths and held-out
   separation, and checks the optional checkpoint backup destination.
+
+### Security
+
+- Recovery rejects symlinked or unsupported run-state entries before access,
+  opens process logs without following symbolic links where supported, and
+  keeps configuration and completion metadata private and atomically published.
+- Published and partial token caches, checkpoints, completed-stage metrics, and
+  produced artifacts are reused only after their persisted hashes verify.
+
+### Fixed
+
+- Checkpoint resume now fails closed on malformed, incomplete, missing-payload,
+  or hash-invalid state, can load a verified external backup, rejects backup
+  aliases of the primary directory, and preserves verified same-step saves.
+- Training and validation inputs cannot overlap by equality or containment.
+- Re-executing an incomplete upstream stage invalidates every downstream stage
+  so stale artifacts cannot be reused against new upstream outputs.
 
 ## [0.13.1-beta.5] - 2026-08-29
 
