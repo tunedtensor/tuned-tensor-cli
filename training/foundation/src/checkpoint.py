@@ -41,7 +41,7 @@ class CheckpointManager:
         keep: int = 3,
         backup_dir: str | Path | None = None,
     ) -> None:
-        self.root = ensure_private_directory(Path(output_dir) / "checkpoints")
+        self.root = ensure_private_directory(Path(output_dir) / "checkpoints").resolve()
         self.config_fingerprint = config_fingerprint
         self.keep = max(1, int(keep))
         self.backup_dir = Path(backup_dir).expanduser().resolve() if backup_dir else None
@@ -54,48 +54,67 @@ class CheckpointManager:
     def _name(step: int) -> str:
         return f"step-{step:09d}"
 
-    def _candidates(self) -> list[Path]:
+    def _candidates(self, root: Path | None = None) -> list[Path]:
+        candidate_root = root or self.root
         return sorted(
-            (path for path in self.root.glob("step-*") if path.is_dir()),
+            (path for path in candidate_root.glob("step-*") if path.is_dir()),
             key=lambda path: path.name,
             reverse=True,
         )
 
+    def _resume_candidates(self) -> list[Path]:
+        ranked = [(path, 1) for path in self._candidates()]
+        if self.backup_dir is not None and self.backup_dir.is_dir():
+            ranked.extend((path, 0) for path in self._candidates(self.backup_dir))
+        return [
+            path
+            for path, _priority in sorted(
+                ranked,
+                key=lambda candidate: (candidate[0].name, candidate[1]),
+                reverse=True,
+            )
+        ]
+
     def latest(self) -> Path | None:
         mismatched = False
         corrupt = False
-        for path in self._candidates():
+        for path in self._resume_candidates():
             try:
                 metadata = json.loads((path / "metadata.json").read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
+                corrupt = True
                 continue
-            if metadata.get("complete") is True and metadata.get("config_fingerprint") != self.config_fingerprint:
+            if not isinstance(metadata, dict) or metadata.get("complete") is not True:
+                corrupt = True
+                continue
+            if metadata.get("config_fingerprint") != self.config_fingerprint:
                 mismatched = True
                 continue
-            if (
-                metadata.get("complete") is True
-                and metadata.get("config_fingerprint") == self.config_fingerprint
-                and (path / "model.safetensors").is_file()
-                and (path / "training-state.pt").is_file()
-            ):
-                files = metadata.get("files")
-                if not isinstance(files, dict):
-                    corrupt = True
-                    continue
-                valid = True
-                for name in ["model.safetensors", "training-state.pt"]:
-                    expected = files.get(name)
-                    candidate = path / name
-                    if (
-                        not isinstance(expected, dict)
-                        or candidate.stat().st_size != expected.get("size")
-                        or _sha256(candidate) != expected.get("sha256")
-                    ):
-                        valid = False
-                        break
-                if valid:
-                    return path
+            model_path = path / "model.safetensors"
+            state_path = path / "training-state.pt"
+            if not model_path.is_file() or not state_path.is_file():
                 corrupt = True
+                continue
+            files = metadata.get("files")
+            if not isinstance(files, dict):
+                corrupt = True
+                continue
+            valid = True
+            for name, candidate in [
+                ("model.safetensors", model_path),
+                ("training-state.pt", state_path),
+            ]:
+                expected = files.get(name)
+                if (
+                    not isinstance(expected, dict)
+                    or candidate.stat().st_size != expected.get("size")
+                    or _sha256(candidate) != expected.get("sha256")
+                ):
+                    valid = False
+                    break
+            if valid:
+                return path
+            corrupt = True
         if mismatched:
             raise ValueError("Existing foundation checkpoints do not match the current training configuration.")
         if corrupt:
@@ -141,6 +160,9 @@ class CheckpointManager:
     ) -> Path:
         name = self._name(step)
         final = self.root / name
+        if final.exists() and self.latest() == final:
+            self._backup(final)
+            return final
         temporary = Path(tempfile.mkdtemp(prefix=f".{name}.", dir=self.root))
         temporary.chmod(0o700)
         try:

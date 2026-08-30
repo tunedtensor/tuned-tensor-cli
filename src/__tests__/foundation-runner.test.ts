@@ -142,6 +142,42 @@ describe("foundation pipeline runner", () => {
     await expect(access(outputDir)).rejects.toThrow();
   });
 
+  it("rejects validation data nested inside the training corpus before creating run state", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-overlap-"));
+    dirs.push(dir);
+    const training = join(dir, "training");
+    const validation = join(training, "held-out.jsonl");
+    await mkdir(training);
+    await writeFile(join(training, "train.txt"), "training text\n");
+    await writeFile(validation, '{"text":"validation text"}\n');
+    const outputDir = join(dir, "run");
+    const overlappingSpec: LocalFoundationSpecFile = {
+      ...spec,
+      foundation: {
+        ...spec.foundation,
+        corpus_path: training,
+        validation_path: validation,
+      },
+    };
+    const plan = createExecutionPlan(
+      pipelineFromFoundationHyperparameters(overlappingSpec.name, overlappingSpec.foundation),
+      { only: ["tokenize"] },
+    );
+    let spawned = false;
+
+    await expect(runFoundationPipeline({
+      spec: overlappingSpec,
+      plan,
+      specPath: join(dir, "tunedtensor.json"),
+      outputDir,
+      spawnStep: async () => {
+        spawned = true;
+      },
+    })).rejects.toThrow(/training.*validation.*overlap/i);
+    expect(spawned).toBe(false);
+    await expect(access(outputDir)).rejects.toThrow();
+  });
+
   it("rejects missing required step outputs", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tt-foundation-"));
     dirs.push(dir);
@@ -219,6 +255,58 @@ describe("foundation pipeline runner", () => {
     })).rejects.toThrow(/symbolic link/i);
   });
 
+  it("rejects a symlinked resume root before spawning or writing through it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-resume-link-"));
+    dirs.push(dir);
+    const target = join(dir, "target");
+    const outputDir = join(dir, "run");
+    await mkdir(target);
+    await symlink(target, outputDir, "dir");
+    const recipe = pipelineFromFoundationHyperparameters(spec.name, spec.foundation);
+    const plan = createExecutionPlan(recipe, { only: ["tokenize"] });
+    let spawned = false;
+
+    await expect(runFoundationPipeline({
+      spec,
+      plan,
+      specPath: join(dir, "tunedtensor.json"),
+      outputDir,
+      resume: true,
+      spawnStep: async () => {
+        spawned = true;
+      },
+    })).rejects.toThrow(/symbolic link/i);
+    expect(spawned).toBe(false);
+    await expect(access(join(target, "tokenize"))).rejects.toThrow();
+  });
+
+  it("rejects preserved symlinks before reading resume configuration", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-resume-entry-link-"));
+    dirs.push(dir);
+    const outputDir = join(dir, "run");
+    const stepDir = join(outputDir, "tokenize");
+    const target = join(dir, "external-config.json");
+    await mkdir(join(stepDir, "output"), { recursive: true });
+    await writeFile(target, "preserve me\n");
+    await symlink(target, join(stepDir, "config.json"));
+    const recipe = pipelineFromFoundationHyperparameters(spec.name, spec.foundation);
+    const plan = createExecutionPlan(recipe, { only: ["tokenize"] });
+    let spawned = false;
+
+    await expect(runFoundationPipeline({
+      spec,
+      plan,
+      specPath: join(dir, "tunedtensor.json"),
+      outputDir,
+      resume: true,
+      spawnStep: async () => {
+        spawned = true;
+      },
+    })).rejects.toThrow(/symbolic link/i);
+    expect(spawned).toBe(false);
+    expect(await readFile(target, "utf8")).toBe("preserve me\n");
+  });
+
   it("threads tokenizer and model artifacts and writes a hashed report", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tt-foundation-"));
     dirs.push(dir);
@@ -285,6 +373,34 @@ describe("foundation pipeline runner", () => {
     expect(resumedCalls).toEqual(["pretrain.py"]);
   });
 
+  it("reruns downstream stages after an earlier completion manifest is missing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-resume-dag-"));
+    dirs.push(dir);
+    const specPath = join(dir, "tunedtensor.json");
+    const outputDir = join(dir, "run");
+    const plan = createExecutionPlan(
+      pipelineFromFoundationHyperparameters(spec.name, spec.foundation),
+      { only: ["tokenize", "pretrain"] },
+    );
+    await runFoundationPipeline({ spec, plan, specPath, outputDir, spawnStep: mockSpawn });
+    await rm(join(outputDir, "tokenize", "completion.json"));
+    const resumedCalls: string[] = [];
+
+    await runFoundationPipeline({
+      spec,
+      plan,
+      specPath,
+      outputDir,
+      resume: true,
+      spawnStep: async (args) => {
+        resumedCalls.push(args.entrypoint);
+        await mockSpawn(args);
+      },
+    });
+
+    expect(resumedCalls).toEqual(["train_tokenizer.py", "pretrain.py"]);
+  });
+
   it("refuses resume when the persisted step configuration changed", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tt-foundation-resume-config-"));
     dirs.push(dir);
@@ -303,6 +419,35 @@ describe("foundation pipeline runner", () => {
       resume: true,
       spawnStep: mockSpawn,
     })).rejects.toThrow(/configuration changed/i);
+  });
+
+  it("refuses resume when a completed stage artifact changed", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-resume-integrity-"));
+    dirs.push(dir);
+    const specPath = join(dir, "tunedtensor.json");
+    const outputDir = join(dir, "run");
+    const plan = createExecutionPlan(
+      pipelineFromFoundationHyperparameters(spec.name, spec.foundation),
+      { only: ["tokenize"] },
+    );
+    await runFoundationPipeline({ spec, plan, specPath, outputDir, spawnStep: mockSpawn });
+    await writeFile(
+      join(outputDir, "tokenize", "output", "tokenizer.json"),
+      '{"changed":true}\n',
+    );
+    let spawned = false;
+
+    await expect(runFoundationPipeline({
+      spec,
+      plan,
+      specPath,
+      outputDir,
+      resume: true,
+      spawnStep: async () => {
+        spawned = true;
+      },
+    })).rejects.toThrow(/integrity.*changed/i);
+    expect(spawned).toBe(false);
   });
 
   it("normalizes every generated step directory and artifact to private modes", async () => {

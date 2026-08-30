@@ -22,6 +22,7 @@ import train_tokenizer as tokenizer_entrypoint
 from checkpoint import CheckpointManager
 from common import write_json
 from data import (
+    END,
     IGNORE_INDEX,
     decoded_byte_count,
     encode_ids,
@@ -249,6 +250,113 @@ class FoundationPretrainReliabilityTests(unittest.TestCase):
             self.assertEqual(tokens.tolist(), expected)
             self.assertEqual(metadata["documents"], 3)
 
+    def test_token_cache_rebuilds_same_size_corruption(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus = root / "corpus.txt"
+            corpus.write_text("alpha beta gamma delta", encoding="utf-8")
+            tokenizer = train_tokenizer("alpha beta gamma delta " * 16, vocab_size=64)
+            tokenizer_path = root / "tokenizer.json"
+            tokenizer.save(str(tokenizer_path))
+            output = root / "work"
+            output.mkdir()
+            config = {"corpus_path": str(corpus), "max_chars": 1000}
+
+            tokens, _metadata = pretrain.prepare_token_cache(tokenizer, tokenizer_path, config, output)
+            expected = tokens.tolist()
+            del tokens
+            cache_path = output / "pretrain-tokens.bin"
+            original = cache_path.read_bytes()
+            cache_path.write_bytes(b"\xff\xff\xff\xff" + original[4:])
+
+            rebuilt, metadata = pretrain.prepare_token_cache(tokenizer, tokenizer_path, config, output)
+
+            self.assertEqual(rebuilt.tolist(), expected)
+            self.assertEqual(metadata["tokens_sha256"], pretrain.file_sha256(cache_path))
+
+    def test_token_cache_discards_corrupt_published_partial_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            import hashlib
+            import numpy as np
+            root = Path(directory)
+            corpus = root / "corpus.jsonl"
+            corpus.write_text(
+                '{"text":"alpha beta"}\n{"text":"gamma delta"}\n',
+                encoding="utf-8",
+            )
+            tokenizer = train_tokenizer("alpha beta gamma delta " * 16, vocab_size=64)
+            tokenizer_path = root / "tokenizer.json"
+            tokenizer.save(str(tokenizer_path))
+            output = root / "work"
+            output.mkdir()
+            first_ids = tokenizer.encode("alpha beta").ids
+            end_id = tokenizer.token_to_id(END)
+            if end_id is not None:
+                first_ids.append(end_id)
+            first = np.asarray(first_ids, dtype=np.uint32).tobytes()
+            partial = output / ".pretrain-tokens.partial"
+            partial.write_bytes(b"\xff\xff\xff\xff" + first[4:])
+            config = {"corpus_path": str(corpus), "max_chars": 1000}
+            signature = {
+                "source": pretrain.source_signature(config),
+                "tokenizer_sha256": pretrain.file_sha256(tokenizer_path),
+            }
+            (output / ".pretrain-tokens.partial.json").write_text(json.dumps({
+                "signature": signature,
+                "tokens": len(first_ids),
+                "documents": 1,
+                "source_documents": 1,
+                "bytes": len(first),
+                "tokens_sha256": hashlib.sha256(first).hexdigest(),
+            }), encoding="utf-8")
+
+            rebuilt, metadata = pretrain.prepare_token_cache(tokenizer, tokenizer_path, config, output)
+            expected: list[int] = []
+            for text in ["alpha beta", "gamma delta"]:
+                expected.extend(tokenizer.encode(text).ids)
+                if end_id is not None:
+                    expected.append(end_id)
+
+            self.assertEqual(rebuilt.tolist(), expected)
+            self.assertEqual(metadata["documents"], 2)
+
+    def test_token_cache_rebuilds_corrupt_cache_from_interrupted_publish(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            import hashlib
+            import numpy as np
+            root = Path(directory)
+            corpus = root / "corpus.txt"
+            corpus.write_text("alpha beta", encoding="utf-8")
+            tokenizer = train_tokenizer("alpha beta " * 16, vocab_size=64)
+            tokenizer_path = root / "tokenizer.json"
+            tokenizer.save(str(tokenizer_path))
+            output = root / "work"
+            output.mkdir()
+            ids = tokenizer.encode("alpha beta").ids
+            end_id = tokenizer.token_to_id(END)
+            if end_id is not None:
+                ids.append(end_id)
+            encoded = np.asarray(ids, dtype=np.uint32).tobytes()
+            (output / "pretrain-tokens.bin").write_bytes(b"\xff\xff\xff\xff" + encoded[4:])
+            config = {"corpus_path": str(corpus), "max_chars": 1000}
+            signature = {
+                "source": pretrain.source_signature(config),
+                "tokenizer_sha256": pretrain.file_sha256(tokenizer_path),
+            }
+            (output / ".pretrain-tokens.partial.json").write_text(json.dumps({
+                "signature": signature,
+                "tokens": len(ids),
+                "documents": 1,
+                "source_documents": 1,
+                "bytes": len(encoded),
+                "tokens_sha256": hashlib.sha256(encoded).hexdigest(),
+            }), encoding="utf-8")
+
+            rebuilt, metadata = pretrain.prepare_token_cache(tokenizer, tokenizer_path, config, output)
+
+            self.assertEqual(rebuilt.tolist(), ids)
+            self.assertEqual(metadata["tokens_sha256"], pretrain.file_sha256(output / "pretrain-tokens.bin"))
+
     def test_token_batches_are_deterministic_and_advance_with_the_cursor(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "tokens.bin"
@@ -301,6 +409,59 @@ class FoundationPretrainReliabilityTests(unittest.TestCase):
             for key, value in model.state_dict().items():
                 self.assertTrue(torch.equal(value, expected[key]))
 
+    def test_checkpoint_resume_loads_verified_backup_when_primary_is_lost(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as backup:
+            model = torch.nn.Linear(2, 2)
+            optimizer = torch.optim.AdamW(model.parameters())
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _: 1.0)
+            manager = CheckpointManager(directory, "stable", backup_dir=backup)
+            manager.save(
+                model, optimizer, scheduler,
+                step=2, samples_consumed=4, tokens_seen=8, last_loss=1.0, reason="periodic",
+            )
+            __import__("shutil").rmtree(Path(directory) / "checkpoints")
+            replacement = CheckpointManager(directory, "stable", backup_dir=backup)
+
+            resumed = replacement.load(model, optimizer, scheduler, torch.device("cpu"))
+
+            self.assertIsNotNone(resumed)
+            assert resumed is not None
+            self.assertEqual(resumed.step, 2)
+            self.assertEqual(resumed.path.parent, Path(backup).resolve())
+
+    def test_checkpoint_save_is_idempotent_for_an_existing_verified_step(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            model = torch.nn.Linear(2, 2)
+            optimizer = torch.optim.AdamW(model.parameters())
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _: 1.0)
+            manager = CheckpointManager(directory, "stable")
+            first = manager.save(
+                model, optimizer, scheduler,
+                step=1, samples_consumed=1, tokens_seen=2, last_loss=1.0, reason="periodic",
+            )
+            original = (first / "model.safetensors").read_bytes()
+            with torch.no_grad():
+                for parameter in model.parameters():
+                    parameter.add_(1)
+
+            repeated = manager.save(
+                model, optimizer, scheduler,
+                step=1, samples_consumed=1, tokens_seen=2, last_loss=2.0, reason="non-finite-loss",
+            )
+
+            self.assertEqual(repeated, first)
+            self.assertEqual((first / "model.safetensors").read_bytes(), original)
+
+    def test_checkpoint_backup_rejects_relative_alias_of_primary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.getcwd()
+            os.chdir(directory)
+            try:
+                with self.assertRaisesRegex(ValueError, "outside the primary"):
+                    CheckpointManager("run", "stable", backup_dir="run/checkpoints")
+            finally:
+                os.chdir(previous)
+
     def test_checkpoint_resume_rejects_configuration_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             model = torch.nn.Linear(2, 2)
@@ -320,6 +481,43 @@ class FoundationPretrainReliabilityTests(unittest.TestCase):
                 CheckpointManager(directory, "changed").load(
                     model, optimizer, scheduler, torch.device("cpu"),
                 )
+
+    def test_checkpoint_resume_rejects_unreadable_only_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = CheckpointManager(directory, "stable")
+            checkpoint = Path(directory) / "checkpoints" / "step-000000001"
+            checkpoint.mkdir()
+            (checkpoint / "metadata.json").write_text("{", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "No intact foundation checkpoint"):
+                manager.latest()
+
+    def test_checkpoint_resume_rejects_incomplete_only_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = CheckpointManager(directory, "stable")
+            checkpoint = Path(directory) / "checkpoints" / "step-000000001"
+            checkpoint.mkdir()
+            (checkpoint / "metadata.json").write_text(
+                json.dumps({"complete": False, "config_fingerprint": "stable"}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "No intact foundation checkpoint"):
+                manager.latest()
+
+    def test_checkpoint_resume_rejects_checkpoint_with_missing_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manager = CheckpointManager(directory, "stable")
+            checkpoint = Path(directory) / "checkpoints" / "step-000000001"
+            checkpoint.mkdir()
+            (checkpoint / "metadata.json").write_text(json.dumps({
+                "complete": True,
+                "config_fingerprint": "stable",
+                "files": {},
+            }), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "No intact foundation checkpoint"):
+                manager.latest()
 
     def test_checkpoint_resume_falls_back_when_latest_bytes_are_corrupt(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

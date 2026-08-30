@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { mkdir } from "node:fs/promises";
 import {
@@ -53,6 +53,15 @@ function resolveLocalReference(value: unknown, baseDirectory: string): unknown {
   if (value === "~") return homedir();
   if (value.startsWith("~/")) return resolve(homedir(), value.slice(2));
   return resolve(baseDirectory, value);
+}
+
+export function localPathsOverlap(left: string, right: string): boolean {
+  const contains = (parent: string, candidate: string): boolean => {
+    const relation = relative(resolve(parent), resolve(candidate));
+    return relation === ""
+      || (!isAbsolute(relation) && relation !== ".." && !relation.startsWith(`..${sep}`));
+  };
+  return contains(left, right) || contains(right, left);
 }
 
 /** Resolve dataset paths relative to the spec/request file itself. */

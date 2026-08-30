@@ -192,6 +192,35 @@ test("exclusive process logs reject aliases before launching the child", async (
   }
 });
 
+test("appended process logs refuse symlinks before launching the child", async () => {
+  if (process.platform === "win32") return;
+  const root = await mkdtemp(join(tmpdir(), "tt-local-process-append-link-test-"));
+  const target = join(root, "target.log");
+  const logPath = join(root, "pretrain.log");
+  const marker = join(root, "child-ran");
+  await writeFile(target, "preserve me\n");
+  await symlink(target, logPath);
+  try {
+    await assert.rejects(
+      runLoggedProcess({
+        command: process.execPath,
+        commandArgs: [
+          "-e",
+          `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran")`,
+        ],
+        stage: "pretrain",
+        logPath,
+        appendLog: true,
+      }),
+      /ELOOP/,
+    );
+    assert.equal(existsSync(marker), false);
+    assert.equal(await readFile(target, "utf8"), "preserve me\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("resumed process logs append instead of erasing the interruption history", async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-process-append-test-"));
   const logPath = join(root, "pretrain.log");

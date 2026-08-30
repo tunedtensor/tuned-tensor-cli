@@ -192,7 +192,7 @@ test("foundation doctor validates streaming, held-out, and checkpoint paths", as
 
     const overlapping = localFoundationSpecFileSchema.parse({
       ...spec,
-      foundation: { ...spec.foundation, validation_path: training },
+      foundation: { ...spec.foundation, validation_path: join(training, "part.txt") },
     });
     const overlapChecks = await runDoctor(localRunnerConfigSchema.parse({
       dryRun: true,

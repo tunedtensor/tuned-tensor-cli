@@ -69,7 +69,12 @@ def prepare_token_cache(
         except json.JSONDecodeError:
             metadata = {}
         expected_size = int(metadata.get("tokens", 0)) * np.dtype(np.uint32).itemsize
-        if metadata.get("signature") == signature and expected_size == cache_path.stat().st_size:
+        if (
+            metadata.get("signature") == signature
+            and expected_size == cache_path.stat().st_size
+            and isinstance(metadata.get("tokens_sha256"), str)
+            and file_sha256(cache_path) == metadata["tokens_sha256"]
+        ):
             return np.memmap(cache_path, dtype=np.uint32, mode="r"), metadata
 
     partial_path = output_dir / ".pretrain-tokens.partial"
@@ -82,7 +87,15 @@ def prepare_token_cache(
             partial_metadata = {}
     if cache_path.is_file() and partial_metadata.get("signature") == signature:
         expected_size = int(partial_metadata.get("bytes", -1))
-        if expected_size == cache_path.stat().st_size and int(partial_metadata.get("tokens", 0)) > 0:
+        expected_tokens = int(partial_metadata.get("tokens", 0))
+        expected_hash = partial_metadata.get("tokens_sha256")
+        if (
+            expected_size == cache_path.stat().st_size
+            and expected_tokens > 0
+            and expected_tokens * np.dtype(np.uint32).itemsize == expected_size
+            and isinstance(expected_hash, str)
+            and file_sha256(cache_path) == expected_hash
+        ):
             metadata = {
                 "signature": signature,
                 "tokens": int(partial_metadata["tokens"]),
@@ -104,11 +117,29 @@ def prepare_token_cache(
     source_documents = int(partial_metadata.get("source_documents", document_count))
     recorded_bytes = int(partial_metadata.get("bytes", 0))
     if partial_path.is_file():
-        with partial_path.open("r+b") as partial:
-            partial.truncate(recorded_bytes)
-        with partial_path.open("rb") as partial:
-            while chunk := partial.read(1_048_576):
-                digest.update(chunk)
+        partial_size = partial_path.stat().st_size
+        valid_partial = (
+            0 <= recorded_bytes <= partial_size
+            and token_count >= 0
+            and token_count * np.dtype(np.uint32).itemsize == recorded_bytes
+            and isinstance(partial_metadata.get("tokens_sha256"), str)
+        )
+        if valid_partial:
+            with partial_path.open("r+b") as partial:
+                partial.truncate(recorded_bytes)
+            with partial_path.open("rb") as partial:
+                while chunk := partial.read(1_048_576):
+                    digest.update(chunk)
+            valid_partial = digest.hexdigest() == partial_metadata["tokens_sha256"]
+        if not valid_partial:
+            partial_path.unlink(missing_ok=True)
+            partial_metadata_path.unlink(missing_ok=True)
+            partial_metadata = {}
+            digest = hashlib.sha256()
+            token_count = 0
+            document_count = 0
+            source_documents = 0
+            recorded_bytes = 0
     corpus_path = config.get("corpus_path")
     if corpus_path:
         documents = iter_corpus_documents(corpus_path, int(config.get("max_chars") or 0))

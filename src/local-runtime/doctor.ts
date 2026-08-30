@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import type { FineTuneRunRequest, LocalFoundationSpecFile, LocalRunnerConfig } from "./contracts.js";
-import { foundationPlaceholderIssues } from "./local-project.js";
+import { foundationPlaceholderIssues, localPathsOverlap } from "./local-project.js";
 import {
   minimalMachineLearningEnvironment,
   withHuggingFaceCacheEnvironment,
@@ -339,7 +339,10 @@ export async function runDoctor(
     if (
       foundationSpec.foundation.corpus_path
       && foundationSpec.foundation.validation_path
-      && resolve(foundationSpec.foundation.corpus_path) === resolve(foundationSpec.foundation.validation_path)
+      && localPathsOverlap(
+        foundationSpec.foundation.corpus_path,
+        foundationSpec.foundation.validation_path,
+      )
     ) {
       checks.push({
         name: "held-out-corpus",

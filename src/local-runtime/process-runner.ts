@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { createWriteStream, readFileSync, type WriteStream } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { constants, readFileSync, type WriteStream } from "node:fs";
+import { mkdir, open } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { pythonEnvironmentPath } from "../paths.js";
 import { forwardStreamLines, reportInBackground, type LocalRunReporter } from "./run-reporter.js";
@@ -128,23 +128,17 @@ async function openProcessLog(
   exclusive: boolean,
   append: boolean,
 ): Promise<WriteStream> {
-  const stream = createWriteStream(path, {
-    flags: exclusive ? "wx" : append ? "a" : "w",
-    mode: 0o600,
-  });
-  await new Promise<void>((resolveOpen, reject) => {
-    const onOpen = () => {
-      stream.off("error", onError);
-      resolveOpen();
-    };
-    const onError = (error: Error) => {
-      stream.off("open", onOpen);
-      reject(error);
-    };
-    stream.once("open", onOpen);
-    stream.once("error", onError);
-  });
-  return stream;
+  const flags = constants.O_WRONLY
+    | constants.O_CREAT
+    | (exclusive ? constants.O_EXCL : append ? constants.O_APPEND : constants.O_TRUNC)
+    | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW);
+  const handle = await open(path, flags, 0o600);
+  try {
+    return handle.createWriteStream({ autoClose: true });
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
 }
 
 export async function runLoggedProcess(args: {
