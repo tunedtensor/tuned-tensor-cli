@@ -29,7 +29,7 @@ export const specSnapshotSchema = z.object({
 
 export const foundationHyperparametersSchema = z.object({
   vocab_size: z.number().int().min(64).max(65_536).default(256),
-  max_chars: z.number().int().min(1_000).max(2_000_000_000).default(20_000),
+  max_chars: z.number().int().min(1_000).max(1_000_000_000_000).default(20_000),
   depth: z.number().int().min(1).max(64).default(2),
   pretrain_steps: z.number().int().min(1).max(10_000_000).default(2),
   finetune_steps: z.number().int().min(1).max(10_000_000).default(2),
@@ -37,6 +37,22 @@ export const foundationHyperparametersSchema = z.object({
   batch_size: z.number().int().min(1).max(1024).default(2),
   sequence_length: z.number().int().min(16).max(8192).default(64),
   nproc_per_node: z.number().int().min(1).max(16).default(1),
+  corpus_path: z.string().min(1).optional(),
+  tokenizer_max_chars: z.number().int().min(1_000).max(1_000_000_000_000).optional(),
+  validation_path: z.string().min(1).optional(),
+  checkpoint_backup_dir: z.string().min(1).optional(),
+  seed: z.number().int().min(0).max(2_147_483_647).optional(),
+  learning_rate: z.number().positive().max(1).optional(),
+  weight_decay: z.number().min(0).max(10).optional(),
+  warmup_steps: z.number().int().min(0).max(10_000_000).optional(),
+  min_lr_ratio: z.number().min(0).max(1).optional(),
+  gradient_accumulation_steps: z.number().int().min(1).max(1024).optional(),
+  gradient_clip: z.number().positive().max(1_000).optional(),
+  bf16: z.boolean().optional(),
+  checkpoint_interval_steps: z.number().int().min(1).max(10_000_000).optional(),
+  checkpoint_interval_seconds: z.number().int().min(1).max(86_400).optional(),
+  keep_checkpoints: z.number().int().min(1).max(100).optional(),
+  log_interval_steps: z.number().int().min(1).max(1_000_000).optional(),
 }).strict();
 
 export const localFoundationSpecFileSchema = z.object({

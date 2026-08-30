@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 
@@ -29,9 +31,35 @@ def load_config(argv: list[str] | None = None) -> dict[str, Any]:
 def write_json(path: str | Path, value: Any) -> None:
     destination = Path(path)
     ensure_private_directory(destination.parent)
-    with destination.open("w", encoding="utf-8") as output:
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=destination.parent,
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            os.fchmod(output.fileno(), 0o600)
+            output.write(json.dumps(value, indent=2) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, destination)
         make_private_file(destination)
-        output.write(json.dumps(value, indent=2) + "\n")
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def append_jsonl(path: str | Path, value: Any) -> None:
+    destination = Path(path)
+    ensure_private_directory(destination.parent)
+    descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        payload = (json.dumps(value, separators=(",", ":")) + "\n").encode("utf-8")
+        os.write(descriptor, payload)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    make_private_file(destination)
 
 
 def require_cuda(action: str) -> None:

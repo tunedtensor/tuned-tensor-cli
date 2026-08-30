@@ -67,6 +67,13 @@ export function resolveLocalRunInputPaths(raw: unknown, inputPath: string): unkn
       if (fields[key] !== undefined) fields[key] = resolveLocalReference(fields[key], baseDirectory);
     }
   }
+  const foundation = value.foundation;
+  if (foundation && typeof foundation === "object" && !Array.isArray(foundation)) {
+    const fields = foundation as Record<string, unknown>;
+    for (const key of ["corpus_path", "validation_path", "checkpoint_backup_dir"] as const) {
+      if (fields[key] !== undefined) fields[key] = resolveLocalReference(fields[key], baseDirectory);
+    }
+  }
   return value;
 }
 

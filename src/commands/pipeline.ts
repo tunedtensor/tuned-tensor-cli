@@ -195,9 +195,14 @@ export function registerPipelineCommands(parent: Command): void {
     .option("-f, --file <path>", "Pipeline file", DEFAULT_PIPELINE_FILE)
     .option("--spec <path>", "Local behavior spec", DEFAULT_SPEC_FILE)
     .option("--config <path>", "Local runtime config")
+    .option("--output <path>", "Foundation run directory (must not already exist)")
+    .option("--resume <path>", "Resume a foundation run directory")
     .option("--only <ids>", "Comma-separated step IDs to include")
     .option("--skip <ids>", "Comma-separated step IDs to omit")
-    .action(async (options: { file: string; spec: string; config?: string; dryRun?: boolean; only?: string; skip?: string }) => {
+    .action(async (options: { file: string; spec: string; config?: string; output?: string; resume?: string; dryRun?: boolean; only?: string; skip?: string }) => {
+      if (options.output && options.resume) {
+        throw new Error("--output and --resume are mutually exclusive.");
+      }
       const document = await resolvePipelineDocument(options);
       const plan = createExecutionPlan(document as Pipeline, { only: parseList(options.only), skip: parseList(options.skip) });
       const hostWarnings = await hostWarningsForPipeline(document, options.spec);
@@ -227,10 +232,15 @@ export function registerPipelineCommands(parent: Command): void {
           spec: input.spec,
           plan,
           specPath: resolve(options.spec),
+          ...(options.output || options.resume ? { outputDir: resolve(options.resume ?? options.output!) } : {}),
+          resume: Boolean(options.resume),
         });
         if (isJsonMode()) return printJson(result);
         printSuccess(`Foundation pipeline completed. Report: ${result.report_path}`);
         return;
+      }
+      if (options.output || options.resume) {
+        throw new Error("--output and --resume are only valid for foundation pipelines.");
       }
       assertLocalRunInputReady(input.request);
       const config = await loadLocalRunnerConfig(options.config ? resolve(options.config) : undefined);

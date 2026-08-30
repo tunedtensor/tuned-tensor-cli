@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Added
+
+- Foundation pretraining can stream `.txt` and `{"text": ...}` JSONL shards
+  into a deterministic disk-backed token cache and evaluate BPB on a distinct
+  validation corpus.
+- Long runs use BF16 autocast, gradient accumulation and clipping, warmup plus
+  cosine decay, non-finite guards, JSONL progress heartbeats, and atomic rolling
+  checkpoints containing model, optimizer, scheduler, RNG, counter, and token
+  cursor state. An optional backup directory mirrors retained checkpoints.
+- `tt pipeline run --resume <directory>` starts or resumes one stable foundation
+  run, verifies and skips completed stages, and rejects configuration drift.
+  SIGINT/SIGTERM receive a two-minute checkpoint grace period; the long-run
+  guide includes a restart-on-failure user service.
+
+### Changed
+
+- Foundation `doctor` probes the locked foundation CUDA environment, requires
+  BF16 for long-run training, validates configured corpus paths and held-out
+  separation, and checks the optional checkpoint backup destination.
+
 ## [0.13.1-beta.5] - 2026-08-29
 
 ### Added

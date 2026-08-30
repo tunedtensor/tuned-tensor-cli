@@ -245,6 +245,66 @@ describe("foundation pipeline runner", () => {
     expect(report.steps).toHaveLength(plan.steps.length);
   });
 
+  it("resumes verified stages and reruns only an interrupted pretrain step", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-resume-"));
+    dirs.push(dir);
+    const specPath = join(dir, "tunedtensor.json");
+    const outputDir = join(dir, "run");
+    await writeFile(specPath, JSON.stringify(spec));
+    const plan = createExecutionPlan(
+      pipelineFromFoundationHyperparameters(spec.name, spec.foundation),
+      { only: ["tokenize", "pretrain"] },
+    );
+    const firstCalls: string[] = [];
+    await expect(runFoundationPipeline({
+      spec,
+      plan,
+      specPath,
+      outputDir,
+      spawnStep: async (args) => {
+        firstCalls.push(args.entrypoint);
+        if (args.entrypoint === "pretrain.py") throw new Error("injected interruption");
+        await mockSpawn(args);
+      },
+    })).rejects.toThrow(/injected interruption/);
+    expect(firstCalls).toEqual(["train_tokenizer.py", "pretrain.py"]);
+
+    const resumedCalls: string[] = [];
+    const result = await runFoundationPipeline({
+      spec,
+      plan,
+      specPath,
+      outputDir,
+      resume: true,
+      spawnStep: async (args) => {
+        resumedCalls.push(args.entrypoint);
+        await mockSpawn(args);
+      },
+    });
+    expect(result.status).toBe("succeeded");
+    expect(resumedCalls).toEqual(["pretrain.py"]);
+  });
+
+  it("refuses resume when the persisted step configuration changed", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-foundation-resume-config-"));
+    dirs.push(dir);
+    const specPath = join(dir, "tunedtensor.json");
+    const outputDir = join(dir, "run");
+    const plan = createExecutionPlan(
+      pipelineFromFoundationHyperparameters(spec.name, spec.foundation),
+      { only: ["tokenize"] },
+    );
+    await runFoundationPipeline({ spec, plan, specPath, outputDir, spawnStep: mockSpawn });
+    await expect(runFoundationPipeline({
+      spec: { ...spec, system_prompt: "Changed after the first run." },
+      plan,
+      specPath,
+      outputDir,
+      resume: true,
+      spawnStep: mockSpawn,
+    })).rejects.toThrow(/configuration changed/i);
+  });
+
   it("normalizes every generated step directory and artifact to private modes", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tt-foundation-"));
     dirs.push(dir);

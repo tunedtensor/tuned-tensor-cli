@@ -141,7 +141,7 @@ guarantee that a model or dataset is compatible with a TT workflow.
 
 For educational questions about how or why training works, the agent can read
 the exact Python implementation shipped with the running TT build. The source
-tool is limited to named foundation components (tokenizer, pretraining, model,
+tool is limited to named foundation components (tokenizer, pretraining, checkpointing, model,
 data, SFT, RL, evaluation, and common helpers) and adapter components (training,
 data, model contract, and evaluation); it cannot read arbitrary paths. Answers
 separate behavior directly visible in the code from inferred rationale and
@@ -206,16 +206,18 @@ Two local engines share that document version:
   `inference` evaluators. Requires a foundation `tunedtensor.json`
   (`engine: "foundation"`, at least two examples, no `base_model`).
 
-The foundation engine is a small, readable local baseline inspired by Andrej
+The foundation engine is a readable, single-GPU local trainer inspired by Andrej
 Karpathy's [nanochat](https://github.com/karpathy/nanochat), not a port of its
-compute-optimal training stack. The first version deliberately builds a bounded
-pretraining corpus from the spec prompt and examples, reports chat accuracy on
-those same contract examples, and supports one training process. Foundation
+distributed training stack. With `foundation.corpus_path`, it streams `.txt`
+or JSONL (`{"text":"..."}`) shards into a deterministic on-disk token cache;
+without that field it retains the bounded prompt/example corpus for smoke runs.
+`foundation.validation_path` supplies a distinct held-out BPB corpus. Foundation
 plans reject `compare` before creating run artifacts; comparison remains an
 adapter-engine capability. Optional RL samples one seeded on-policy completion
 per step with a sparse last-number exact reward and therefore requires a numeric
 expected output for every example. Treat those metrics as an end-to-end
-execution and overfit check—not held-out capability or multi-GPU evidence.
+execution and overfit check—not held-out capability or multi-GPU evidence when
+no validation corpus is configured.
 
 ```bash
 tt pipeline init --file pipeline.json
@@ -227,12 +229,21 @@ tt --json pipeline run --file pipeline.json \
   --spec tunedtensor.json --config local-runner.json
 tt init --engine foundation --name "Tiny GPT"
 tt --json pipeline run --spec tunedtensor.json --dry-run
+tt pipeline run --spec tunedtensor.json --resume /absolute/path/to/foundation-run
 ```
 
 `--only` and `--skip` preserve dependency safety: a selected step cannot refer
 to an omitted predecessor. Cloud-targeted steps fail closed unless you pass
 `--dry-run`. Foundation documents are local-only. The TT agent may describe,
 validate, and prepare a plan, but has no direct pipeline-execute tool.
+
+Long pretraining uses BF16, warmup plus cosine decay, gradient clipping,
+periodic metrics, and atomic rolling checkpoints. `--resume <run-directory>`
+starts or resumes one stable run identity; completed stages are verified and
+skipped, while an interrupted pretrain step restores model, optimizer,
+scheduler, RNG, counters, and token cursor. See
+[Long foundation runs](docs/local-runtime/foundation-long-runs.md) before an
+unattended job.
 
 ## Quick start
 

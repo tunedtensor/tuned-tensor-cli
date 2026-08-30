@@ -152,3 +152,56 @@ test("doctor rejects an unchanged generated foundation spec", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("foundation doctor validates streaming, held-out, and checkpoint paths", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-doctor-foundation-data-"));
+  try {
+    const training = join(root, "training");
+    const validation = join(root, "validation.jsonl");
+    await mkdir(training);
+    await writeFile(join(training, "part.txt"), "training text\n");
+    await writeFile(validation, '{"text":"validation text"}\n');
+    const foundation = {
+      corpus_path: training,
+      validation_path: validation,
+      checkpoint_backup_dir: join(root, "backup"),
+    };
+    const spec = localFoundationSpecFileSchema.parse({
+      engine: "foundation",
+      name: "Long run",
+      system_prompt: "Answer clearly.",
+      examples: [
+        { input: "hello", output: "world" },
+        { input: "two", output: "three" },
+      ],
+      foundation,
+    });
+    const checks = await runDoctor(localRunnerConfigSchema.parse({
+      dryRun: true,
+      artifactRoot: join(root, "artifacts"),
+      storeRoot: join(root, "store"),
+      paths: { modelCache: join(root, "cache") },
+    }), undefined, spec);
+    assert.equal(checks.find((check) => check.name === "pretraining-corpus")?.ok, true);
+    assert.equal(checks.find((check) => check.name === "validation-corpus")?.ok, true);
+    assert.equal(checks.find((check) => check.name === "checkpoint-backup")?.ok, true);
+    assert.match(
+      JSON.stringify(checks.find((check) => check.name === "effective-plan")?.details),
+      /training\/foundation\/src\/pretrain\.py/,
+    );
+
+    const overlapping = localFoundationSpecFileSchema.parse({
+      ...spec,
+      foundation: { ...spec.foundation, validation_path: training },
+    });
+    const overlapChecks = await runDoctor(localRunnerConfigSchema.parse({
+      dryRun: true,
+      artifactRoot: join(root, "artifacts-2"),
+      storeRoot: join(root, "store-2"),
+      paths: { modelCache: join(root, "cache-2") },
+    }), undefined, overlapping);
+    assert.equal(overlapChecks.find((check) => check.name === "held-out-corpus")?.ok, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
