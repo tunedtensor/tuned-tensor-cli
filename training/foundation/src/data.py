@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
+from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Iterable, Iterator
 
 from tokenizers import Tokenizer
 from tokenizers import models as tokenizer_models
@@ -18,7 +21,7 @@ SPECIAL_TOKENS = [UNK, PAD, SYSTEM, USER, ASSISTANT, END]
 IGNORE_INDEX = -100
 
 
-def train_tokenizer(corpus: str, vocab_size: int) -> Tokenizer:
+def train_tokenizer(corpus: str | Iterable[str], vocab_size: int) -> Tokenizer:
     tokenizer = Tokenizer(tokenizer_models.BPE(unk_token=UNK))
     tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
     trainer = trainers.BpeTrainer(
@@ -26,8 +29,91 @@ def train_tokenizer(corpus: str, vocab_size: int) -> Tokenizer:
         special_tokens=SPECIAL_TOKENS,
         min_frequency=1,
     )
-    tokenizer.train_from_iterator([corpus], trainer=trainer)
+    tokenizer.train_from_iterator([corpus] if isinstance(corpus, str) else corpus, trainer=trainer)
     return tokenizer
+
+
+def corpus_files(path: str | Path) -> list[Path]:
+    unresolved = Path(path).expanduser()
+    if unresolved.is_symlink():
+        raise ValueError(f"Foundation corpus must not be a symbolic link: {unresolved}")
+    source = unresolved.resolve()
+    if source.is_file():
+        files = [source]
+    elif source.is_dir():
+        files = sorted(
+            candidate for candidate in source.rglob("*")
+            if candidate.is_file() and candidate.suffix.lower() in {".txt", ".jsonl"}
+        )
+    else:
+        raise ValueError(f"Foundation corpus path does not exist: {source}")
+    if not files:
+        raise ValueError(f"Foundation corpus has no .txt or .jsonl files: {source}")
+    for candidate in files:
+        if candidate.is_symlink():
+            raise ValueError(f"Foundation corpus must not contain symbolic links: {candidate}")
+    return files
+
+
+def corpus_manifest(path: str | Path) -> list[dict[str, int | str]]:
+    manifest: list[dict[str, int | str]] = []
+    for candidate in corpus_files(path):
+        info = candidate.stat()
+        manifest.append({
+            "path": str(candidate),
+            "size": int(info.st_size),
+            "mtime_ns": int(info.st_mtime_ns),
+        })
+    return manifest
+
+
+def iter_corpus_documents(path: str | Path, max_chars: int | None = None) -> Iterator[str]:
+    remaining = max_chars if max_chars and max_chars > 0 else None
+    for candidate in corpus_files(path):
+        if remaining is not None and remaining <= 0:
+            return
+        if candidate.suffix.lower() == ".jsonl":
+            with candidate.open("r", encoding="utf-8") as source:
+                for line_number, line in enumerate(source, start=1):
+                    if remaining is not None and remaining <= 0:
+                        return
+                    if not line.strip():
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError as error:
+                        raise ValueError(f"Invalid JSONL at {candidate}:{line_number}: {error.msg}") from error
+                    if not isinstance(row, dict) or not isinstance(row.get("text"), str):
+                        raise ValueError(f'Foundation JSONL rows require a string "text" field: {candidate}:{line_number}')
+                    text = row["text"]
+                    if remaining is not None:
+                        text = text[:remaining]
+                        remaining -= len(text)
+                    if text:
+                        yield text
+        else:
+            with candidate.open("r", encoding="utf-8") as source:
+                while True:
+                    requested = min(1_048_576, remaining) if remaining is not None else 1_048_576
+                    if requested <= 0:
+                        return
+                    text = source.read(requested)
+                    if not text:
+                        break
+                    if remaining is not None:
+                        remaining -= len(text)
+                    yield text
+
+
+def corpus_documents_hash(documents: Iterable[str]) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    chars = 0
+    for document in documents:
+        encoded = document.encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, "little"))
+        digest.update(encoded)
+        chars += len(document)
+    return digest.hexdigest(), chars
 
 
 def smoke_corpus(examples: list[dict[str, str]], max_chars: int, extra: str = "") -> str:

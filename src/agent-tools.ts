@@ -29,6 +29,7 @@ const TRAINING_SOURCE_FILES = {
   foundation: {
     tokenizer: "training/foundation/src/train_tokenizer.py",
     pretrain: "training/foundation/src/pretrain.py",
+    checkpoint: "training/foundation/src/checkpoint.py",
     model: "training/foundation/src/model.py",
     data: "training/foundation/src/data.py",
     finetune: "training/foundation/src/finetune.py",
@@ -491,7 +492,7 @@ export function createTunedTensorTools(
         Type.Object({
           engine: Type.Literal("foundation"),
           component: Type.Union([
-            Type.Literal("tokenizer"), Type.Literal("pretrain"), Type.Literal("model"),
+            Type.Literal("tokenizer"), Type.Literal("pretrain"), Type.Literal("checkpoint"), Type.Literal("model"),
             Type.Literal("data"), Type.Literal("finetune"), Type.Literal("rl"),
             Type.Literal("evaluate"), Type.Literal("common"),
           ]),

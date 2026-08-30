@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { createWriteStream, readFileSync, type WriteStream } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { constants, readFileSync, type WriteStream } from "node:fs";
+import { mkdir, open } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { pythonEnvironmentPath } from "../paths.js";
 import { forwardStreamLines, reportInBackground, type LocalRunReporter } from "./run-reporter.js";
@@ -38,7 +38,8 @@ export type FoundationPythonEntrypoint =
   | "pretrain.py"
   | "finetune.py"
   | "evaluate.py"
-  | "rl.py";
+  | "rl.py"
+  | "-c";
 
 /** Build a command for the one locked Python runtime shipped with TT Local. */
 export function buildBundledPythonCommand(
@@ -80,6 +81,9 @@ export function buildFoundationPythonCommand(
   entrypoint: FoundationPythonEntrypoint,
   args: string[] = [],
 ): { command: "uv"; commandArgs: string[]; displayCommand: string[] } {
+  const target = entrypoint === "-c"
+    ? entrypoint
+    : join(foundationProject, "src", entrypoint);
   const commandArgs = [
     "run",
     "--frozen",
@@ -87,7 +91,7 @@ export function buildFoundationPythonCommand(
     "--project",
     foundationProject,
     "python",
-    join(foundationProject, "src", entrypoint),
+    target,
     ...args,
   ];
   return {
@@ -122,24 +126,19 @@ export class ProcessCancelledError extends Error {
 async function openProcessLog(
   path: string,
   exclusive: boolean,
+  append: boolean,
 ): Promise<WriteStream> {
-  const stream = createWriteStream(path, {
-    flags: exclusive ? "wx" : "w",
-    mode: 0o600,
-  });
-  await new Promise<void>((resolveOpen, reject) => {
-    const onOpen = () => {
-      stream.off("error", onError);
-      resolveOpen();
-    };
-    const onError = (error: Error) => {
-      stream.off("open", onOpen);
-      reject(error);
-    };
-    stream.once("open", onOpen);
-    stream.once("error", onError);
-  });
-  return stream;
+  const flags = constants.O_WRONLY
+    | constants.O_CREAT
+    | (exclusive ? constants.O_EXCL : append ? constants.O_APPEND : constants.O_TRUNC)
+    | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW);
+  const handle = await open(path, flags, 0o600);
+  try {
+    return handle.createWriteStream({ autoClose: true });
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
 }
 
 export async function runLoggedProcess(args: {
@@ -157,10 +156,12 @@ export async function runLoggedProcess(args: {
   cancelPollMs?: number;
   terminateProcessGroupOnExit?: boolean;
   exclusiveLog?: boolean;
+  appendLog?: boolean;
+  shutdownGraceMs?: number;
 }): Promise<LoggedProcessResult> {
   if (args.logPath) await mkdir(dirname(args.logPath), { recursive: true });
   const logStream = args.logPath
-    ? await openProcessLog(args.logPath, args.exclusiveLog ?? false)
+    ? await openProcessLog(args.logPath, args.exclusiveLog ?? false, args.appendLog ?? false)
     : null;
   let stderr = "";
 
@@ -191,7 +192,7 @@ export async function runLoggedProcess(args: {
       const requestStop = (signal: NodeJS.Signals = "SIGTERM") => {
         killProcessGroup(signal);
         if (!forceKillTimer) {
-          forceKillTimer = setTimeout(() => killProcessGroup("SIGKILL"), 5_000);
+          forceKillTimer = setTimeout(() => killProcessGroup("SIGKILL"), args.shutdownGraceMs ?? 5_000);
           forceKillTimer.unref();
         }
       };

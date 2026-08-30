@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { mkdir } from "node:fs/promises";
 import {
@@ -55,6 +55,15 @@ function resolveLocalReference(value: unknown, baseDirectory: string): unknown {
   return resolve(baseDirectory, value);
 }
 
+export function localPathsOverlap(left: string, right: string): boolean {
+  const contains = (parent: string, candidate: string): boolean => {
+    const relation = relative(resolve(parent), resolve(candidate));
+    return relation === ""
+      || (!isAbsolute(relation) && relation !== ".." && !relation.startsWith(`..${sep}`));
+  };
+  return contains(left, right) || contains(right, left);
+}
+
 /** Resolve dataset paths relative to the spec/request file itself. */
 export function resolveLocalRunInputPaths(raw: unknown, inputPath: string): unknown {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
@@ -64,6 +73,13 @@ export function resolveLocalRunInputPaths(raw: unknown, inputPath: string): unkn
   if (dataset && typeof dataset === "object" && !Array.isArray(dataset)) {
     const fields = dataset as Record<string, unknown>;
     for (const key of ["training", "validation", "test"] as const) {
+      if (fields[key] !== undefined) fields[key] = resolveLocalReference(fields[key], baseDirectory);
+    }
+  }
+  const foundation = value.foundation;
+  if (foundation && typeof foundation === "object" && !Array.isArray(foundation)) {
+    const fields = foundation as Record<string, unknown>;
+    for (const key of ["corpus_path", "validation_path", "checkpoint_backup_dir"] as const) {
       if (fields[key] !== undefined) fields[key] = resolveLocalReference(fields[key], baseDirectory);
     }
   }

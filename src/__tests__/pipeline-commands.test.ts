@@ -246,8 +246,13 @@ describe("pipeline commands", () => {
         "node", "tt", "--json", "pipeline", "run",
         "--file", join(dir, "missing.pipeline.json"),
         "--spec", spec,
+        "--resume", join(dir, "foundation-run"),
       ]);
       expect(execute).toHaveBeenCalledOnce();
+      expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+        outputDir: join(dir, "foundation-run"),
+        resume: true,
+      }));
       const output = JSON.parse(log.mock.calls.at(-1)?.[0] as string);
       expect(output.status).toBe("succeeded");
       expect(output.report_path).toBe(join(dir, "report.json"));

@@ -168,8 +168,14 @@ test("dataset paths resolve relative to the spec and file URIs stay absolute", (
       training: "data/train.jsonl",
       validation: "file:///shared/validation.jsonl",
     },
+    foundation: {
+      corpus_path: "data/pretrain",
+      validation_path: "data/held-out.jsonl",
+      checkpoint_backup_dir: "~/tt-checkpoints",
+    },
   }, inputPath) as {
     dataset_prebuilt: { training: string; validation: string };
+    foundation: { corpus_path: string; validation_path: string; checkpoint_backup_dir: string };
   };
   assert.equal(
     resolved.dataset_prebuilt.training,
@@ -179,6 +185,9 @@ test("dataset paths resolve relative to the spec and file URIs stay absolute", (
     resolved.dataset_prebuilt.validation,
     "file:///shared/validation.jsonl",
   );
+  assert.equal(resolved.foundation.corpus_path, join(tmpdir(), "project", "data", "pretrain"));
+  assert.equal(resolved.foundation.validation_path, join(tmpdir(), "project", "data", "held-out.jsonl"));
+  assert.ok(resolved.foundation.checkpoint_backup_dir.endsWith("/tt-checkpoints"));
 });
 
 test("init and load treat a foundation spec as its own engine", async () => {

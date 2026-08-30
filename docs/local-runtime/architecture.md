@@ -51,15 +51,19 @@ TT Local currently ships two such methods:
   rejects `nproc_per_node` values above 1 and unsupported steps such as
   `compare` before creating run artifacts.
 
-The foundation engine is a readable lifecycle baseline inspired by nanochat,
-not a port of nanochat's data, distributed, optimizer, or compute-optimal
-training stack. Its bounded pretraining corpus repeats the foundation spec's
-prompt and examples, and chat evaluation reuses those examples. RL uses a
+The foundation engine is a readable single-GPU trainer inspired by nanochat,
+not a port of nanochat's distributed or compute-optimal training stack. It can
+stream configured text/JSONL shards into a deterministic token cache, use a
+distinct held-out BPB corpus, and atomically recover model, optimizer,
+scheduler, RNG, counters, and token position. Without a configured corpus it
+retains the bounded prompt/example smoke path. Chat evaluation reuses the spec
+examples. RL uses a
 single seeded on-policy sample per step with a sparse last-number exact reward
 and requires every expected output to contain a number. BPB is normalized over
 decoded target bytes from each evaluated window, but the corpus remains
-example-derived. The resulting metrics prove stage wiring and can demonstrate
-deliberate overfitting; they do not measure held-out model capability.
+example-derived unless `validation_path` is configured. Smoke metrics prove
+stage wiring and can demonstrate deliberate overfitting; they do not measure
+held-out model capability.
 
 Do not mix those lockfiles. Each engine hashes its own `pyproject.toml` and
 `uv.lock` into a distinct cache environment.

@@ -8,7 +8,7 @@ from tokenizers import Tokenizer
 from torch.nn import functional as F
 
 from common import load_config, write_json
-from data import END, decoded_byte_count, encode_ids, example_pairs, format_prompt, smoke_corpus, window_tokens
+from data import END, decoded_byte_count, encode_ids, example_pairs, format_prompt, iter_corpus_documents, smoke_corpus, window_tokens
 from model import bits_per_byte, generate, load_model
 
 
@@ -98,7 +98,15 @@ def main(argv: list[str] | None = None) -> None:
     output_dir = Path(config["output_dir"])
     metrics: dict = {"ok": True, "evaluator": evaluator, "device": str(device)}
     if evaluator == "bpb":
-        corpus = smoke_corpus(examples, int(config.get("max_chars") or 20_000), extra=str(config.get("system_prompt") or ""))
+        validation_path = config.get("validation_path")
+        if validation_path:
+            validation_chars = int(config.get("validation_max_chars") or 2_000_000)
+            corpus = "".join(iter_corpus_documents(validation_path, validation_chars))
+            metrics["held_out"] = True
+            metrics["validation_path"] = str(validation_path)
+        else:
+            corpus = smoke_corpus(examples, int(config.get("max_chars") or 20_000), extra=str(config.get("system_prompt") or ""))
+            metrics["held_out"] = False
         metrics.update(evaluate_bpb(model, tokenizer, corpus, sequence_length, device))
     elif evaluator == "chat":
         metrics.update(evaluate_chat(model, tokenizer, str(config.get("system_prompt") or ""), examples, device))

@@ -1,17 +1,19 @@
 import { constants } from "node:fs";
-import { access, mkdir, statfs, unlink, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, statfs, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import type { FineTuneRunRequest, LocalFoundationSpecFile, LocalRunnerConfig } from "./contracts.js";
-import { foundationPlaceholderIssues } from "./local-project.js";
+import { foundationPlaceholderIssues, localPathsOverlap } from "./local-project.js";
 import {
   minimalMachineLearningEnvironment,
   withHuggingFaceCacheEnvironment,
 } from "./huggingface-cache.js";
 import {
   buildBundledPythonCommand,
+  buildFoundationPythonCommand,
   withBundledPythonEnvironment,
+  withFoundationPythonEnvironment,
 } from "./process-runner.js";
 import { resolveTrainingModel } from "./model-registry.js";
 import { defaultLocalHome } from "./store.js";
@@ -167,6 +169,26 @@ interface PythonProbePlan {
   env: NodeJS.ProcessEnv;
 }
 
+function foundationPythonProbePlan(requireBf16: boolean): PythonProbePlan {
+  const source = [
+    "import json",
+    "import numpy, safetensors, tokenizers, torch",
+    "assert torch.cuda.is_available(), 'TT Foundation training requires CUDA but torch.cuda.is_available() is false'",
+    ...(requireBf16
+      ? ["assert torch.cuda.is_bf16_supported(), 'TT Foundation BF16 training was requested but this device does not support BF16'"]
+      : []),
+    "props = torch.cuda.get_device_properties(0)",
+    "print(json.dumps({'python_ok': True, 'torch': torch.__version__, 'cuda_available': True, 'bf16': torch.cuda.is_bf16_supported(), 'cuda_device': torch.cuda.get_device_name(0), 'compute_capability': list(torch.cuda.get_device_capability(0)), 'total_memory_bytes': props.total_memory}))",
+  ].join("; ");
+  const entrypoint = buildFoundationPythonCommand("-c", [source]);
+  return {
+    name: "python-runtime",
+    command: entrypoint.command,
+    args: entrypoint.commandArgs,
+    env: withFoundationPythonEnvironment(process.env),
+  };
+}
+
 function pythonProbeSource(device: LocalRunnerConfig["evaluation"]["inference"]["device"]): string {
   return [
     "import json",
@@ -220,6 +242,29 @@ function foundationPlaceholderCheck(spec: LocalFoundationSpecFile): DoctorCheck 
       ? "The spec still contains generated placeholder content; edit it before training."
       : `${spec.examples.length} spec example(s); foundation engine`,
   };
+}
+
+async function foundationCorpusCheck(name: string, path: string): Promise<DoctorCheck> {
+  const resolvedPath = resolve(path);
+  try {
+    const info = await lstat(resolvedPath);
+    const supported = info.isFile() || info.isDirectory();
+    return {
+      name,
+      ok: supported && !info.isSymbolicLink(),
+      message: supported && !info.isSymbolicLink()
+        ? `${resolvedPath} is available for streaming.`
+        : `${resolvedPath} must be a regular file or directory, not a symbolic link.`,
+      details: { path: resolvedPath },
+    };
+  } catch (error) {
+    return {
+      name,
+      ok: false,
+      message: `${resolvedPath}: ${error instanceof Error ? error.message : String(error)}`,
+      details: { path: resolvedPath },
+    };
+  }
 }
 
 function placeholderSpecCheck(request: FineTuneRunRequest): DoctorCheck {
@@ -285,11 +330,39 @@ export async function runDoctor(
 
   if (foundationSpec) {
     checks.push(foundationPlaceholderCheck(foundationSpec));
+    if (foundationSpec.foundation.corpus_path) {
+      checks.push(await foundationCorpusCheck("pretraining-corpus", foundationSpec.foundation.corpus_path));
+    }
+    if (foundationSpec.foundation.validation_path) {
+      checks.push(await foundationCorpusCheck("validation-corpus", foundationSpec.foundation.validation_path));
+    }
+    if (
+      foundationSpec.foundation.corpus_path
+      && foundationSpec.foundation.validation_path
+      && localPathsOverlap(
+        foundationSpec.foundation.corpus_path,
+        foundationSpec.foundation.validation_path,
+      )
+    ) {
+      checks.push({
+        name: "held-out-corpus",
+        ok: false,
+        message: "foundation.corpus_path and foundation.validation_path must be distinct.",
+      });
+    }
+    if (foundationSpec.foundation.checkpoint_backup_dir) {
+      checks.push(await writableDirectoryCheck(
+        "checkpoint-backup",
+        foundationSpec.foundation.checkpoint_backup_dir,
+      ));
+    }
   } else if (request) {
     checks.push(placeholderSpecCheck(request));
     resolveTrainingModel(request.spec_snapshot.base_model);
   }
-  const pythonPlans = buildDoctorPythonPlans(config);
+  const pythonPlans = foundationSpec && !config.dryRun
+    ? [foundationPythonProbePlan(foundationSpec.foundation.bf16 !== false)]
+    : buildDoctorPythonPlans(config);
   if (pythonPlans.length > 0) {
     const uvVersion = await runCommand("uv", ["--version"]);
     checks.push({
@@ -355,20 +428,22 @@ export async function runDoctor(
     });
   }
 
-  const trainingCommand = buildBundledPythonCommand("train.py").displayCommand;
+  const trainingCommand = foundationSpec
+    ? buildFoundationPythonCommand("pretrain.py").displayCommand
+    : buildBundledPythonCommand("train.py").displayCommand;
   checks.push({
     name: "effective-plan",
     ok: true,
     message: "Resolved the configured training and evaluation plan.",
     details: {
       training_command: trainingCommand ?? null,
-      evaluation_provider: "transformers",
+      evaluation_provider: foundationSpec ? "foundation" : "transformers",
       evaluation_device: device,
       artifact_root: resolve(config.artifactRoot),
       store_root: resolve(config.storeRoot ?? defaultLocalHome()),
       model_cache: resolve(config.paths.modelCache ?? process.env.HF_HOME ?? join(homedir(), ".cache", "huggingface")),
       base_model: request?.spec_snapshot.base_model ?? null,
-      scoring_mode: config.evaluation.scoring.mode,
+      scoring_mode: foundationSpec ? "bpb/chat" : config.evaluation.scoring.mode,
     },
   });
 
