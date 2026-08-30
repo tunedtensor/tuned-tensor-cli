@@ -16,7 +16,15 @@ from torch.nn import functional as F
 
 from checkpoint import CheckpointManager
 from common import append_jsonl, ensure_private_directory, load_config, make_private_file, require_cuda, write_json
-from data import END, corpus_hash, corpus_manifest, example_pairs, iter_corpus_documents, smoke_corpus
+from data import (
+    END,
+    corpus_hash,
+    corpus_manifest,
+    example_pairs,
+    instruction_corpus_documents,
+    iter_corpus_documents,
+    smoke_corpus,
+)
 from model import FoundationGPT, model_config_from_depth, param_count, save_model
 
 
@@ -37,10 +45,12 @@ def file_sha256(path: str | Path) -> str:
 def source_signature(config: dict[str, Any]) -> dict[str, Any]:
     corpus_path = config.get("corpus_path")
     if corpus_path:
+        instruction = str(config.get("system_prompt") or "").strip()
         return {
             "kind": "files",
             "manifest": corpus_manifest(corpus_path),
             "max_chars": int(config.get("max_chars") or 0),
+            "instruction_sha256": corpus_hash(instruction),
         }
     examples = example_pairs(config.get("examples") or [])
     corpus = smoke_corpus(
@@ -142,7 +152,10 @@ def prepare_token_cache(
             recorded_bytes = 0
     corpus_path = config.get("corpus_path")
     if corpus_path:
-        documents = iter_corpus_documents(corpus_path, int(config.get("max_chars") or 0))
+        documents = instruction_corpus_documents(
+            str(config.get("system_prompt") or ""),
+            iter_corpus_documents(corpus_path, int(config.get("max_chars") or 0)),
+        )
     else:
         examples = example_pairs(config.get("examples") or [])
         documents = iter([smoke_corpus(

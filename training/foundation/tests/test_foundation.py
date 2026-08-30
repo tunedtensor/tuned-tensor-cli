@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
+from tokenizers import Tokenizer
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import torch
@@ -26,6 +28,7 @@ from data import (
     IGNORE_INDEX,
     decoded_byte_count,
     encode_ids,
+    encode_prompt_ids,
     encode_sft_example,
     format_chat,
     format_prompt,
@@ -103,7 +106,7 @@ class FoundationModelTests(unittest.TestCase):
 
     def test_generation_stops_when_every_row_emits_the_stop_token(self) -> None:
         class FakeModel:
-            config = {"sequence_length": 8}
+            config = {"sequence_length": 256}
 
             def __init__(self) -> None:
                 self.calls = 0
@@ -128,6 +131,52 @@ class FoundationModelTests(unittest.TestCase):
 
 
 class FoundationEvaluationTests(unittest.TestCase):
+    def test_inference_evaluation_formats_the_shared_system_instruction(self) -> None:
+        encoded: list[str] = []
+
+        class FakeTokenizer:
+            def encode(self, text: str) -> Any:
+                encoded.append(text)
+                return type("Encoding", (), {"ids": list(range(len(text)))})()
+
+        class FakeModel:
+            config = {"sequence_length": 256}
+
+            def eval(self) -> None:
+                return None
+
+            def __call__(self, tokens: torch.Tensor) -> torch.Tensor:
+                logits = torch.zeros(tokens.size(0), tokens.size(1), 8)
+                logits[:, -1, 0] = 1
+                return logits
+
+        evaluate.evaluate_inference(
+            cast(FoundationGPT, FakeModel()),
+            cast(Any, FakeTokenizer()),
+            "Answer briefly.\n\nGuidelines:\n- Be direct.",
+            "hello",
+            torch.device("cpu"),
+        )
+
+        self.assertEqual(
+            encoded[0],
+            format_prompt("Answer briefly.\n\nGuidelines:\n- Be direct.", "hello"),
+        )
+
+    def test_bounded_prompt_preserves_the_instruction_and_trims_user_content(self) -> None:
+        class CharacterTokenizer:
+            def encode(self, text: str) -> Any:
+                return type("Encoding", (), {"ids": [ord(char) for char in text]})()
+
+        tokenizer = cast(Any, CharacterTokenizer())
+        instruction = "Keep this instruction."
+        ids = encode_prompt_ids(tokenizer, instruction, "x" * 200, 80)
+        text = "".join(chr(value) for value in ids)
+
+        self.assertTrue(text.startswith(f"<|system|>{instruction}<|end|><|user|>"))
+        self.assertTrue(text.endswith("<|end|><|assistant|>"))
+        self.assertEqual(len(ids), 80)
+
     def test_chat_evaluation_stops_at_the_tokenizer_end_token(self) -> None:
         class FakeEncoding:
             ids = [1, 2]
@@ -175,6 +224,28 @@ class FoundationEvaluationTests(unittest.TestCase):
 
 
 class FoundationTokenizerTests(unittest.TestCase):
+    def test_corpus_backed_tokenizer_includes_the_compiled_instruction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus = root / "corpus.txt"
+            corpus.write_text("alpha " * 64, encoding="utf-8")
+            output = root / "tokenizer"
+            instruction = "Ωmega guideline"
+            config = root / "config.json"
+            config.write_text(json.dumps({
+                "output_dir": str(output),
+                "vocab_size": 64,
+                "max_chars": 2000,
+                "corpus_path": str(corpus),
+                "system_prompt": instruction,
+                "examples": [],
+            }), encoding="utf-8")
+
+            tokenizer_entrypoint.main(["--config", str(config)])
+
+            tokenizer = Tokenizer.from_file(str(output / "tokenizer.json"))
+            self.assertNotIn(tokenizer.token_to_id("<unk>"), tokenizer.encode(instruction).ids)
+
     def test_whitespace_bpe_round_trips_words(self) -> None:
         tokenizer = train_tokenizer("hello world hello there hello world\n" * 32, vocab_size=64)
         encoded = tokenizer.encode("hello world")
@@ -207,6 +278,75 @@ class FoundationTokenizerTests(unittest.TestCase):
 
 
 class FoundationPretrainReliabilityTests(unittest.TestCase):
+    def test_corpus_backed_token_cache_includes_the_compiled_instruction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus = root / "corpus.txt"
+            corpus.write_text("alpha beta", encoding="utf-8")
+            instruction = "Ωmega guideline"
+            tokenizer = train_tokenizer([instruction, "alpha beta"], vocab_size=64)
+            tokenizer_path = root / "tokenizer.json"
+            tokenizer.save(str(tokenizer_path))
+            output = root / "work"
+            output.mkdir()
+
+            tokens, _metadata = pretrain.prepare_token_cache(
+                tokenizer,
+                tokenizer_path,
+                {
+                    "corpus_path": str(corpus),
+                    "max_chars": 1000,
+                    "system_prompt": instruction,
+                },
+                output,
+            )
+
+            end_id = tokenizer.token_to_id(END)
+            expected: list[int] = []
+            for document in [instruction, "alpha beta"]:
+                expected.extend(tokenizer.encode(document).ids)
+                if end_id is not None:
+                    expected.append(end_id)
+            self.assertEqual(tokens.tolist(), expected)
+
+    def test_compiled_instruction_change_invalidates_corpus_backed_token_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus = root / "corpus.txt"
+            corpus.write_text("alpha beta", encoding="utf-8")
+            first_instruction = "First guideline"
+            second_instruction = "Second constraint"
+            tokenizer = train_tokenizer(
+                [first_instruction, second_instruction, "alpha beta"],
+                vocab_size=64,
+            )
+            tokenizer_path = root / "tokenizer.json"
+            tokenizer.save(str(tokenizer_path))
+            output = root / "work"
+            output.mkdir()
+            base_config = {"corpus_path": str(corpus), "max_chars": 1000}
+
+            first, _metadata = pretrain.prepare_token_cache(
+                tokenizer,
+                tokenizer_path,
+                {**base_config, "system_prompt": first_instruction},
+                output,
+            )
+            first_tokens = first.tolist()
+            del first
+            second, _metadata = pretrain.prepare_token_cache(
+                tokenizer,
+                tokenizer_path,
+                {**base_config, "system_prompt": second_instruction},
+                output,
+            )
+
+            self.assertNotEqual(second.tolist(), first_tokens)
+            self.assertEqual(
+                second[:len(tokenizer.encode(second_instruction).ids)].tolist(),
+                tokenizer.encode(second_instruction).ids,
+            )
+
     def test_token_cache_resumes_from_published_document_progress(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             import hashlib
@@ -615,6 +755,24 @@ class FoundationSftMaskTests(unittest.TestCase):
             labels[first_assistant_target:first_assistant_target + len(full_ids) - len(prefix_ids)],
             full_ids[len(prefix_ids):],
         )
+
+    def test_truncated_assistant_targets_keep_the_end_token_supervised(self) -> None:
+        tokenizer = train_tokenizer(
+            "<|system|> You are helpful. <|user|> hello <|assistant|> world <｜end｜>\n" * 16,
+            vocab_size=96,
+        )
+
+        _input_ids, labels = encode_sft_example(
+            tokenizer,
+            "You are helpful.",
+            "hello " * 100,
+            "world " * 100,
+            32,
+        )
+
+        supervised = [label for label in labels if label != IGNORE_INDEX]
+        self.assertGreaterEqual(len(supervised), 2)
+        self.assertEqual(supervised[-1], tokenizer.token_to_id(END))
 
 
 class FoundationRlRewardTests(unittest.TestCase):

@@ -7,7 +7,7 @@ from tokenizers import Tokenizer
 from torch.nn import functional as F
 
 from common import load_config, require_cuda, write_json
-from data import END, encode_ids, example_pairs, format_prompt, numeric_reward
+from data import END, encode_generation_prompt, example_pairs, numeric_reward
 from model import FoundationGPT, load_model, param_count, save_model
 
 
@@ -73,10 +73,18 @@ def main(argv: list[str] | None = None) -> None:
     last_loss = 0.0
     for step in range(steps):
         example = examples[step % len(examples)]
-        prompt_ids = encode_ids(tokenizer, format_prompt(str(config.get("system_prompt") or ""), example["input"]))
+        context_length = int(model.config["sequence_length"])
+        prompt_ids, completion_tokens = encode_generation_prompt(
+            tokenizer,
+            str(config.get("system_prompt") or ""),
+            example["input"],
+            context_length,
+            24,
+        )
         prompt_ids, completion_tokens = bounded_rollout(
             prompt_ids,
-            int(model.config["sequence_length"]),
+            context_length,
+            completion_tokens,
         )
         prompt = torch.tensor([prompt_ids], dtype=torch.long, device=device)
         sampled = sample_rollout(

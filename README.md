@@ -206,6 +206,13 @@ Two local engines share that document version:
   `inference` evaluators. Requires a foundation `tunedtensor.json`
   (`engine: "foundation"`, at least two examples, no `base_model`).
 
+Both engines are spec-driven. `system_prompt`, `guidelines`, and `constraints`
+are compiled into one canonical system instruction, and `examples` supply the
+demonstrated behavior. Adapter training, foundation tokenizer/pretraining,
+chat SFT, optional RL, and evaluation all receive that same compiled
+instruction. Engine-specific fields choose how TT learns the behavior; they do
+not redefine the behavior itself.
+
 The foundation engine is a readable, single-GPU local trainer inspired by Andrej
 Karpathy's [nanochat](https://github.com/karpathy/nanochat), not a port of its
 distributed training stack. With `foundation.corpus_path`, it streams `.txt`

@@ -68,6 +68,20 @@ held-out model capability.
 Do not mix those lockfiles. Each engine hashes its own `pyproject.toml` and
 `uv.lock` into a distinct cache environment.
 
+## Spec-driven instruction contract
+
+Adapter and foundation specs extend one engine-neutral behavior schema:
+`name`, `description`, `system_prompt`, `guidelines`, `constraints`, and
+`examples`. Node compiles the three instruction fields into one canonical
+system message. The adapter dataset compiler and every foundation stage use
+that same compiler, so tokenizer input, pretraining smoke data, chat SFT, RL,
+and evaluation all receive guidelines and constraints consistently.
+
+Engine-specific fields control execution only. Adapter specs add `base_model`,
+LoRA hyperparameters, and optional prebuilt datasets. Foundation specs add
+`engine: "foundation"` and the `foundation` training configuration. The
+behavioral instruction remains the shared source of truth.
+
 ## Python boundary
 
 Node owns input validation, state, process lifecycle, manifests, and reports.

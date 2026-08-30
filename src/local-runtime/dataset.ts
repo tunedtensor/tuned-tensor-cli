@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import type { BehaviorSpecExample, SpecSnapshot } from "./contracts.js";
+import type { BehaviorSpec, BehaviorSpecExample, SpecSnapshot } from "./contracts.js";
 
 export interface ChatJsonlRow {
   messages: Array<{
@@ -72,14 +72,19 @@ export async function normalizeChatJsonlForRelocation(path: string): Promise<str
   return (await loadNormalizedChatJsonl(path)).jsonl;
 }
 
-export function buildSystemMessage(spec: SpecSnapshot): string {
+/** Compile the shared behavior fields into the instruction seen by either engine. */
+export function buildSystemMessage(
+  spec: Pick<BehaviorSpec, "system_prompt" | "guidelines" | "constraints">,
+): string {
   const parts: string[] = [];
+  const guidelines = spec.guidelines.map((value) => value.trim()).filter(Boolean);
+  const constraints = spec.constraints.map((value) => value.trim()).filter(Boolean);
   if (spec.system_prompt.trim()) parts.push(spec.system_prompt.trim());
-  if (spec.guidelines.length > 0) {
-    parts.push(`Guidelines:\n${spec.guidelines.map((guideline) => `- ${guideline}`).join("\n")}`);
+  if (guidelines.length > 0) {
+    parts.push(`Guidelines:\n${guidelines.map((guideline) => `- ${guideline}`).join("\n")}`);
   }
-  if (spec.constraints.length > 0) {
-    parts.push(`Constraints:\n${spec.constraints.map((constraint) => `- ${constraint}`).join("\n")}`);
+  if (constraints.length > 0) {
+    parts.push(`Constraints:\n${constraints.map((constraint) => `- ${constraint}`).join("\n")}`);
   }
   return parts.join("\n\n") || "Follow the demonstrated behavior.";
 }
