@@ -57,6 +57,11 @@ function requiredBoolean(value: unknown, label: string): boolean {
   return value;
 }
 
+function optionalString(value: unknown, label: string): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  return requiredString(value, label);
+}
+
 async function requireMutationGuardSupport(api: AgentMutationApi): Promise<void> {
   const version = record(data(await api.get("/version")));
   const capabilities = version?.capabilities;
@@ -129,12 +134,19 @@ export async function approvePreparedAction(
         if (!pipeline) throw new Error("Prepared pipeline content is invalid.");
         const specPath = requiredString(input.spec_path, "spec path");
         const specSha256 = requiredString(input.spec_sha256, "spec fingerprint");
+        const configPath = optionalString(input.config_path, "config path");
+        const configSha256 = optionalString(input.config_sha256, "config fingerprint");
+        if (Boolean(configPath) !== Boolean(configSha256)) {
+          throw new Error("Prepared action config path and fingerprint must be provided together.");
+        }
         const dryRun = requiredBoolean(input.dry_run, "dry-run flag");
         execute = async () => await executeLocalPipelineAction({
           workspaceRoot,
           pipeline,
           specPath,
           expectedSpecSha256: specSha256,
+          expectedConfigPath: configPath,
+          expectedConfigSha256: configSha256,
           dryRun,
           runCommand: options.runPipelineCommand!,
           signal: options.signal,

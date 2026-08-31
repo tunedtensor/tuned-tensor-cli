@@ -58,6 +58,9 @@ describe("deterministic local approvals", () => {
   it("executes a sealed local pipeline through the deterministic command runner", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "tt-local-pipeline-approval-"));
     const specPath = join(workspace, "tunedtensor.json");
+    writeFileSync(join(workspace, "local-runner.json"), JSON.stringify({
+      artifactRoot: "artifacts",
+    }));
     writeFileSync(specPath, JSON.stringify({
       name: "Sentiment",
       base_model: "Qwen/Qwen3.5-2B",
@@ -83,6 +86,8 @@ describe("deterministic local approvals", () => {
         pipeline: prepared.pipeline,
         spec_path: prepared.specPath,
         spec_sha256: prepared.specSha256,
+        config_path: prepared.configPath,
+        config_sha256: prepared.configSha256,
         dry_run: prepared.dryRun,
       },
     };
@@ -95,6 +100,8 @@ describe("deterministic local approvals", () => {
         .toEqual(prepared.pipeline);
       expect(JSON.parse(readFileSync(command[command.indexOf("--spec") + 1]!, "utf8")))
         .toMatchObject({ name: "Sentiment" });
+      expect(JSON.parse(readFileSync(command[command.indexOf("--config") + 1]!, "utf8")))
+        .toMatchObject({ artifactRoot: join(workspace, "artifacts") });
       return { exitCode: 0, signal: null };
     });
 
@@ -108,6 +115,7 @@ describe("deterministic local approvals", () => {
         completed: true,
         engine: "adapter",
         spec_path: "./tunedtensor.json",
+        config_path: "./local-runner.json",
         dry_run: true,
       });
       expect(transitions).toEqual(["executing", "completed"]);

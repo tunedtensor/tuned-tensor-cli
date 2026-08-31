@@ -172,8 +172,8 @@ is bound to the current workspace so changing directories before approval fails
 safely instead of writing somewhere else. Ambiguous write failures remain
 sealed as `outcome_unknown` for manual inspection. `/reject` never mutates.
 Pipeline execution also waits for `/approve`. Preparation fingerprints the
-workspace spec and approval revalidates it, copies the resolved spec and
-pipeline into private temporary inputs, and invokes `tt pipeline run`
+workspace spec and adjacent config, revalidates both, copies the resolved spec,
+config, and pipeline into private temporary inputs, and invokes `tt pipeline run`
 deterministically. A changed spec requires a new review.
 
 Useful shell controls include `/help`, `/status`, `/context`, `/model`,

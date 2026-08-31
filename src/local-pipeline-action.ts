@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   canonicalPipeline,
@@ -16,9 +17,12 @@ import {
   parseLocalRunInput,
   type LocalRunInput,
 } from "./local-runtime/local-project.js";
+import { parseLocalRunnerConfig } from "./local-runtime/orchestrator.js";
+import type { LocalRunnerConfig } from "./local-runtime/contracts.js";
 
 const DEFAULT_SPEC_PATH = "tunedtensor.json";
 const MAX_SPEC_BYTES = 2_000_000;
+const MAX_CONFIG_BYTES = 1_000_000;
 
 export interface PreparedLocalPipelineAction {
   pipeline: Pipeline;
@@ -30,7 +34,9 @@ export interface PreparedLocalPipelineAction {
   resolvedSpec: Exclude<LocalRunInput, { kind: "request" }>[
     "spec"
   ];
-  specDirectory: string;
+  configPath?: string;
+  configSha256?: string;
+  resolvedConfig?: LocalRunnerConfig;
   workspaceRoot: string;
 }
 
@@ -103,6 +109,45 @@ async function resolveWorkspaceSpec(
   };
 }
 
+function errorCode(error: unknown): string | undefined {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code)
+    : undefined;
+}
+
+async function resolveAdjacentConfig(args: {
+  workspaceRoot: string;
+  specPath: string;
+}): Promise<{ path: string; displayPath: string; source: Buffer } | undefined> {
+  const candidate = join(dirname(args.specPath), "local-runner.json");
+  let fileInfo: Awaited<ReturnType<typeof lstat>>;
+  try {
+    fileInfo = await lstat(candidate);
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return undefined;
+    throw error;
+  }
+  if (fileInfo.isSymbolicLink() || !fileInfo.isFile()) {
+    throw new Error("Adjacent local-runner.json must be a regular file, not a directory or symlink.");
+  }
+  if (fileInfo.size > MAX_CONFIG_BYTES) {
+    throw new Error(`Adjacent local-runner.json exceeds ${MAX_CONFIG_BYTES} bytes.`);
+  }
+  const physicalPath = await realpath(candidate);
+  if (!isWithin(args.workspaceRoot, physicalPath)) {
+    throw new Error("Adjacent local-runner.json resolves outside the current workspace.");
+  }
+  const source = await readFile(physicalPath);
+  if (source.byteLength > MAX_CONFIG_BYTES) {
+    throw new Error(`Adjacent local-runner.json exceeds ${MAX_CONFIG_BYTES} bytes.`);
+  }
+  return {
+    path: physicalPath,
+    displayPath: `./${relative(args.workspaceRoot, physicalPath).split(sep).join("/")}`,
+    source,
+  };
+}
+
 function pipelineForInput(
   input: Exclude<LocalRunInput, { kind: "request" }>,
   requested?: unknown,
@@ -132,6 +177,16 @@ export async function prepareLocalPipelineAction(args: {
   }
   if (input.kind === "foundation-spec") assertFoundationSpecReady(input.spec);
   else assertLocalRunInputReady(input.request);
+  const config = await resolveAdjacentConfig({
+    workspaceRoot: spec.workspaceRoot,
+    specPath: spec.path,
+  });
+  const resolvedConfig = config
+    ? parseLocalRunnerConfig(
+        JSON.parse(config.source.toString("utf8")) as unknown,
+        config.path,
+      )
+    : undefined;
 
   const pipeline = pipelineForInput(input, args.pipeline);
   const normalized = parsePipeline(pipeline);
@@ -158,7 +213,11 @@ export async function prepareLocalPipelineAction(args: {
     dryRun: args.dryRun ?? true,
     engine: input.kind === "foundation-spec" ? "foundation" : "adapter",
     resolvedSpec: input.spec,
-    specDirectory: dirname(spec.path),
+    ...(config ? {
+      configPath: config.displayPath,
+      configSha256: createHash("sha256").update(config.source).digest("hex"),
+      resolvedConfig,
+    } : {}),
     workspaceRoot: spec.workspaceRoot,
   };
 }
@@ -168,6 +227,8 @@ export async function executeLocalPipelineAction(args: {
   pipeline: unknown;
   specPath: string;
   expectedSpecSha256: string;
+  expectedConfigPath?: string;
+  expectedConfigSha256?: string;
   dryRun: boolean;
   runCommand: LocalPipelineCommandRunner;
   signal?: AbortSignal;
@@ -176,6 +237,7 @@ export async function executeLocalPipelineAction(args: {
   command: string[];
   engine: "adapter" | "foundation";
   spec_path: string;
+  config_path: string | null;
   dry_run: boolean;
 }> {
   let prepared: PreparedLocalPipelineAction;
@@ -197,16 +259,22 @@ export async function executeLocalPipelineAction(args: {
       "The Tuned Tensor spec changed after this pipeline action was prepared; review and prepare it again.",
     );
   }
+  if (
+    prepared.configPath !== args.expectedConfigPath
+    || prepared.configSha256 !== args.expectedConfigSha256
+  ) {
+    throw new LocalPipelineActionError(
+      "The adjacent local-runner.json changed after this pipeline action was prepared; review and prepare it again.",
+    );
+  }
 
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "tt-agent-pipeline-"));
   const temporaryId = randomUUID();
-  const pipelinePath = join(
-    prepared.specDirectory,
-    `.tt-agent-${temporaryId}.pipeline.json`,
-  );
-  const specPath = join(
-    prepared.specDirectory,
-    `.tt-agent-${temporaryId}.spec.json`,
-  );
+  const pipelinePath = join(temporaryDirectory, `${temporaryId}.pipeline.json`);
+  const specPath = join(temporaryDirectory, `${temporaryId}.spec.json`);
+  const configPath = prepared.resolvedConfig
+    ? join(temporaryDirectory, `${temporaryId}.config.json`)
+    : undefined;
   const command = [
     "pipeline",
     "run",
@@ -214,6 +282,7 @@ export async function executeLocalPipelineAction(args: {
     pipelinePath,
     "--spec",
     specPath,
+    ...(configPath ? ["--config", configPath] : []),
     ...(prepared.dryRun ? ["--dry-run"] : []),
   ];
   try {
@@ -223,6 +292,13 @@ export async function executeLocalPipelineAction(args: {
         mode: 0o600,
         flag: "wx",
       }),
+      ...(configPath && prepared.resolvedConfig ? [
+        writeFile(configPath, `${JSON.stringify(prepared.resolvedConfig, null, 2)}\n`, {
+          encoding: "utf8",
+          mode: 0o600,
+          flag: "wx",
+        }),
+      ] : []),
       writeFile(specPath, `${JSON.stringify(prepared.resolvedSpec, null, 2)}\n`, {
         encoding: "utf8",
         mode: 0o600,
@@ -244,6 +320,7 @@ export async function executeLocalPipelineAction(args: {
       command: ["tt", "pipeline", "run", "--spec", prepared.specPath],
       engine: prepared.engine,
       spec_path: prepared.specPath,
+      config_path: prepared.configPath ?? null,
       dry_run: prepared.dryRun,
     };
   } catch (error) {
@@ -253,9 +330,6 @@ export async function executeLocalPipelineAction(args: {
       error,
     );
   } finally {
-    await Promise.all([
-      rm(pipelinePath, { force: true }),
-      rm(specPath, { force: true }),
-    ]);
+    await rm(temporaryDirectory, { recursive: true, force: true });
   }
 }

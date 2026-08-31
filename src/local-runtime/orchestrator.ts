@@ -239,11 +239,14 @@ export async function loadRunRequest(path: string): Promise<FineTuneRunRequest> 
   return fineTuneRunRequestSchema.parse(await loadJsonFile<unknown>(path));
 }
 
-export async function loadLocalRunnerConfig(path?: string): Promise<LocalRunnerConfig> {
-  if (!path) return localRunnerConfigSchema.parse({});
+export function parseLocalRunnerConfig(
+  document: unknown,
+  path?: string,
+): LocalRunnerConfig {
+  const config = localRunnerConfigSchema.parse(document);
+  if (!path) return config;
   const configPath = resolve(path);
   const base = dirname(configPath);
-  const config = localRunnerConfigSchema.parse(await loadJsonFile<unknown>(configPath));
   const configPathValue = (value: string | undefined): string | undefined => {
     if (!value) return undefined;
     if (value === "~") return homedir();
@@ -265,9 +268,18 @@ export async function loadLocalRunnerConfig(path?: string): Promise<LocalRunnerC
             ...config.evaluation.generalRegression,
             dataset: configPathValue(config.evaluation.generalRegression.dataset)!,
           }
-        : undefined,
+      : undefined,
     },
   };
+}
+
+export async function loadLocalRunnerConfig(path?: string): Promise<LocalRunnerConfig> {
+  if (!path) return parseLocalRunnerConfig({});
+  const configPath = resolve(path);
+  return parseLocalRunnerConfig(
+    await loadJsonFile<unknown>(configPath),
+    configPath,
+  );
 }
 
 function elapsed(started: number): { ms: number; seconds: number } {

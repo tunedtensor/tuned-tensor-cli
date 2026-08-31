@@ -551,7 +551,7 @@ export function createTunedTensorTools(
     define(
       "prepare_pipeline_run",
       "Prepare pipeline run",
-      "Prepare a local pipeline for explicit /approve execution. Omit pipeline to derive the canonical adapter or foundation recipe from the spec. Preparation validates the spec, resolves the plan, seals the spec contents, and never starts work by itself.",
+      "Prepare a local pipeline for explicit /approve execution. Omit pipeline to derive the canonical adapter or foundation recipe from the spec. Preparation validates the spec, resolves the plan, seals the spec and adjacent local-runner.json, and never starts work by itself.",
       Type.Object({
         pipeline: Type.Optional(PipelineDocument),
         spec_path: Type.Optional(Type.String({
@@ -576,6 +576,8 @@ export function createTunedTensorTools(
             pipeline: prepared.pipeline,
             spec_path: prepared.specPath,
             spec_sha256: prepared.specSha256,
+            config_path: prepared.configPath ?? null,
+            config_sha256: prepared.configSha256 ?? null,
             dry_run: prepared.dryRun,
           },
           {
@@ -583,6 +585,8 @@ export function createTunedTensorTools(
             engine: prepared.engine,
             spec_path: prepared.specPath,
             spec_sha256: prepared.specSha256,
+            config_path: prepared.configPath ?? null,
+            config_sha256: prepared.configSha256 ?? null,
             execution: "not started",
           },
         ));
