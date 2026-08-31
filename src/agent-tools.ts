@@ -550,8 +550,8 @@ export function createTunedTensorTools(
     ),
     define(
       "prepare_pipeline_run",
-      "Prepare pipeline run",
-      "Prepare a local pipeline for explicit /approve execution. Omit pipeline to derive the canonical adapter or foundation recipe from the spec. Preparation validates the spec, resolves the plan, seals the spec and adjacent local-runner.json, and never starts work by itself.",
+      "Prepare pipeline dry-run",
+      "Prepare a sealed local pipeline dry-run for explicit /approve preview. Omit pipeline to derive the canonical adapter or foundation recipe from the spec. Real execution remains an explicit direct tt pipeline run command.",
       Type.Object({
         pipeline: Type.Optional(PipelineDocument),
         spec_path: Type.Optional(Type.String({
@@ -559,23 +559,23 @@ export function createTunedTensorTools(
           maxLength: 500,
           description: "Workspace-relative tunedtensor.json path; defaults to tunedtensor.json",
         })),
-        dry_run: Type.Optional(Type.Boolean({ default: true })),
       }, { additionalProperties: false }),
       async (p) => {
         const prepared = await prepareLocalPipelineAction({
           workspaceRoot,
           pipeline: p.pipeline,
           specPath: p.spec_path,
-          dryRun: p.dry_run,
+          dryRun: true,
         });
         return await api.propose(proposal(
           "run_local_pipeline",
-          prepared.dryRun ? "Dry-run local pipeline" : "Run local pipeline",
-          `${prepared.dryRun ? "Preview" : "Execute"} the ${prepared.engine} pipeline for ${prepared.specPath}.`,
+          "Dry-run local pipeline",
+          `Preview the ${prepared.engine} pipeline for ${prepared.specPath}.`,
           {
             pipeline: prepared.pipeline,
             spec_path: prepared.specPath,
             spec_sha256: prepared.specSha256,
+            workspace_fingerprint: prepared.workspaceFingerprint,
             config_path: prepared.configPath ?? null,
             config_sha256: prepared.configSha256 ?? null,
             dry_run: prepared.dryRun,
@@ -585,6 +585,7 @@ export function createTunedTensorTools(
             engine: prepared.engine,
             spec_path: prepared.specPath,
             spec_sha256: prepared.specSha256,
+            workspace_fingerprint: prepared.workspaceFingerprint,
             config_path: prepared.configPath ?? null,
             config_sha256: prepared.configSha256 ?? null,
             execution: "not started",

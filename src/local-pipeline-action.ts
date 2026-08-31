@@ -19,6 +19,7 @@ import {
 } from "./local-runtime/local-project.js";
 import { parseLocalRunnerConfig } from "./local-runtime/orchestrator.js";
 import type { LocalRunnerConfig } from "./local-runtime/contracts.js";
+import { canonicalWorkspace, fingerprintWorkspace } from "./local-spec-workspace.js";
 
 const DEFAULT_SPEC_PATH = "tunedtensor.json";
 const MAX_SPEC_BYTES = 2_000_000;
@@ -38,6 +39,7 @@ export interface PreparedLocalPipelineAction {
   configSha256?: string;
   resolvedConfig?: LocalRunnerConfig;
   workspaceRoot: string;
+  workspaceFingerprint: string;
 }
 
 export interface LocalPipelineCommandResult {
@@ -50,10 +52,28 @@ export type LocalPipelineCommandRunner = (
   options: { cwd: string; signal?: AbortSignal },
 ) => Promise<LocalPipelineCommandResult>;
 
+export interface ValidatePreparedLocalPipelineActionArgs {
+  workspaceRoot: string;
+  pipeline: unknown;
+  specPath: string;
+  expectedSpecSha256: string;
+  expectedWorkspaceFingerprint: string;
+  expectedConfigPath?: string;
+  expectedConfigSha256?: string;
+  dryRun: boolean;
+}
+
 export class LocalPipelineActionError extends Error {
   constructor(message: string, cause?: unknown) {
     super(message, { cause });
     this.name = "LocalPipelineActionError";
+  }
+}
+
+export class LocalPipelineWorkspaceMismatchError extends LocalPipelineActionError {
+  constructor(message: string) {
+    super(message);
+    this.name = "LocalPipelineWorkspaceMismatchError";
   }
 }
 
@@ -72,15 +92,17 @@ function isWithin(root: string, candidate: string): boolean {
 async function resolveWorkspaceSpec(
   workspaceRoot: string,
   requestedPath: string,
-): Promise<{ workspaceRoot: string; path: string; displayPath: string; source: Buffer }> {
+): Promise<{
+  workspaceRoot: string;
+  workspaceFingerprint: string;
+  path: string;
+  displayPath: string;
+  source: Buffer;
+}> {
   if (!requestedPath || isAbsolute(requestedPath)) {
     throw new Error("Pipeline spec_path must be a relative file inside the current workspace.");
   }
-  const rootInfo = await lstat(workspaceRoot);
-  if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
-    throw new Error("The local agent workspace must be a real directory, not a symlink.");
-  }
-  const canonicalRoot = await realpath(workspaceRoot);
+  const canonicalRoot = await canonicalWorkspace(workspaceRoot);
   const lexicalPath = resolve(canonicalRoot, requestedPath);
   if (!isWithin(canonicalRoot, lexicalPath)) {
     throw new Error("Pipeline spec_path must stay inside the current workspace.");
@@ -103,6 +125,7 @@ async function resolveWorkspaceSpec(
   const workspaceRelative = relative(canonicalRoot, physicalPath).split(sep).join("/");
   return {
     workspaceRoot: canonicalRoot,
+    workspaceFingerprint: await fingerprintWorkspace(canonicalRoot),
     path: physicalPath,
     displayPath: `./${workspaceRelative}`,
     source,
@@ -205,12 +228,19 @@ export async function prepareLocalPipelineAction(args: {
       `Step "${remote.id}" targets cloud execution. The laptop-local agent can only approve local pipelines.`,
     );
   }
+  const dryRun = args.dryRun ?? true;
+  if (!dryRun) {
+    throw new Error(
+      "Real pipeline execution requires the explicit direct tt pipeline run command; model-mediated approvals are dry-run only.",
+    );
+  }
+
   return {
     pipeline,
     plan,
     specPath: spec.displayPath,
     specSha256: createHash("sha256").update(spec.source).digest("hex"),
-    dryRun: args.dryRun ?? true,
+    dryRun,
     engine: input.kind === "foundation-spec" ? "foundation" : "adapter",
     resolvedSpec: input.spec,
     ...(config ? {
@@ -219,27 +249,13 @@ export async function prepareLocalPipelineAction(args: {
       resolvedConfig,
     } : {}),
     workspaceRoot: spec.workspaceRoot,
+    workspaceFingerprint: spec.workspaceFingerprint,
   };
 }
 
-export async function executeLocalPipelineAction(args: {
-  workspaceRoot: string;
-  pipeline: unknown;
-  specPath: string;
-  expectedSpecSha256: string;
-  expectedConfigPath?: string;
-  expectedConfigSha256?: string;
-  dryRun: boolean;
-  runCommand: LocalPipelineCommandRunner;
-  signal?: AbortSignal;
-}): Promise<{
-  completed: true;
-  command: string[];
-  engine: "adapter" | "foundation";
-  spec_path: string;
-  config_path: string | null;
-  dry_run: boolean;
-}> {
+export async function validatePreparedLocalPipelineAction(
+  args: ValidatePreparedLocalPipelineActionArgs,
+): Promise<PreparedLocalPipelineAction> {
   let prepared: PreparedLocalPipelineAction;
   try {
     prepared = await prepareLocalPipelineAction({
@@ -252,6 +268,11 @@ export async function executeLocalPipelineAction(args: {
     throw new LocalPipelineActionError(
       error instanceof Error ? error.message : String(error),
       error,
+    );
+  }
+  if (prepared.workspaceFingerprint !== args.expectedWorkspaceFingerprint) {
+    throw new LocalPipelineWorkspaceMismatchError(
+      "The local workspace changed after this pipeline action was prepared; return to the original workspace and prepare it again.",
     );
   }
   if (prepared.specSha256 !== args.expectedSpecSha256) {
@@ -267,6 +288,21 @@ export async function executeLocalPipelineAction(args: {
       "The adjacent local-runner.json changed after this pipeline action was prepared; review and prepare it again.",
     );
   }
+  return prepared;
+}
+
+export async function executeLocalPipelineAction(args: ValidatePreparedLocalPipelineActionArgs & {
+  runCommand: LocalPipelineCommandRunner;
+  signal?: AbortSignal;
+}): Promise<{
+  completed: true;
+  command: string[];
+  engine: "adapter" | "foundation";
+  spec_path: string;
+  config_path: string | null;
+  dry_run: boolean;
+}> {
+  const prepared = await validatePreparedLocalPipelineAction(args);
 
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "tt-agent-pipeline-"));
   const temporaryId = randomUUID();
@@ -312,12 +348,12 @@ export async function executeLocalPipelineAction(args: {
     if (result.exitCode !== 0) {
       const suffix = result.signal ? ` after ${result.signal}` : "";
       throw new LocalPipelineActionError(
-        `Approved pipeline exited with code ${result.exitCode ?? 1}${suffix}. Inspect the local run events before preparing another action.`,
+        `Approved pipeline dry-run exited with code ${result.exitCode ?? 1}${suffix}.`,
       );
     }
     return {
       completed: true,
-      command: ["tt", "pipeline", "run", "--spec", prepared.specPath],
+      command: ["tt", "pipeline", "run", "--dry-run", "--spec", prepared.specPath],
       engine: prepared.engine,
       spec_path: prepared.specPath,
       config_path: prepared.configPath ?? null,

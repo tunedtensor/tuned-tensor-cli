@@ -135,7 +135,6 @@ describe("Tuned Tensor agent tools", () => {
 
       await tool("prepare_pipeline_run", api, workspace).execute("pipeline-prepare", {
         pipeline,
-        dry_run: true,
       });
       expect(api.propose).toHaveBeenCalledWith(expect.objectContaining({
         operation: "run_local_pipeline",
@@ -143,6 +142,7 @@ describe("Tuned Tensor agent tools", () => {
           dry_run: true,
           spec_path: "./tunedtensor.json",
           spec_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+          workspace_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
         }),
         preview: expect.objectContaining({ execution: "not started" }),
       }));

@@ -83,7 +83,7 @@ local endpoint or a remote provider.
 
 Run `tt` to open the primary conversational workflow. The agent can inspect the
 project, derive the canonical pipeline from `tunedtensor.json`, present the
-resolved plan, and prepare a sealed run for `/approve`. Workflow commands such
+resolved plan, and prepare a sealed dry-run for `/approve`. Workflow commands such
 as `runs list` and `doctor` also work immediately. Chat waits until you choose a
 provider and model from inside the shell:
 
@@ -129,8 +129,8 @@ Ask TT anything. Known commands run directly.
 Ordinary sentences go through the locally orchestrated model session. The
 model has no shell or general filesystem tool. It can prepare one new folder
 directly beneath the shell's current working directory with a validated
-`tunedtensor.json`, or prepare a local pipeline run sealed to the reviewed spec
-contents. Neither action executes until `/approve`. The tools refuse path
+`tunedtensor.json`, or prepare a local pipeline dry-run sealed to the reviewed
+workspace and spec contents. Neither action starts until `/approve`. The tools refuse path
 traversal, symlinked workspace roots, existing spec targets, unsupported spec
 fields, cloud pipeline targets, and spec changes after review. Known CLI
 commands such as `runs list`, `doctor`, and `models list` still execute directly.
@@ -138,9 +138,10 @@ Prefix a command with `:` when you want to make that intent explicit.
 
 The agent can describe the built-in adapter and foundation pipeline stages,
 including optional foundation RL. When asked to train or dry-run, it derives or
-validates the pipeline, shows the exact plan, and prepares the same execution
-path used by `tt pipeline run`. `/approve` starts it outside the model, streams
-normal pipeline progress, and Ctrl-C stops the child process group. It can also
+validates the pipeline, shows the exact plan, and prepares a deterministic
+dry-run. `/approve` starts that preview outside the model, and Ctrl-C stops the
+child process group. Real training is intentionally not model-mediated: run the
+displayed `tt pipeline run` command directly when you choose to execute. It can also
 search public Hugging Face model or dataset metadata for foundation and
 fine-tuning discovery. A Hub search sends only the search query to
 `huggingface.co`; it uses no Hugging Face token, downloads nothing, and omits
@@ -171,10 +172,13 @@ are anchored to open workspace and destination-directory handles. The proposal
 is bound to the current workspace so changing directories before approval fails
 safely instead of writing somewhere else. Ambiguous write failures remain
 sealed as `outcome_unknown` for manual inspection. `/reject` never mutates.
-Pipeline execution also waits for `/approve`. Preparation fingerprints the
-workspace spec and adjacent config, revalidates both, copies the resolved spec,
-config, and pipeline into private temporary inputs, and invokes `tt pipeline run`
-deterministically. A changed spec requires a new review.
+Pipeline dry-runs also wait for `/approve`. Preparation fingerprints the
+workspace directory identity, spec, and adjacent config, revalidates them,
+copies the resolved spec, config, and pipeline into private temporary inputs,
+and invokes `tt pipeline run --dry-run` deterministically. Persisted proposals
+that request real execution fail before the child command is dispatched. Real
+training remains available through the explicit direct `tt pipeline run` command.
+A changed workspace or spec requires a new review.
 
 Useful shell controls include `/help`, `/status`, `/context`, `/model`,
 `/login`, `/cd`, `/clear`, and `/exit`.

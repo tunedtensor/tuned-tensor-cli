@@ -5,9 +5,11 @@
 ### Changed
 
 - `tt` is now the primary agentic workflow surface. The local agent can derive,
-  validate, seal, and propose adapter or foundation pipelines; `/approve`
-  executes the same deterministic path as `tt pipeline run`, and Ctrl-C stops
-  the approved child process group.
+  validate, seal, and propose adapter or foundation pipeline dry-runs; `/approve`
+  executes `tt pipeline run --dry-run`, and Ctrl-C stops the preview child process
+  group. Pipeline proposals are bound to the exact workspace directory identity
+  as well as the reviewed spec and adjacent config. Real training remains an
+  explicit direct `tt pipeline run` command outside model-mediated approval.
 - `tt pipeline run` is the single documented training entrypoint. The duplicate
   root `tt run` command remains only as a hidden deprecated compatibility alias.
 - `tt serve` remains the explicit, separate lifecycle for verified model

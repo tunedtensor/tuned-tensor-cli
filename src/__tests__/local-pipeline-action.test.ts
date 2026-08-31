@@ -52,6 +52,54 @@ describe("local pipeline agent actions", () => {
     }
   });
 
+  it("keeps real adapter and foundation execution outside model-mediated approval", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "tt-agent-real-pipeline-"));
+    const adapter = {
+      name: "Sentiment",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Classify sentiment.",
+      guidelines: ["Return one label."],
+      examples: [
+        { input: "Great", output: "positive" },
+        { input: "Awful", output: "negative" },
+      ],
+    };
+    const foundation = {
+      engine: "foundation",
+      name: "Tiny support model",
+      system_prompt: "Answer support questions.",
+      guidelines: ["Be concise."],
+      constraints: [],
+      examples: [
+        { input: "Can I return this?", output: "Yes, within 30 days." },
+        { input: "When do you ship?", output: "Within two business days." },
+      ],
+      foundation: {
+        depth: 2,
+        pretrain_steps: 2,
+        finetune_steps: 2,
+        rl_steps: 0,
+        vocab_size: 256,
+        max_chars: 20_000,
+        sequence_length: 64,
+        batch_size: 2,
+        nproc_per_node: 1,
+      },
+    };
+
+    try {
+      for (const spec of [adapter, foundation]) {
+        writeFileSync(join(workspace, "tunedtensor.json"), JSON.stringify(spec));
+        await expect(prepareLocalPipelineAction({
+          workspaceRoot: workspace,
+          dryRun: false,
+        })).rejects.toThrow(/real pipeline execution requires the explicit direct tt pipeline run command/i);
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("rejects workspace escapes and cloud-targeted execution", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "tt-agent-pipeline-guard-"));
     writeFileSync(join(workspace, "tunedtensor.json"), JSON.stringify({

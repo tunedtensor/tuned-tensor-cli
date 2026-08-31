@@ -1,13 +1,18 @@
 import type { AgentAction } from "./agent-client.js";
 import {
+  canonicalWorkspace,
   createLocalSpecProject,
+  fingerprintWorkspace,
   isKnownLocalSpecFailure,
+  prepareLocalSpecProject,
   type LocalSpecFileOperations,
 } from "./local-spec-workspace.js";
 import {
   executeLocalPipelineAction,
   isKnownLocalPipelineFailure,
+  LocalPipelineWorkspaceMismatchError,
   type LocalPipelineCommandRunner,
+  validatePreparedLocalPipelineAction,
 } from "./local-pipeline-action.js";
 
 export interface AgentMutationApi {
@@ -29,6 +34,14 @@ export interface AgentApprovalOptions {
   localFileOperations?: Partial<LocalSpecFileOperations>;
   runPipelineCommand?: LocalPipelineCommandRunner;
   signal?: AbortSignal;
+  durableClaimed?: boolean;
+}
+
+export class PreparedActionWorkspaceMismatchError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, { cause });
+    this.name = "PreparedActionWorkspaceMismatchError";
+  }
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -89,6 +102,98 @@ async function fail(
   throw error;
 }
 
+async function prepareLocalPipelineApproval(
+  action: AgentAction,
+  options: AgentApprovalOptions,
+) {
+  const input = args(action);
+  const workspaceRoot = options.workspaceRoot;
+  if (!workspaceRoot) {
+    throw new Error("A local workspace is required to run a local pipeline.");
+  }
+  if (!options.runPipelineCommand) {
+    throw new Error("The local pipeline command runner is unavailable.");
+  }
+  const pipeline = record(input.pipeline);
+  if (!pipeline) throw new Error("Prepared pipeline content is invalid.");
+  const specPath = requiredString(input.spec_path, "spec path");
+  const specSha256 = requiredString(input.spec_sha256, "spec fingerprint");
+  const workspaceFingerprint = requiredString(
+    input.workspace_fingerprint,
+    "workspace fingerprint",
+  );
+  const configPath = optionalString(input.config_path, "config path");
+  const configSha256 = optionalString(input.config_sha256, "config fingerprint");
+  if (Boolean(configPath) !== Boolean(configSha256)) {
+    throw new Error("Prepared action config path and fingerprint must be provided together.");
+  }
+  const dryRun = requiredBoolean(input.dry_run, "dry-run flag");
+  if (!dryRun) {
+    throw new Error(
+      "Real pipeline execution requires the explicit direct tt pipeline run command; model-mediated approvals are dry-run only.",
+    );
+  }
+  const validation = {
+    workspaceRoot,
+    pipeline,
+    specPath,
+    expectedSpecSha256: specSha256,
+    expectedWorkspaceFingerprint: workspaceFingerprint,
+    expectedConfigPath: configPath,
+    expectedConfigSha256: configSha256,
+    dryRun,
+  };
+  await validatePreparedLocalPipelineAction(validation);
+  return {
+    validation,
+    runCommand: options.runPipelineCommand,
+    signal: options.signal,
+  };
+}
+
+export async function preflightPreparedAction(
+  action: AgentAction,
+  options: AgentApprovalOptions = {},
+): Promise<void> {
+  if (action.status !== "proposed") {
+    throw new Error(`Action ${action.id} is not proposed and cannot be approved.`);
+  }
+  if (action.operation === "create_local_spec") {
+    const input = args(action);
+    const workspaceRoot = options.workspaceRoot;
+    if (!workspaceRoot) {
+      throw new Error("A local workspace is required to create a local spec.");
+    }
+    const directory = requiredString(input.directory, "local directory");
+    const expectedWorkspaceFingerprint = requiredString(
+      input.workspace_fingerprint,
+      "workspace fingerprint",
+    );
+    const canonicalRoot = await canonicalWorkspace(workspaceRoot);
+    const actualWorkspaceFingerprint = await fingerprintWorkspace(canonicalRoot);
+    if (actualWorkspaceFingerprint !== expectedWorkspaceFingerprint) {
+      throw new PreparedActionWorkspaceMismatchError(
+        "The local workspace changed after this action was prepared; return to the original workspace and prepare it again.",
+      );
+    }
+    await prepareLocalSpecProject(
+      workspaceRoot,
+      directory,
+      input.spec,
+      expectedWorkspaceFingerprint,
+    );
+  } else if (action.operation === "run_local_pipeline") {
+    try {
+      await prepareLocalPipelineApproval(action, options);
+    } catch (error) {
+      if (error instanceof LocalPipelineWorkspaceMismatchError) {
+        throw new PreparedActionWorkspaceMismatchError(error.message, error);
+      }
+      throw error;
+    }
+  }
+}
+
 export async function approvePreparedAction(
   action: AgentAction,
   api: AgentMutationApi,
@@ -123,33 +228,11 @@ export async function approvePreparedAction(
         break;
       }
       case "run_local_pipeline": {
-        const workspaceRoot = options.workspaceRoot;
-        if (!workspaceRoot) {
-          throw new Error("A local workspace is required to run a local pipeline.");
-        }
-        if (!options.runPipelineCommand) {
-          throw new Error("The local pipeline command runner is unavailable.");
-        }
-        const pipeline = record(input.pipeline);
-        if (!pipeline) throw new Error("Prepared pipeline content is invalid.");
-        const specPath = requiredString(input.spec_path, "spec path");
-        const specSha256 = requiredString(input.spec_sha256, "spec fingerprint");
-        const configPath = optionalString(input.config_path, "config path");
-        const configSha256 = optionalString(input.config_sha256, "config fingerprint");
-        if (Boolean(configPath) !== Boolean(configSha256)) {
-          throw new Error("Prepared action config path and fingerprint must be provided together.");
-        }
-        const dryRun = requiredBoolean(input.dry_run, "dry-run flag");
+        const prepared = await prepareLocalPipelineApproval(action, options);
         execute = async () => await executeLocalPipelineAction({
-          workspaceRoot,
-          pipeline,
-          specPath,
-          expectedSpecSha256: specSha256,
-          expectedConfigPath: configPath,
-          expectedConfigSha256: configSha256,
-          dryRun,
-          runCommand: options.runPipelineCommand!,
-          signal: options.signal,
+          ...prepared.validation,
+          runCommand: prepared.runCommand,
+          signal: prepared.signal,
         });
         break;
       }
@@ -186,6 +269,12 @@ export async function approvePreparedAction(
     }
 
   } catch (error) {
+    if (
+      error instanceof LocalPipelineWorkspaceMismatchError
+      && options.durableClaimed !== true
+    ) {
+      throw error;
+    }
     return await fail(action, persist, error);
   }
 
