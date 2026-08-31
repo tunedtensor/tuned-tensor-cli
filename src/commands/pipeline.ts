@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Command } from "commander";
 import {
   canonicalFoundationPipeline,
@@ -25,6 +25,12 @@ import { readHardwareSnapshot } from "../local-runtime/hardware-snapshot.js";
 
 const DEFAULT_PIPELINE_FILE = "tunedtensor.pipeline.json";
 const DEFAULT_SPEC_FILE = "tunedtensor.json";
+
+export function localConfigPath(explicitPath: string | undefined, specPath: string): string | undefined {
+  if (explicitPath) return resolve(explicitPath);
+  const adjacent = join(dirname(resolve(specPath)), "local-runner.json");
+  return existsSync(adjacent) ? adjacent : undefined;
+}
 
 function parseList(value?: string): string[] | undefined {
   if (!value) return undefined;
@@ -81,9 +87,10 @@ async function resolvePipelineDocument(options: { file: string; spec?: string })
     }
     return document;
   }
+  if (specInput) return canonicalPipeline("local");
   if (specPath && !existsSync(specPath)) await loadLocalRunInput(specPath);
   throw new Error(
-    `Pipeline file not found: ${options.file}. Run \`tt pipeline init\` or pass a foundation --spec.`,
+    `Pipeline file not found: ${options.file}. Run \`tt pipeline init\` or pass --spec to derive the canonical pipeline.`,
   );
 }
 
@@ -243,7 +250,7 @@ export function registerPipelineCommands(parent: Command): void {
         throw new Error("--output and --resume are only valid for foundation pipelines.");
       }
       assertLocalRunInputReady(input.request);
-      const config = await loadLocalRunnerConfig(options.config ? resolve(options.config) : undefined);
+      const config = await loadLocalRunnerConfig(localConfigPath(options.config, options.spec));
       const localPipeline: LocalPipeline = {
         version: 1,
         ...(plan.name ? { name: plan.name } : {}),

@@ -43,9 +43,9 @@ resource defaults, data contract, and real CUDA acceptance test.
 TT Local currently ships two such methods:
 
 - **Adapter** (`training/adapter`): certified Transformers checkpoints and
-  PEFT LoRA SFT. Driven by `tt run` and adapter pipelines.
+  PEFT LoRA SFT. Driven by `tt pipeline run`.
 - **Foundation** (`training/foundation`): a from-scratch BPE tokenizer and GPT
-  with no Transformers/PEFT. Driven only by `tt pipeline` from a foundation
+  with no Transformers/PEFT. Driven by `tt pipeline run` from a foundation
   `tunedtensor.json`. Pretrain, SFT, and RL require CUDA. Tokenizer training
   and the CPU unit tests do not. The current runtime is single-process and
   rejects `nproc_per_node` values above 1 and unsupported steps such as

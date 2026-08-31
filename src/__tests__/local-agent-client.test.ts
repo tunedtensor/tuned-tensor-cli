@@ -96,8 +96,11 @@ describe("local agent conversation client", () => {
       "inspect_training_source",
       "validate_pipeline",
       "prepare_create_local_spec",
+      "prepare_pipeline_run",
     ]);
-    expect(created[0]?.systemPrompt).toMatch(/workspace-scoped local spec/i);
+    expect(created[0]?.systemPrompt).toMatch(/sealed local pipeline run/i);
+    expect(created[0]?.systemPrompt).toContain("prepare_pipeline_run");
+    expect(created[0]?.systemPrompt).toMatch(/requires the deterministic \/approve path/i);
     expect(created[0]?.systemPrompt).toMatch(/no hosted account/i);
     expect(created[0]?.systemPrompt).toMatch(/adapter.*foundation.*describe_pipeline/is);
     expect(created[0]?.systemPrompt).toContain("search_hugging_face");

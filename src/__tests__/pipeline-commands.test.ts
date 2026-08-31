@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { createProgram } from "../cli.js";
 import { setJsonMode } from "../output.js";
 import * as foundationRunner from "../local-runtime/foundation-runner.js";
+import { localConfigPath } from "../commands/pipeline.js";
 
 afterEach(() => {
   setJsonMode(false);
@@ -12,6 +13,21 @@ afterEach(() => {
 });
 
 describe("pipeline commands", () => {
+  it("uses an explicit config or discovers local-runner.json beside the spec", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tt-pipeline-config-"));
+    const spec = join(dir, "tunedtensor.json");
+    const adjacent = join(dir, "local-runner.json");
+    writeFileSync(spec, "{}");
+    try {
+      expect(localConfigPath(undefined, spec)).toBeUndefined();
+      writeFileSync(adjacent, "{}");
+      expect(localConfigPath(undefined, spec)).toBe(adjacent);
+      expect(localConfigPath("custom.json", spec)).toBe(join(process.cwd(), "custom.json"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("initializes a canonical recipe and emits a resolved dry-run JSON plan without execution", async () => {
     const dir = mkdtempSync(join(tmpdir(), "tt-pipeline-"));
     const file = join(dir, "pipeline.json");
@@ -26,6 +42,42 @@ describe("pipeline commands", () => {
       const output = JSON.parse(log.mock.calls.at(-1)?.[0] as string);
       expect(output.dry_run).toBe(true);
       expect(output.steps[0]).toMatchObject({ id: "baseline", target: "local" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("derives the canonical adapter pipeline from a spec when no recipe file exists", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tt-adapter-spec-pipeline-"));
+    const spec = join(dir, "tunedtensor.json");
+    writeFileSync(spec, JSON.stringify({
+      name: "Sentiment",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Classify sentiment.",
+      guidelines: ["Return one label."],
+      examples: [
+        { input: "Great", output: "positive" },
+        { input: "Awful", output: "negative" },
+      ],
+    }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const program = createProgram("test");
+      program.exitOverride();
+      await program.parseAsync([
+        "node", "tt", "--json", "pipeline", "run", "--dry-run",
+        "--file", join(dir, "missing.pipeline.json"), "--spec", spec,
+      ]);
+      expect(JSON.parse(log.mock.calls.at(-1)?.[0] as string)).toMatchObject({
+        dry_run: true,
+        name: "default-local",
+        steps: [
+          { id: "baseline", uses: "evaluate", target: "local" },
+          { id: "train", uses: "train", target: "local" },
+          { id: "candidate", uses: "evaluate", target: "local" },
+          { id: "compare", uses: "compare", target: "local" },
+        ],
+      });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

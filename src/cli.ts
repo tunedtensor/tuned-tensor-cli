@@ -57,6 +57,7 @@ export interface SelfCommandOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   entrypoint?: string;
+  signal?: AbortSignal;
 }
 
 export interface SelfCommandResult extends ShellCommandResult {
@@ -122,6 +123,14 @@ async function createDefaultAgentClient(
     modelRuntime,
     toolApi,
     mutationApi,
+    runPipelineCommand: async (args, options) => await (
+      runtime.runSelfCommand ?? runSelfCommand
+    )(args, {
+      cwd: options.cwd,
+      env,
+      entrypoint: runtime.argv?.[1],
+      signal: options.signal,
+    }),
     createAgent: runtime.createPiAgent,
   });
 }
@@ -207,14 +216,18 @@ export async function runSelfCommand(
     const onSigint = () => forwardSignal("SIGINT");
     const onSigterm = () => forwardSignal("SIGTERM");
     const onSighup = () => forwardSignal("SIGHUP");
+    const onAbort = () => forwardSignal("SIGTERM");
     const cleanup = () => {
       process.off("SIGINT", onSigint);
       process.off("SIGTERM", onSigterm);
       if (process.platform !== "win32") process.off("SIGHUP", onSighup);
+      options.signal?.removeEventListener("abort", onAbort);
     };
     process.on("SIGINT", onSigint);
     process.on("SIGTERM", onSigterm);
     if (process.platform !== "win32") process.on("SIGHUP", onSighup);
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
     child.once("error", (error) => {
       cleanup();
       reject(error);
@@ -356,7 +369,8 @@ Examples:
   tt                     Open the conversational terminal (TTY only)
   tt hardware
   tt doctor tunedtensor.json
-  tt run tunedtensor.json --dry-run
+  tt pipeline run --spec tunedtensor.json --dry-run
+  tt serve active
   tt runs list
 `,
   );

@@ -7,6 +7,7 @@ import {
   createProgram,
   extractPassthroughOptions,
   runCli,
+  runSelfCommand,
   type SelfCommandRunner,
 } from "../cli.js";
 import type { ShellCommandRunner } from "../shell.js";
@@ -44,6 +45,20 @@ describe("extractPassthroughOptions", () => {
 });
 
 describe("unified command routing", () => {
+  it("terminates a self command when an approved pipeline is interrupted", async () => {
+    const controller = new AbortController();
+    const pending = runSelfCommand(
+      ["setInterval(() => {}, 1000)"],
+      { entrypoint: "-e", signal: controller.signal },
+    );
+    setTimeout(() => controller.abort(), 25);
+
+    await expect(pending).resolves.toMatchObject({
+      exitCode: expect.any(Number),
+      signal: "SIGTERM",
+    });
+  });
+
   it("configures the local agent and exposes agent model status without secret flags", async () => {
     const configRoot = mkdtempSync(join(tmpdir(), "tt-agent-cli-"));
     process.env.TUNED_TENSOR_HOME = configRoot;

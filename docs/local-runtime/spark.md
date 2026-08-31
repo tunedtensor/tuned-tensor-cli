@@ -108,7 +108,7 @@ tt doctor tunedtensor.json
 tt validate tunedtensor.json
 tt models prefetch tunedtensor.json
 tt models verify-base tunedtensor.json
-tt run tunedtensor.json
+tt pipeline run --spec tunedtensor.json --config local-runner.json
 ```
 
 `doctor` resolves the same bundled project and paths the run will use, imports

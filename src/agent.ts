@@ -390,7 +390,7 @@ export class TunedTensorAgentSession {
         return context
           ? await this.options.client.approveAction(action.id, onEvent, signal, context)
           : await this.options.client.approveAction(action.id, onEvent, signal);
-      }, false);
+      }, action.operation === "run_local_pipeline");
     } finally {
       // Approval is one-way once requested. Preflight failures, completed
       // actions, and unknown outcomes are all non-retryable under this ID.

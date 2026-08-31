@@ -206,6 +206,56 @@ describe("TunedTensorAgentSession", () => {
     expect(session.snapshot().pendingActions).toHaveLength(0);
   });
 
+  it("allows an approved local pipeline to be stopped with Ctrl-C", async () => {
+    const client = fakeClient();
+    const action = {
+      id: "pipeline-action-123",
+      title: "Run local pipeline",
+      summary: "Run the adapter pipeline.",
+      risk: "medium",
+      operation: "run_local_pipeline",
+      arguments: {},
+    };
+    client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
+      onEvent({ type: "approval_required", payload: { action } });
+      return {
+        threadId: thread.id,
+        turnId: "turn-pipeline",
+        status: "waiting_for_approval",
+        response: "",
+        actions: [action],
+      };
+    });
+    let approvalSignal: AbortSignal | undefined;
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => { started = resolve; });
+    client.approveAction = vi.fn(async (_actionId, _onEvent, signal) => {
+      approvalSignal = signal;
+      started();
+      await new Promise<void>((resolve) => {
+        signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return {
+        threadId: thread.id,
+        turnId: "turn-pipeline",
+        status: "cancelled",
+        response: "",
+        actions: [],
+      };
+    });
+    const { io, stdout } = testIO();
+    const session = new TunedTensorAgentSession({ client, io });
+    await session.handleLine("train the current spec");
+
+    const settling = session.handleLine("/approve");
+    await didStart;
+    expect(session.interrupt()).toBe(true);
+    expect(approvalSignal?.aborted).toBe(true);
+    await settling;
+    expect(stdout.join(" ")).toContain("Response stopped");
+    expect(session.snapshot().pendingActions).toHaveLength(0);
+  });
+
   it("reuses the active thread and supports new and resumed conversations", async () => {
     const client = fakeClient();
     const { io } = testIO();

@@ -112,20 +112,43 @@ describe("Tuned Tensor agent tools", () => {
   });
 
   it("validates and prepares pipeline plans without direct execution", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "tt-agent-pipeline-"));
     const api = fakeApi();
     const pipeline = {
       version: 1,
       target: "local",
       steps: [{ id: "baseline", uses: "evaluate", with: { model: "base" } }],
     };
-    const validated = await tool("validate_pipeline", api).execute("pipeline-validate", { pipeline });
-    expect(validated.details).toMatchObject({ valid: true });
-
-    await tool("prepare_pipeline_run", api).execute("pipeline-prepare", { pipeline, dry_run: true });
-    expect(api.propose).toHaveBeenCalledWith(expect.objectContaining({
-      operation: "run_pipeline",
-      arguments: expect.objectContaining({ dry_run: true }),
+    writeFileSync(join(workspace, "tunedtensor.json"), JSON.stringify({
+      name: "Sentiment",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Classify sentiment.",
+      guidelines: ["Return one label."],
+      examples: [
+        { input: "Great", output: "positive" },
+        { input: "Awful", output: "negative" },
+      ],
     }));
+    try {
+      const validated = await tool("validate_pipeline", api).execute("pipeline-validate", { pipeline });
+      expect(validated.details).toMatchObject({ valid: true });
+
+      await tool("prepare_pipeline_run", api, workspace).execute("pipeline-prepare", {
+        pipeline,
+        dry_run: true,
+      });
+      expect(api.propose).toHaveBeenCalledWith(expect.objectContaining({
+        operation: "run_local_pipeline",
+        arguments: expect.objectContaining({
+          dry_run: true,
+          spec_path: "./tunedtensor.json",
+          spec_sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        }),
+        preview: expect.objectContaining({ execution: "not started" }),
+      }));
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   it("describes the shipped foundation workflow and exact CLI commands", async () => {
@@ -431,7 +454,7 @@ exit 1
       "report_run", "estimate_run", "list_datasets", "get_dataset",
       "list_models", "get_model", "get_balance", "list_transactions",
       "examine_hardware", "describe_pipeline", "search_hugging_face", "inspect_training_source", "validate_pipeline",
-      "prepare_create_spec", "prepare_update_spec", "prepare_pipeline_run",
+      "prepare_create_spec", "prepare_update_spec",
     ]);
   });
 
@@ -448,6 +471,7 @@ exit 1
         "inspect_training_source",
         "validate_pipeline",
         "prepare_create_local_spec",
+        "prepare_pipeline_run",
       ]);
     } finally {
       rmSync(workspace, { recursive: true, force: true });

@@ -19,6 +19,7 @@ import {
 import { assessHardware } from "./local-runtime/hardware.js";
 import { readHardwareSnapshot } from "./local-runtime/hardware-snapshot.js";
 import { warningsFromSnapshot } from "./local-runtime/capability.js";
+import { prepareLocalPipelineAction } from "./local-pipeline-action.js";
 
 
 const MAX_TOOL_OUTPUT = 32_000;
@@ -91,9 +92,15 @@ const PipelineDocument = Type.Object({
   version: Type.Literal(1),
   name: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
   target: Type.Optional(Type.Union([Type.Literal("local"), Type.Literal("cloud")])),
+  runtime: Type.Optional(Type.Object({
+    engine: Type.Literal("foundation"),
+  }, { additionalProperties: false })),
   steps: Type.Array(Type.Object({
     id: Type.String({ minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_-]*$" }),
-    uses: Type.Union([Type.Literal("train"), Type.Literal("evaluate"), Type.Literal("compare")]),
+    uses: Type.Union([
+      Type.Literal("train"), Type.Literal("evaluate"), Type.Literal("compare"),
+      Type.Literal("tokenize"), Type.Literal("pretrain"), Type.Literal("finetune"), Type.Literal("rl"),
+    ]),
     target: Type.Optional(Type.Union([Type.Literal("local"), Type.Literal("cloud")])),
     with: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   }, { additionalProperties: false }), { minItems: 1, maxItems: 16 }),
@@ -541,6 +548,46 @@ export function createTunedTensorTools(
         ));
       },
     ),
+    define(
+      "prepare_pipeline_run",
+      "Prepare pipeline run",
+      "Prepare a local pipeline for explicit /approve execution. Omit pipeline to derive the canonical adapter or foundation recipe from the spec. Preparation validates the spec, resolves the plan, seals the spec contents, and never starts work by itself.",
+      Type.Object({
+        pipeline: Type.Optional(PipelineDocument),
+        spec_path: Type.Optional(Type.String({
+          minLength: 1,
+          maxLength: 500,
+          description: "Workspace-relative tunedtensor.json path; defaults to tunedtensor.json",
+        })),
+        dry_run: Type.Optional(Type.Boolean({ default: true })),
+      }, { additionalProperties: false }),
+      async (p) => {
+        const prepared = await prepareLocalPipelineAction({
+          workspaceRoot,
+          pipeline: p.pipeline,
+          specPath: p.spec_path,
+          dryRun: p.dry_run,
+        });
+        return await api.propose(proposal(
+          "run_local_pipeline",
+          prepared.dryRun ? "Dry-run local pipeline" : "Run local pipeline",
+          `${prepared.dryRun ? "Preview" : "Execute"} the ${prepared.engine} pipeline for ${prepared.specPath}.`,
+          {
+            pipeline: prepared.pipeline,
+            spec_path: prepared.specPath,
+            spec_sha256: prepared.specSha256,
+            dry_run: prepared.dryRun,
+          },
+          {
+            plan: prepared.plan,
+            engine: prepared.engine,
+            spec_path: prepared.specPath,
+            spec_sha256: prepared.specSha256,
+            execution: "not started",
+          },
+        ));
+      },
+    ),
   ] : [];
 
   const hostedMutations: AgentTool[] = [
@@ -560,18 +607,6 @@ export function createTunedTensorTools(
       }));
     }),
 
-    define("prepare_pipeline_run", "Prepare pipeline run", "Prepare a pipeline action for review only. It never executes a step, transfers an artifact, or reserves credits.", Type.Object({
-      pipeline: PipelineDocument,
-      dry_run: Type.Optional(Type.Boolean()),
-    }, { additionalProperties: false }), async (p) => {
-      const errors = validatePipeline(p.pipeline);
-      if (errors.length) throw new Error(`Invalid pipeline:\n- ${errors.join("\n- ")}`);
-      const plan = createExecutionPlan(p.pipeline);
-      return await api.propose(proposal("run_pipeline", "Run pipeline", "Review the resolved pipeline before any separate execution approval flow.", {
-        pipeline: p.pipeline,
-        dry_run: p.dry_run ?? true,
-      }, { plan, execution: "not started" }));
-    }),
   ];
   if (options.localOnly) {
     return [...localReads, ...localMutations];

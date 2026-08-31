@@ -4,6 +4,11 @@ import {
   isKnownLocalSpecFailure,
   type LocalSpecFileOperations,
 } from "./local-spec-workspace.js";
+import {
+  executeLocalPipelineAction,
+  isKnownLocalPipelineFailure,
+  type LocalPipelineCommandRunner,
+} from "./local-pipeline-action.js";
 
 export interface AgentMutationApi {
   get(path: string): Promise<unknown>;
@@ -22,6 +27,8 @@ export type PersistAction = (action: AgentAction) => Promise<void>;
 export interface AgentApprovalOptions {
   workspaceRoot?: string;
   localFileOperations?: Partial<LocalSpecFileOperations>;
+  runPipelineCommand?: LocalPipelineCommandRunner;
+  signal?: AbortSignal;
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -42,6 +49,11 @@ function args(action: AgentAction): Record<string, unknown> {
 
 function requiredString(value: unknown, label: string): string {
   if (typeof value !== "string" || !value) throw new Error(`Prepared action ${label} is invalid.`);
+  return value;
+}
+
+function requiredBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") throw new Error(`Prepared action ${label} is invalid.`);
   return value;
 }
 
@@ -105,6 +117,30 @@ export async function approvePreparedAction(
         );
         break;
       }
+      case "run_local_pipeline": {
+        const workspaceRoot = options.workspaceRoot;
+        if (!workspaceRoot) {
+          throw new Error("A local workspace is required to run a local pipeline.");
+        }
+        if (!options.runPipelineCommand) {
+          throw new Error("The local pipeline command runner is unavailable.");
+        }
+        const pipeline = record(input.pipeline);
+        if (!pipeline) throw new Error("Prepared pipeline content is invalid.");
+        const specPath = requiredString(input.spec_path, "spec path");
+        const specSha256 = requiredString(input.spec_sha256, "spec fingerprint");
+        const dryRun = requiredBoolean(input.dry_run, "dry-run flag");
+        execute = async () => await executeLocalPipelineAction({
+          workspaceRoot,
+          pipeline,
+          specPath,
+          expectedSpecSha256: specSha256,
+          dryRun,
+          runCommand: options.runPipelineCommand!,
+          signal: options.signal,
+        });
+        break;
+      }
       case "create_spec": {
         await requireMutationGuardSupport(api);
         const spec = record(input.spec);
@@ -157,7 +193,10 @@ export async function approvePreparedAction(
     await persist(action);
     return output;
   } catch (error) {
-    if (action.operation === "create_local_spec" && isKnownLocalSpecFailure(error)) {
+    if (
+      (action.operation === "create_local_spec" && isKnownLocalSpecFailure(error))
+      || (action.operation === "run_local_pipeline" && isKnownLocalPipelineFailure(error))
+    ) {
       action.status = "failed";
       try {
         await persist(action);
@@ -165,7 +204,7 @@ export async function approvePreparedAction(
         action.status = "outcome_unknown";
         try { await persist(action); } catch { /* Keep the durable executing record fail-closed. */ }
         throw new Error(
-          "Local spec creation did not apply, but its final action status could not be recorded. Inspect the workspace before preparing another action.",
+          "The local action did not complete, but its final status could not be recorded. Inspect the workspace and local runs before preparing another action.",
           { cause: persistError },
         );
       }
@@ -180,7 +219,9 @@ export async function approvePreparedAction(
     const detail = error instanceof Error ? error.message : String(error);
     const inspectionTarget = action.operation === "create_local_spec"
       ? "local workspace"
-      : "remote resource";
+      : action.operation === "run_local_pipeline"
+        ? "local run store"
+        : "remote resource";
     throw new Error(
       `The mutation outcome is unknown and this action cannot be retried automatically. Inspect the ${inspectionTarget} before preparing another action. ${detail}`,
       { cause: error },

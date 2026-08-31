@@ -276,11 +276,12 @@ function deterministicBehaviorSpecId(spec: FineTuneRunRequest["spec_snapshot"]):
   ].join("-");
 }
 
-export async function loadLocalRunInput(
+export function parseLocalRunInput(
+  rawInput: unknown,
   path: string,
   options: RunRequestFromSpecOptions = {},
-): Promise<LocalRunInput> {
-  const raw = resolveLocalRunInputPaths(JSON.parse(await readFile(path, "utf8")) as unknown, path);
+): LocalRunInput {
+  const raw = resolveLocalRunInputPaths(rawInput, path);
   const request = fineTuneRunRequestSchema.safeParse(raw);
   if (request.success) {
     return { kind: "request", path, request: request.data };
@@ -295,4 +296,15 @@ export async function loadLocalRunInput(
     spec,
     request: runRequestFromLocalSpec(spec, options),
   };
+}
+
+export async function loadLocalRunInput(
+  path: string,
+  options: RunRequestFromSpecOptions = {},
+): Promise<LocalRunInput> {
+  return parseLocalRunInput(
+    JSON.parse(await readFile(path, "utf8")) as unknown,
+    path,
+    options,
+  );
 }
