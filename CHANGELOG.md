@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.13.1] - 2026-09-01
+
 ### Changed
 
 - `tt` is now the primary agentic workflow surface. The local agent can derive,
