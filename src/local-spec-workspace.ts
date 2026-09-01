@@ -107,7 +107,7 @@ function validateInputs(directory: string, spec: unknown): asserts spec is Local
   }
 }
 
-async function canonicalWorkspace(workspaceRoot: string): Promise<string> {
+export async function canonicalWorkspace(workspaceRoot: string): Promise<string> {
   const rootInfo = await lstat(workspaceRoot);
   if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
     throw new Error("The local agent workspace must be a real directory, not a symlink.");
@@ -115,7 +115,7 @@ async function canonicalWorkspace(workspaceRoot: string): Promise<string> {
   return await realpath(workspaceRoot);
 }
 
-async function fingerprintWorkspace(canonicalRoot: string): Promise<string> {
+export async function fingerprintWorkspace(canonicalRoot: string): Promise<string> {
   return fingerprintWorkspaceInfo(await lstat(canonicalRoot));
 }
 
@@ -130,9 +130,19 @@ export async function prepareLocalSpecProject(
   workspaceRoot: string,
   directory: string,
   spec: unknown,
+  expectedWorkspaceFingerprint?: string,
 ): Promise<PreparedLocalSpecProject> {
-  validateInputs(directory, spec);
   const canonicalRoot = await canonicalWorkspace(workspaceRoot);
+  const workspaceFingerprint = await fingerprintWorkspace(canonicalRoot);
+  if (
+    expectedWorkspaceFingerprint !== undefined
+    && workspaceFingerprint !== expectedWorkspaceFingerprint
+  ) {
+    throw new Error(
+      "The local workspace changed after this action was prepared; return to the original workspace and prepare it again.",
+    );
+  }
+  validateInputs(directory, spec);
   const targetDirectory = join(canonicalRoot, directory);
   try {
     await lstat(targetDirectory);
@@ -141,7 +151,7 @@ export async function prepareLocalSpecProject(
       return {
         directory: `./${directory}`,
         specPath: `./${directory}/tunedtensor.json`,
-        workspaceFingerprint: await fingerprintWorkspace(canonicalRoot),
+        workspaceFingerprint,
       };
     }
     throw error;
@@ -158,7 +168,12 @@ export async function createLocalSpecProject(
 ): Promise<CreatedLocalSpecProject> {
   let prepared: PreparedLocalSpecProject;
   try {
-    prepared = await prepareLocalSpecProject(workspaceRoot, directory, spec);
+    prepared = await prepareLocalSpecProject(
+      workspaceRoot,
+      directory,
+      spec,
+      expectedWorkspaceFingerprint,
+    );
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new LocalSpecMutationError(detail, "not_applied", error);

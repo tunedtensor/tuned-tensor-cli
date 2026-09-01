@@ -10,6 +10,7 @@ import {
 } from "../agent-approval.js";
 import type { AgentAction } from "../agent-client.js";
 import { prepareLocalSpecProject } from "../local-spec-workspace.js";
+import { prepareLocalPipelineAction } from "../local-pipeline-action.js";
 
 const SPEC_ID = "251f122f-dd8e-4894-a0ab-99965e976e29";
 const ACTION_ID = "ed8e4bca-ab1c-4c9f-8b65-9f7997f76670";
@@ -54,6 +55,244 @@ function updateAction(): AgentAction {
 }
 
 describe("deterministic local approvals", () => {
+  it("executes a sealed local pipeline through the deterministic command runner", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "tt-local-pipeline-approval-"));
+    const specPath = join(workspace, "tunedtensor.json");
+    writeFileSync(join(workspace, "local-runner.json"), JSON.stringify({
+      artifactRoot: "artifacts",
+    }));
+    writeFileSync(specPath, JSON.stringify({
+      name: "Sentiment",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Classify sentiment.",
+      guidelines: ["Return one label."],
+      examples: [
+        { input: "Great", output: "positive" },
+        { input: "Awful", output: "negative" },
+      ],
+    }));
+    const prepared = await prepareLocalPipelineAction({
+      workspaceRoot: workspace,
+      dryRun: true,
+    });
+    const action: AgentAction = {
+      id: ACTION_ID,
+      operation: "run_local_pipeline",
+      title: "Dry-run local pipeline",
+      summary: "Preview the adapter pipeline.",
+      risk: "medium",
+      status: "proposed",
+      arguments: {
+        pipeline: prepared.pipeline,
+        spec_path: prepared.specPath,
+        spec_sha256: prepared.specSha256,
+        workspace_fingerprint: prepared.workspaceFingerprint,
+        config_path: prepared.configPath,
+        config_sha256: prepared.configSha256,
+        dry_run: prepared.dryRun,
+      },
+    };
+    const transitions: string[] = [];
+    const runPipelineCommand = vi.fn(async (command: string[], options: { cwd: string }) => {
+      expect(command.slice(0, 2)).toEqual(["pipeline", "run"]);
+      expect(command).toContain("--dry-run");
+      expect(options.cwd).toBe(workspace);
+      expect(JSON.parse(readFileSync(command[command.indexOf("--file") + 1]!, "utf8")))
+        .toEqual(prepared.pipeline);
+      expect(JSON.parse(readFileSync(command[command.indexOf("--spec") + 1]!, "utf8")))
+        .toMatchObject({ name: "Sentiment" });
+      expect(JSON.parse(readFileSync(command[command.indexOf("--config") + 1]!, "utf8")))
+        .toMatchObject({ artifactRoot: join(workspace, "artifacts") });
+      return { exitCode: 0, signal: null };
+    });
+
+    try {
+      await expect(approvePreparedAction(
+        action,
+        api(),
+        async (value) => { transitions.push(value.status ?? ""); },
+        { workspaceRoot: workspace, runPipelineCommand },
+      )).resolves.toMatchObject({
+        completed: true,
+        engine: "adapter",
+        spec_path: "./tunedtensor.json",
+        config_path: "./local-runner.json",
+        dry_run: true,
+        command: ["tt", "pipeline", "run", "--dry-run", "--spec", "./tunedtensor.json"],
+      });
+      expect(transitions).toEqual(["executing", "completed"]);
+      expect(runPipelineCommand).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a persisted real pipeline action before claiming it", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "tt-local-pipeline-real-action-"));
+    writeFileSync(join(workspace, "tunedtensor.json"), JSON.stringify({
+      name: "Sentiment",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Classify sentiment.",
+      guidelines: ["Return one label."],
+      examples: [
+        { input: "Great", output: "positive" },
+        { input: "Awful", output: "negative" },
+      ],
+    }));
+    const prepared = await prepareLocalPipelineAction({ workspaceRoot: workspace });
+    const action: AgentAction = {
+      id: ACTION_ID,
+      operation: "run_local_pipeline",
+      title: "Run local pipeline",
+      summary: "Run the adapter pipeline.",
+      risk: "high",
+      status: "proposed",
+      arguments: {
+        pipeline: prepared.pipeline,
+        spec_path: prepared.specPath,
+        spec_sha256: prepared.specSha256,
+        workspace_fingerprint: prepared.workspaceFingerprint,
+        dry_run: false,
+      },
+    };
+    const transitions: string[] = [];
+    const runPipelineCommand = vi.fn(async () => ({ exitCode: 0, signal: null }));
+
+    try {
+      await expect(approvePreparedAction(
+        action,
+        api(),
+        async (value) => { transitions.push(value.status ?? ""); },
+        {
+          workspaceRoot: workspace,
+          runPipelineCommand,
+        },
+      )).rejects.toThrow(/real pipeline execution requires the explicit direct tt pipeline run command/i);
+      expect(action.status).toBe("failed");
+      expect(transitions).toEqual(["failed"]);
+      expect(runPipelineCommand).not.toHaveBeenCalled();
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an approved pipeline in a different workspace with an identical spec", async () => {
+    const preparedWorkspace = mkdtempSync(join(tmpdir(), "tt-local-pipeline-prepared-workspace-"));
+    const approvalWorkspace = mkdtempSync(join(tmpdir(), "tt-local-pipeline-approval-workspace-"));
+    const spec = JSON.stringify({
+      name: "Sentiment",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Classify sentiment.",
+      guidelines: ["Return one label."],
+      examples: [
+        { input: "Great", output: "positive" },
+        { input: "Awful", output: "negative" },
+      ],
+    });
+    writeFileSync(join(preparedWorkspace, "tunedtensor.json"), spec);
+    writeFileSync(join(approvalWorkspace, "tunedtensor.json"), spec);
+    const prepared = await prepareLocalPipelineAction({ workspaceRoot: preparedWorkspace });
+    const action: AgentAction = {
+      id: ACTION_ID,
+      operation: "run_local_pipeline",
+      title: "Run local pipeline",
+      summary: "Run the adapter pipeline.",
+      risk: "medium",
+      status: "proposed",
+      arguments: {
+        pipeline: prepared.pipeline,
+        spec_path: prepared.specPath,
+        spec_sha256: prepared.specSha256,
+        workspace_fingerprint: prepared.workspaceFingerprint,
+        dry_run: true,
+      },
+    };
+    const runPipelineCommand = vi.fn(async () => ({ exitCode: 0, signal: null }));
+    const transitions: string[] = [];
+
+    try {
+      await expect(approvePreparedAction(
+        action,
+        api(),
+        async (value) => { transitions.push(value.status ?? ""); },
+        { workspaceRoot: approvalWorkspace, runPipelineCommand },
+      )).rejects.toThrow(/workspace changed after.*prepared/i);
+      expect(action.status).toBe("proposed");
+      expect(transitions).toEqual([]);
+      expect(runPipelineCommand).not.toHaveBeenCalled();
+
+      const claimedAction: AgentAction = {
+        ...action,
+        id: "bc77f76c-28b2-44f3-acb3-57bb554259a7",
+        status: "proposed",
+      };
+      const claimedTransitions: string[] = [];
+      await expect(approvePreparedAction(
+        claimedAction,
+        api(),
+        async (value) => { claimedTransitions.push(value.status ?? ""); },
+        {
+          workspaceRoot: approvalWorkspace,
+          runPipelineCommand,
+          durableClaimed: true,
+        },
+      )).rejects.toThrow(/workspace changed after.*prepared/i);
+      expect(claimedAction.status).toBe("failed");
+      expect(claimedTransitions).toEqual(["failed"]);
+      expect(runPipelineCommand).not.toHaveBeenCalled();
+    } finally {
+      rmSync(preparedWorkspace, { recursive: true, force: true });
+      rmSync(approvalWorkspace, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an approved pipeline when its sealed spec changed", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "tt-local-pipeline-stale-"));
+    const specPath = join(workspace, "tunedtensor.json");
+    const spec = {
+      name: "Sentiment",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Classify sentiment.",
+      guidelines: ["Return one label."],
+      examples: [
+        { input: "Great", output: "positive" },
+        { input: "Awful", output: "negative" },
+      ],
+    };
+    writeFileSync(specPath, JSON.stringify(spec));
+    const prepared = await prepareLocalPipelineAction({ workspaceRoot: workspace });
+    const action: AgentAction = {
+      id: ACTION_ID,
+      operation: "run_local_pipeline",
+      title: "Run local pipeline",
+      summary: "Run the adapter pipeline.",
+      risk: "medium",
+      status: "proposed",
+      arguments: {
+        pipeline: prepared.pipeline,
+        spec_path: prepared.specPath,
+        spec_sha256: prepared.specSha256,
+        workspace_fingerprint: prepared.workspaceFingerprint,
+        dry_run: true,
+      },
+    };
+    writeFileSync(specPath, JSON.stringify({ ...spec, system_prompt: "Changed after review." }));
+    const runPipelineCommand = vi.fn();
+
+    try {
+      await expect(approvePreparedAction(
+        action,
+        api(),
+        async () => {},
+        { workspaceRoot: workspace, runPipelineCommand },
+      )).rejects.toThrow(/changed after.*prepared/i);
+      expect(action.status).toBe("failed");
+      expect(runPipelineCommand).not.toHaveBeenCalled();
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("creates an approved local spec without contacting the cloud API", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "tt-local-spec-approval-"));
     const client = api();

@@ -456,7 +456,7 @@ async function loadCliBehaviorSpec(inputPath: string, runId?: string) {
   });
   if (input.kind === "foundation-spec") {
     throw new Error(
-      `This spec uses engine "foundation". Use \`tt pipeline run --spec ${input.path}\` instead of adapter commands like \`tt run\`.`,
+      `This spec uses engine "foundation". Use \`tt pipeline run --spec ${input.path}\`; the legacy adapter runner cannot execute foundation specs.`,
     );
   }
   if (input.kind !== "spec") {

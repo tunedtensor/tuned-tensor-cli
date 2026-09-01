@@ -129,6 +129,14 @@ describe("local spec workspace", () => {
       "0".repeat(64),
     )).rejects.toThrow(/workspace changed/i);
     expect(existsSync(join(workspace, "safe-spec"))).toBe(false);
+
+    mkdirSync(join(workspace, "conflicting-spec"));
+    await expect(createLocalSpecProject(
+      workspace,
+      "conflicting-spec",
+      spec,
+      "0".repeat(64),
+    )).rejects.toThrow(/workspace changed/i);
   });
 
   it("creates private canonical JSON and never overwrites it", async () => {

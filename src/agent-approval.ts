@@ -1,9 +1,19 @@
 import type { AgentAction } from "./agent-client.js";
 import {
+  canonicalWorkspace,
   createLocalSpecProject,
+  fingerprintWorkspace,
   isKnownLocalSpecFailure,
+  prepareLocalSpecProject,
   type LocalSpecFileOperations,
 } from "./local-spec-workspace.js";
+import {
+  executeLocalPipelineAction,
+  isKnownLocalPipelineFailure,
+  LocalPipelineWorkspaceMismatchError,
+  type LocalPipelineCommandRunner,
+  validatePreparedLocalPipelineAction,
+} from "./local-pipeline-action.js";
 
 export interface AgentMutationApi {
   get(path: string): Promise<unknown>;
@@ -22,6 +32,16 @@ export type PersistAction = (action: AgentAction) => Promise<void>;
 export interface AgentApprovalOptions {
   workspaceRoot?: string;
   localFileOperations?: Partial<LocalSpecFileOperations>;
+  runPipelineCommand?: LocalPipelineCommandRunner;
+  signal?: AbortSignal;
+  durableClaimed?: boolean;
+}
+
+export class PreparedActionWorkspaceMismatchError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, { cause });
+    this.name = "PreparedActionWorkspaceMismatchError";
+  }
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -43,6 +63,16 @@ function args(action: AgentAction): Record<string, unknown> {
 function requiredString(value: unknown, label: string): string {
   if (typeof value !== "string" || !value) throw new Error(`Prepared action ${label} is invalid.`);
   return value;
+}
+
+function requiredBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") throw new Error(`Prepared action ${label} is invalid.`);
+  return value;
+}
+
+function optionalString(value: unknown, label: string): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  return requiredString(value, label);
 }
 
 async function requireMutationGuardSupport(api: AgentMutationApi): Promise<void> {
@@ -70,6 +100,98 @@ async function fail(
     // Preserve the original safety failure.
   }
   throw error;
+}
+
+async function prepareLocalPipelineApproval(
+  action: AgentAction,
+  options: AgentApprovalOptions,
+) {
+  const input = args(action);
+  const workspaceRoot = options.workspaceRoot;
+  if (!workspaceRoot) {
+    throw new Error("A local workspace is required to run a local pipeline.");
+  }
+  if (!options.runPipelineCommand) {
+    throw new Error("The local pipeline command runner is unavailable.");
+  }
+  const pipeline = record(input.pipeline);
+  if (!pipeline) throw new Error("Prepared pipeline content is invalid.");
+  const specPath = requiredString(input.spec_path, "spec path");
+  const specSha256 = requiredString(input.spec_sha256, "spec fingerprint");
+  const workspaceFingerprint = requiredString(
+    input.workspace_fingerprint,
+    "workspace fingerprint",
+  );
+  const configPath = optionalString(input.config_path, "config path");
+  const configSha256 = optionalString(input.config_sha256, "config fingerprint");
+  if (Boolean(configPath) !== Boolean(configSha256)) {
+    throw new Error("Prepared action config path and fingerprint must be provided together.");
+  }
+  const dryRun = requiredBoolean(input.dry_run, "dry-run flag");
+  if (!dryRun) {
+    throw new Error(
+      "Real pipeline execution requires the explicit direct tt pipeline run command; model-mediated approvals are dry-run only.",
+    );
+  }
+  const validation = {
+    workspaceRoot,
+    pipeline,
+    specPath,
+    expectedSpecSha256: specSha256,
+    expectedWorkspaceFingerprint: workspaceFingerprint,
+    expectedConfigPath: configPath,
+    expectedConfigSha256: configSha256,
+    dryRun,
+  };
+  await validatePreparedLocalPipelineAction(validation);
+  return {
+    validation,
+    runCommand: options.runPipelineCommand,
+    signal: options.signal,
+  };
+}
+
+export async function preflightPreparedAction(
+  action: AgentAction,
+  options: AgentApprovalOptions = {},
+): Promise<void> {
+  if (action.status !== "proposed") {
+    throw new Error(`Action ${action.id} is not proposed and cannot be approved.`);
+  }
+  if (action.operation === "create_local_spec") {
+    const input = args(action);
+    const workspaceRoot = options.workspaceRoot;
+    if (!workspaceRoot) {
+      throw new Error("A local workspace is required to create a local spec.");
+    }
+    const directory = requiredString(input.directory, "local directory");
+    const expectedWorkspaceFingerprint = requiredString(
+      input.workspace_fingerprint,
+      "workspace fingerprint",
+    );
+    const canonicalRoot = await canonicalWorkspace(workspaceRoot);
+    const actualWorkspaceFingerprint = await fingerprintWorkspace(canonicalRoot);
+    if (actualWorkspaceFingerprint !== expectedWorkspaceFingerprint) {
+      throw new PreparedActionWorkspaceMismatchError(
+        "The local workspace changed after this action was prepared; return to the original workspace and prepare it again.",
+      );
+    }
+    await prepareLocalSpecProject(
+      workspaceRoot,
+      directory,
+      input.spec,
+      expectedWorkspaceFingerprint,
+    );
+  } else if (action.operation === "run_local_pipeline") {
+    try {
+      await prepareLocalPipelineApproval(action, options);
+    } catch (error) {
+      if (error instanceof LocalPipelineWorkspaceMismatchError) {
+        throw new PreparedActionWorkspaceMismatchError(error.message, error);
+      }
+      throw error;
+    }
+  }
 }
 
 export async function approvePreparedAction(
@@ -105,6 +227,15 @@ export async function approvePreparedAction(
         );
         break;
       }
+      case "run_local_pipeline": {
+        const prepared = await prepareLocalPipelineApproval(action, options);
+        execute = async () => await executeLocalPipelineAction({
+          ...prepared.validation,
+          runCommand: prepared.runCommand,
+          signal: prepared.signal,
+        });
+        break;
+      }
       case "create_spec": {
         await requireMutationGuardSupport(api);
         const spec = record(input.spec);
@@ -138,6 +269,12 @@ export async function approvePreparedAction(
     }
 
   } catch (error) {
+    if (
+      error instanceof LocalPipelineWorkspaceMismatchError
+      && options.durableClaimed !== true
+    ) {
+      throw error;
+    }
     return await fail(action, persist, error);
   }
 
@@ -157,7 +294,10 @@ export async function approvePreparedAction(
     await persist(action);
     return output;
   } catch (error) {
-    if (action.operation === "create_local_spec" && isKnownLocalSpecFailure(error)) {
+    if (
+      (action.operation === "create_local_spec" && isKnownLocalSpecFailure(error))
+      || (action.operation === "run_local_pipeline" && isKnownLocalPipelineFailure(error))
+    ) {
       action.status = "failed";
       try {
         await persist(action);
@@ -165,7 +305,7 @@ export async function approvePreparedAction(
         action.status = "outcome_unknown";
         try { await persist(action); } catch { /* Keep the durable executing record fail-closed. */ }
         throw new Error(
-          "Local spec creation did not apply, but its final action status could not be recorded. Inspect the workspace before preparing another action.",
+          "The local action did not complete, but its final status could not be recorded. Inspect the workspace and local runs before preparing another action.",
           { cause: persistError },
         );
       }
@@ -180,7 +320,9 @@ export async function approvePreparedAction(
     const detail = error instanceof Error ? error.message : String(error);
     const inspectionTarget = action.operation === "create_local_spec"
       ? "local workspace"
-      : "remote resource";
+      : action.operation === "run_local_pipeline"
+        ? "local run store"
+        : "remote resource";
     throw new Error(
       `The mutation outcome is unknown and this action cannot be retried automatically. Inspect the ${inspectionTarget} before preparing another action. ${detail}`,
       { cause: error },

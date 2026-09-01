@@ -10,7 +10,6 @@ export const LOCAL_COMMANDS = [
   "doctor",
   "hardware",
   "validate",
-  "run",
   "serve",
   "runs",
   "models",
@@ -24,7 +23,6 @@ export const LOCAL_COMMAND_DESCRIPTIONS: Record<LocalCommandName, string> = {
   doctor: "Check the host and optional run input before starting work",
   hardware: "Inventory this host and report what TT can train, fine-tune, or infer",
   validate: "Validate a local behavior spec without executing it",
-  run: "Run the local fine-tuning and evaluation workflow",
   serve: "Serve a verified adapter, the active model, or the protected base",
   runs: "Inspect locally stored runs",
   models: "Inspect, verify, prefetch, or serve local models",
@@ -94,6 +92,19 @@ export function registerLocalCommands(
         await runPassthrough([name, ...args]);
       });
   }
+
+  program
+    .command("run", { hidden: true })
+    .description("Deprecated alias for the canonical adapter pipeline")
+    .helpOption(false)
+    .allowUnknownOption()
+    .argument("[args...]", "Legacy local run arguments")
+    .action(async (args: string[]) => {
+      runtime.stderr.write(
+        "`tt run` is deprecated; use `tt pipeline run --spec tunedtensor.json`.\n",
+      );
+      await runPassthrough(["run", ...args]);
+    });
 
   program
     .command("local", { hidden: true })

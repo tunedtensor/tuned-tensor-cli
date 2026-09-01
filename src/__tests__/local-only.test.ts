@@ -46,6 +46,9 @@ describe("local-only CLI surface", () => {
     expect(help).not.toMatch(/--base-url/);
     expect(help).not.toMatch(/\btt auth\b/);
     expect(help).not.toMatch(/\btt publish\b/);
+    expect(help).not.toMatch(/^\s+run\b/m);
+    expect(help).toMatch(/^\s+pipeline\b/m);
+    expect(help).toMatch(/^\s+serve\b/m);
     expect(help.match(/Commands:/g)?.length).toBe(1);
   });
 
@@ -72,6 +75,7 @@ describe("local-only CLI surface", () => {
       "describe_pipeline",
       "validate_pipeline",
       "prepare_create_local_spec",
+      "prepare_pipeline_run",
     ]));
   });
 

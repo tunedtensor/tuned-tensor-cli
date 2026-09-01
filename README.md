@@ -11,15 +11,17 @@
 This release unregisters the hosted API commands (`tt auth`, `tt publish`,
 `tt push`, `tt balance`, `tt topup`, `tt cloud`, and the rest of the managed
 tree). The modules remain in the repository so they can be restored later.
-`tt local …` is kept as a hidden alias; new scripts should call `tt run`,
-`tt doctor`, `tt runs list`, and so on directly.
+`tt local …` is kept as a hidden alias. `tt run` is also retained as a hidden
+compatibility alias for the canonical adapter pipeline; new scripts should use
+`tt pipeline run --spec tunedtensor.json`.
 
 ## Migrating from 0.11
 
 `0.13` is the local-only CLI. If you are coming from `0.11.0`:
 
-- Call `tt run`, `tt doctor`, and `tt serve` at the root. `tt local …` still
-  works as a hidden alias.
+- Run `tt` for the conversational workflow, `tt pipeline run` for explicit or
+  automated execution, and `tt serve` for the serving lifecycle. `tt run` and
+  `tt local …` remain hidden compatibility aliases.
 - Hosted account commands (`tt auth`, `tt publish`, `tt push`, and the rest)
   are unregistered.
 - `Qwen/Qwen3.5-2B` is pinned to Hugging Face snapshot
@@ -79,9 +81,11 @@ The interactive agent harness and conversation state run on your laptop.
 Inference runs through the provider/model you select, which may be a
 local endpoint or a remote provider.
 
-Run `tt` to open one terminal for conversation and commands. Workflow commands
-such as `runs list` and `doctor` work immediately. Chat waits until you choose
-a provider and model from inside the shell:
+Run `tt` to open the primary conversational workflow. The agent can inspect the
+project, derive the canonical pipeline from `tunedtensor.json`, present the
+resolved plan, and prepare a sealed dry-run for `/approve`. Workflow commands such
+as `runs list` and `doctor` also work immediately. Chat waits until you choose a
+provider and model from inside the shell:
 
 ```text
 tt v0.13.1-beta.2
@@ -125,14 +129,19 @@ Ask TT anything. Known commands run directly.
 Ordinary sentences go through the locally orchestrated model session. The
 model has no shell or general filesystem tool. It can prepare one new folder
 directly beneath the shell's current working directory with a validated
-`tunedtensor.json`. The tool refuses path traversal, symlinked workspace
-roots, existing targets, and unsupported spec fields. Known CLI commands such
-as `runs list`, `doctor`, and `models list` still execute directly. Prefix a
-command with `:` when you want to make that intent explicit.
+`tunedtensor.json`, or prepare a local pipeline dry-run sealed to the reviewed
+workspace and spec contents. Neither action starts until `/approve`. The tools refuse path
+traversal, symlinked workspace roots, existing spec targets, unsupported spec
+fields, cloud pipeline targets, and spec changes after review. Known CLI
+commands such as `runs list`, `doctor`, and `models list` still execute directly.
+Prefix a command with `:` when you want to make that intent explicit.
 
 The agent can describe the built-in adapter and foundation pipeline stages,
-including optional foundation RL, and returns the exact `tt pipeline` commands
-for initialization, validation, planning, dry-run, and execution. It can also
+including optional foundation RL. When asked to train or dry-run, it derives or
+validates the pipeline, shows the exact plan, and prepares a deterministic
+dry-run. `/approve` starts that preview outside the model, and Ctrl-C stops the
+child process group. Real training is intentionally not model-mediated: run the
+displayed `tt pipeline run` command directly when you choose to execute. It can also
 search public Hugging Face model or dataset metadata for foundation and
 fine-tuning discovery. A Hub search sends only the search query to
 `huggingface.co`; it uses no Hugging Face token, downloads nothing, and omits
@@ -163,6 +172,13 @@ are anchored to open workspace and destination-directory handles. The proposal
 is bound to the current workspace so changing directories before approval fails
 safely instead of writing somewhere else. Ambiguous write failures remain
 sealed as `outcome_unknown` for manual inspection. `/reject` never mutates.
+Pipeline dry-runs also wait for `/approve`. Preparation fingerprints the
+workspace directory identity, spec, and adjacent config, revalidates them,
+copies the resolved spec, config, and pipeline into private temporary inputs,
+and invokes `tt pipeline run --dry-run` deterministically. Persisted proposals
+that request real execution fail before the child command is dispatched. Real
+training remains available through the explicit direct `tt pipeline run` command.
+A changed workspace or spec requires a new review.
 
 Useful shell controls include `/help`, `/status`, `/context`, `/model`,
 `/login`, `/cd`, `/clear`, and `/exit`.
@@ -199,9 +215,10 @@ adds execution planning (step selection) on top of it.
 Two local engines share that document version:
 
 - **Adapter** (default): LoRA SFT on a certified Hugging Face checkpoint.
-  `tt run` and `tt pipeline` both work. Uses `train` / `evaluate` / `compare`
-  with `evaluate.with.evaluator: "behavior"`.
-- **Foundation**: from-scratch tokenizer + GPT. `tt pipeline` only. Uses
+  Runs through `tt pipeline run`. Uses `train` / `evaluate` / `compare` with
+  `evaluate.with.evaluator: "behavior"`.
+- **Foundation**: from-scratch tokenizer + GPT. Also runs through
+  `tt pipeline run`. Uses
   `tokenize` / `pretrain` / `finetune` / optional `rl` plus `bpb`, `chat`, and
   `inference` evaluators. Requires a foundation `tunedtensor.json`
   (`engine: "foundation"`, at least two examples, no `base_model`).
@@ -239,10 +256,14 @@ tt --json pipeline run --spec tunedtensor.json --dry-run
 tt pipeline run --spec tunedtensor.json --resume /absolute/path/to/foundation-run
 ```
 
+When `--config` is omitted, `pipeline run` uses `local-runner.json` beside the
+selected spec when that file exists.
+
 `--only` and `--skip` preserve dependency safety: a selected step cannot refer
 to an omitted predecessor. Cloud-targeted steps fail closed unless you pass
 `--dry-run`. Foundation documents are local-only. The TT agent may describe,
-validate, and prepare a plan, but has no direct pipeline-execute tool.
+validate, and prepare a sealed pipeline action; only deterministic `/approve`
+handling can execute it.
 
 Long pretraining uses BF16, warmup plus cosine decay, gradient clipping,
 periodic metrics, and atomic rolling checkpoints. `--resume <run-directory>`
@@ -274,7 +295,7 @@ placeholder examples, then preflight and run:
 tt doctor tunedtensor.json
 tt validate tunedtensor.json
 tt models prefetch tunedtensor.json
-tt run tunedtensor.json
+tt pipeline run --spec tunedtensor.json
 ```
 
 Inspect, verify, and serve a completed adapter:
@@ -282,7 +303,7 @@ Inspect, verify, and serve a completed adapter:
 ```bash
 tt runs report <run-id>
 tt models verify local-<run-id>
-tt models serve local-<run-id> --config local-runner.json
+tt serve local-<run-id> --config local-runner.json
 ```
 
 Local currently certifies text SFT with `Qwen/Qwen3.5-2B` (pinned to snapshot
