@@ -549,6 +549,7 @@ test("stored models are verified before a serving launch plan is produced", asyn
       assert.equal(provider.baseUrl, "http://127.0.0.1:8123/v1");
       assert.equal(provider.api, "openai-completions");
       assert.equal(provider.models[0].id, target === "base" ? "base:Qwen/Qwen3.5-2B" : modelId);
+      assert.deepEqual(provider.models.map((m: { id: string }) => m.id), target === "base" ? ["base:Qwen/Qwen3.5-2B"] : [modelId, "base:Qwen/Qwen3.5-2B"]);
       assert.equal(provider.compat.supportsDeveloperRole, false);
       assert.equal(provider.compat.maxTokensField, "max_tokens");
     }
@@ -573,11 +574,9 @@ test("stored models are verified before a serving launch plan is produced", asyn
     assert.equal(unsafeKey.status, 1);
     assert.match(unsafeKey.stderr, /plain environment variable name/);
 
-    const mergedConfig = runCli(["serve", modelId, "--merge-adapter", "--print-client-config", "pi"], root);
-    assert.equal(mergedConfig.status, 0, mergedConfig.stderr);
-    const mergeBase = runCli(["serve", "base", "--merge-adapter", "--print-command"], root);
-    assert.equal(mergeBase.status, 1);
-    assert.match(mergeBase.stderr, /requires an adapter/);
+    const boundedConfig = runCli(["serve", modelId, "--context-length", "4096", "--gpu-memory-utilization", "0.15", "--print-client-config", "pi"], root);
+    assert.equal(boundedConfig.status, 0, boundedConfig.stderr);
+    assert.equal(JSON.parse(boundedConfig.stdout).providers["tt-local"].models[0].contextWindow, 4096);
     const unsupportedClient = runCli(["serve", "base", "--print-client-config", "other"], root);
     assert.equal(unsupportedClient.status, 1);
     assert.match(unsupportedClient.stderr, /--print-client-config must be pi/);

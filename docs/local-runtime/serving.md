@@ -1,110 +1,168 @@
-# Local serving and coding-question comparisons
+# Local serving and coding harnesses
 
-`tt serve` hosts one certified Hugging Face base model or verified LoRA adapter
-per process. It uses the existing locked Transformers/PyTorch runtime; there is
-no extra inference engine, proxy, agent loop, or global harness configuration.
-Foundation checkpoints and image inputs are not supported by this server.
+`tt serve` verifies TT artifacts and launches **vLLM 0.28.0**. vLLM owns model
+execution, batching, KV/prefix caching, streaming, and native tool-call parsing.
+There is no TT inference loop, HTTP server, or proxy between the harness and
+vLLM. The serving dependencies are locked separately from training, in an
+external cache environment; an npm upgrade does not mutate the training runtime.
 
-## Serve base or tuned
+## Requirements and scope
+
+- The packaged serving runtime requires **Linux and NVIDIA CUDA**. CPU/macOS
+  serving is not supported by this runtime; CLI/package commands still work
+  there. Unsupported hardware or model/adapter combinations fail rather than
+  silently falling back to the old server.
+- Install `uv` and prefetch the certified model with `tt models prefetch`.
+  First launch installs the locked serving dependencies and may compile kernels;
+  it needs substantially more time and disk than a warm request. CUDA JIT may
+  require a working CUDA toolkit/C++ toolchain. Model loading remains offline.
+- Foundation checkpoints and image inputs are not supported by this path.
+- Qwen3.5-2B base and a one-step, rank-16 `all-linear` TT-shaped adapter have been
+  exercised on GB10. The registry's Nemotron and Muse Glimmer architectures have
+  upstream support, but their exact adapters/hardware combinations are **not
+  certified by that Qwen smoke test**. No 70B model was tested here.
+
+## Serve once, compare base and tuned
 
 ```bash
-# Prefetch once; serving itself remains offline.
 tt models prefetch tunedtensor.json
 
-# Base plus the same behavior instructions used for the tuned model:
-tt serve base --spec tunedtensor.json --config local-runner.json --max-tokens 512
-
-# Stop the base server with Ctrl-C before switching to the tuned model:
-tt serve local-<run-id> --config local-runner.json --max-tokens 512
+tt serve local-<run-id> --config local-runner.json \
+  --context-length 8192 --max-tokens 512
 ```
 
-`active` resolves the activated adapter and fails if none is active. Adapter
-artifacts, pinned base revisions, and stored system-prompt fingerprints retain
-their existing verification. `base` without explicit `--spec` does not inject
-the adjacent behavior prompt; use explicit `--spec` for a fair comparison.
+This exposes **both** `local-<run-id>` and `base:<base-model-id>` at the same
+endpoint, sharing the base weights. The adapter is registered at startup; TT
+never enables runtime adapter upload/loading. There is no merge/export step
+and no modification of the verified weights. `tt serve base` starts base-only.
+`active` still fails when no adapter is activated.
 
-- Use CUDA when available (`tt hardware` reports suitability). The loader uses
-  BF16 on supported CUDA hardware, FP16 otherwise, and keeps weights resident.
-- For a static adapter with spare memory, add `--merge-adapter` to fold LoRA
-  into the resident base weights once, removing the separate LoRA operations
-  during decoding. This uses PEFT's safe merge and never changes on-disk weights.
-  It needs extra startup memory and can change floating-point rounding; measure
-  latency and check quality on your workload. Omit the flag to keep the existing
-  unmerged path. It is invalid for `base`.
-- Generation explicitly enables the KV cache and runs in inference mode.
-  Streaming emits decoded text during generation, not after a full response.
-- The default admission limit is one request; excess work returns HTTP 429.
-  `--max-concurrent-requests` admits up to eight requests but generation remains
-  serialized: it is **not** GPU batching or a throughput tuning knob.
-- Prompts are limited to 128 messages, 100,000 characters, and 16,384 tokens;
-  requested output is limited to 8,192 tokens. Prompt plus output must also fit
-  the model's context. Lower output budgets reduce worst-case latency/memory.
-- A port conflict fails before loading weights. Health becomes available only
-  after loading. Ctrl-C terminates the process group. A failed stream write
-  unwinds generation and releases its slot; there is no orphan generation worker.
+Artifact integrity, certified base revisions, and stored behavior-prompt
+fingerprints retain their verification. A stored adapter's behavior prompt is
+applied to both model IDs for comparison. `tt serve base` without explicit
+`--spec` does not inject the adjacent spec; use `--spec tunedtensor.json` for that.
+`--no-spec-prompt` is the explicit opt-out. A small generated template prefix
+preserves the owner instructions while leaving tool messages and upstream chat
+formatting intact; it never changes the saved tokenizer/template.
 
-The default bind is `127.0.0.1:8000`. Non-loopback binds still require both
-`--allow-remote` and `--api-key-env NAME`. Never put the key itself on the command
-line. Plain HTTP is intended for a trusted host/network or an encrypted tunnel,
-not direct Internet exposure.
+### Resource controls
 
-## Pi harness: question-only mode
+- `--context-length`: total context budget, default 16,384 tokens. Keep it large
+  enough for the harness's instructions and tool results, not just the question.
+- `--max-tokens`: generation budget, default 512. vLLM receives this through its
+  generation configuration; the upstream API owns per-request validation.
+- `--gpu-memory-utilization`: fraction of device memory budgeted to vLLM,
+  default 0.8. On shared-memory machines leave room for the OS and other work.
+  For the small Qwen GB10 smoke we used **0.15**; this is not suitable for every
+  model size. Reduce the context or memory budget when upstream reports a fit
+  failure, and ensure the weights themselves still fit.
+- `--max-concurrent-requests`: maximum sequences scheduled in a vLLM batch,
+  default one, maximum eight. This is upstream batching, **not** the previous
+  HTTP admission/429 contract; upstream may queue additional requests.
 
-Install [Pi](https://github.com/earendil-works/pi-mono) separately. The integration
-is tested against the CLI's pinned Pi dependency. Export a **new, isolated** Pi
-config rather than replacing `~/.pi/agent/models.json`:
+Health becomes ready after loading/warm-up. Ctrl-C terminates the process group.
+A port conflict is checked before loading; upstream owns the final bind and any
+race. The unreleased custom server's `--merge-adapter` flag is removed.
+
+## Pi
+
+Export a new isolated configuration rather than replacing global settings:
 
 ```bash
 export PI_CODING_AGENT_DIR="$(mktemp -d)"
-
-tt serve base --spec tunedtensor.json --config local-runner.json \
-  --max-tokens 512 --print-client-config pi > "$PI_CODING_AGENT_DIR/models.json"
+tt serve local-<run-id> --config local-runner.json \
+  --context-length 8192 --max-tokens 512 \
+  --print-client-config pi > "$PI_CODING_AGENT_DIR/models.json"
 ```
 
-This prints valid Pi `models.json` and exits without starting a server. It
-includes the resolved model ID, endpoint, output budget, and OpenAI compatibility
-settings. With `--api-key-env NAME`, it exports an explicit **`${NAME}` environment
-reference**, never the secret; provide the same variable to Pi. Wildcard bind addresses
-are rendered as loopback client addresses for use on the same machine.
-
-Start the matching `tt serve base ...` command in another terminal. Then:
+Use the same launch options as the running server. Exporting config verifies the
+TT target but does not start a server. Adapter exports include both model IDs.
+For example, in a disposable coding-fixture directory:
 
 ```bash
 pi --provider tt-local --model 'base:Qwen/Qwen3.5-2B' \
-  --no-tools --no-extensions --no-skills --no-prompt-templates \
+  --tools read --no-extensions --no-skills --no-prompt-templates \
   --no-context-files --no-session --offline --thinking off \
-  --system-prompt 'Answer coding questions concisely.' \
-  -p 'Write a Python function that removes duplicates while preserving order.'
+  -p 'Read fixture.py and explain what its function returns.'
 ```
 
-For the tuned pass, stop the base server, export configuration with
-`tt serve local-<run-id> ... --print-client-config pi` to the same isolated config,
-start that exact tuned target, and replace Pi's `--model` with `local-<run-id>`.
-Use a fresh Pi invocation, the same question, system prompt, output budget, and
-behavior spec for each pass. Explicit model IDs prevent accidentally comparing
-the base model against itself. Save outputs locally and run the same independent
-tests on generated code; a plausible answer is not proof of correctness.
+Repeat with `--model local-<run-id>` in a fresh session. `--tools read` is a
+read-only tool allowlist, **not a filesystem sandbox**. Use a disposable account
+or an enforcing harness permission boundary for untrusted tasks. Enable edits
+or shell commands only when you intend to grant those permissions.
 
-**This is coding Q&A, not autonomous repository editing.** The bundled server
-has no tool-call parser. Non-empty tools, tool histories, stop sequences,
-structured-output requests, and multiple completions are rejected rather than
-silently ignored. Pi's `--no-tools` is required. OpenCode's normal coding-agent
-mode is not supported by this integration; it would require a separately tested
-tool-calling contract. No changes to TT's own agent permissions are made.
+For question-only comparisons, `--no-tools` remains an optional experiment
+setting. It is no longer a server requirement. `reasoning: false` and
+`supportsReasoningEffort: false` in the Pi export describe this endpoint's
+reasoning-control contract; **neither disables tool calls or asserts that the
+model cannot reason**.
 
-## API and measurements
+## OpenCode
 
-Discover the exact model ID with `GET /v1/models`, check `GET /health`, and send
-`POST /v1/chat/completions` with `model` matching that ID. Both normal JSON and
-`stream: true` SSE responses are supported. Use
-`stream_options: {"include_usage": true}` for a final streamed token-usage chunk.
-`max_tokens` or `max_completion_tokens` is accepted, but not both. Token-budget
-exhaustion reports `finish_reason: "length"`. A generation error after streaming
-starts produces an error event and closes without a successful `[DONE]` marker.
+OpenCode can connect directly using its existing custom provider support:
 
-Measure model load separately from first-request warm-up. For steady-state
-latency, repeat the same bounded workload after warm-up and record first-text
-latency, total elapsed time, and completion tokens. Compare base and adapter
-sequentially on the same otherwise-idle machine. Pi's zero provider token prices
-mean no billed API usage, **not** zero hardware or electricity cost. This change
-does not claim optimal throughput across all model/hardware combinations.
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "tt-local": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "TT local",
+      "options": { "baseURL": "http://127.0.0.1:8000/v1" },
+      "models": {
+        "base:Qwen/Qwen3.5-2B": {
+          "name": "TT base",
+          "limit": { "context": 8192, "output": 512 }
+        }
+      }
+    }
+  }
+}
+```
+
+Add the exact adapter ID from `/v1/models` to compare it. Set the actual server
+budgets, configure OpenCode's permissions, and select
+`opencode run --model 'tt-local/base:Qwen/Qwen3.5-2B' ...`. TT does not install a
+second agent framework or change global OpenCode configuration.
+
+## Tool support and security
+
+TT selects upstream parsers for the registered models:
+
+- Qwen3.5-2B: `qwen3_xml`.
+- Nemotron 3.5 Lightning: `qwen3_coder` (ordinary non-thinking template mode).
+- Muse Glimmer: `muse_glimmer`.
+
+These are protocol integrations, not guarantees that a model will choose the
+right tool or produce correct code. A complete test must observe a tool call,
+execute an allowed tool, send its result back, and verify the final answer.
+The harness owns tool execution/permissions; vLLM only generates the calls.
+Fine-tuning can change tool reliability, so compare the tuned model too.
+
+The default bind is `127.0.0.1:8000`. Non-loopback binds require both
+`--allow-remote` and `--api-key-env NAME`. An authentication-only middleware
+extends the bearer check to **all** upstream HTTP routes, including health,
+tokenization, and administrative routes; vLLM's built-in guard covers only
+selected prefixes. No token is put in argv or exported client configuration.
+Pi uses `${NAME}` interpolation; OpenCode can use `"apiKey": "{env:NAME}"`.
+Provide the variable separately to each process. Without `--api-key-env`, local
+serving is unauthenticated. Use a trusted host or encrypted tunnel, never expose
+plain HTTP directly to the Internet. Request/output logging and vLLM usage
+telemetry are disabled by the TT launcher.
+
+## API and measurement
+
+Use `/health`, `/v1/models`, and `/v1/chat/completions`. API bodies, SSE events,
+usage, tool calls, cancellation, and error semantics come from the pinned
+upstream server, not a TT approximation. The old custom server's message/byte
+limits, HTTP errors, and health JSON are not preserved as an API contract.
+
+Measure startup and first-request compilation separately from steady-state
+first-text latency and tokens/second. Compare identical prompts, templates,
+budgets, and fresh harness sessions on an otherwise-idle machine. Test generated
+code independently; a tiny one-step adapter proves integration, not better
+coding. Pi's zero provider token prices do not mean zero hardware cost.
+
+References: [vLLM LoRA](https://docs.vllm.ai/en/v0.28.0/features/lora/),
+[Nemotron tool configuration](https://docs.nvidia.com/nim/large-language-models/latest/get-started/advanced/get-started-nemotron-3.5-lightning.html),
+[OpenCode custom providers](https://opencode.ai/docs/providers/#custom-provider).

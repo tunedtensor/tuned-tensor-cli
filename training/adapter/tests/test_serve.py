@@ -1,254 +1,157 @@
 from __future__ import annotations
 
 import os
-import contextlib
-import http.client
-import json
-import threading
-from types import SimpleNamespace
-from unittest.mock import patch
-from pathlib import Path
-import subprocess
 import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-SRC = Path(__file__).resolve().parents[1] / "src"
-
-
-sys.path.insert(0, str(SRC))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import serve
 
 
-class Tensor:
-    def __init__(self, values):
-        self.values = values
-        self.shape = (1, len(values))
+class UpstreamLaunchTests(unittest.TestCase):
 
-    def to(self, device):
-        return self
-
-    def __getitem__(self, key):
-        if key == 0:
-            return self
-        return Tensor(self.values[key])
-
-
-class Tokenizer:
-    eos_token_id = 2
-
-    def apply_chat_template(self, messages, **kwargs):
-        return "prompt"
-
-    def __call__(self, prompt, **kwargs):
-        return {"input_ids": Tensor([10, 11])}
-
-    def decode(self, tokens, **kwargs):
-        return "hello world"
-
-
-class Model:
-    config = SimpleNamespace(max_position_embeddings=32768)
-
-    def parameters(self):
-        yield SimpleNamespace(device="cpu")
-
-    def generate(self, **kwargs):
-        self.kwargs = kwargs
-        streamer = kwargs.get("streamer")
-        if streamer:
-            streamer.on_finalized_text("hello ")
-            if not self.allow_finish.wait(3):
-                raise RuntimeError("stream was not delivered before generation ended")
-            streamer.on_finalized_text("world", stream_end=True)
-        return [Tensor([10, 11, 20, 21, 2])]
+    def test_auth_covers_upstream_admin_routes_not_only_v1(self):
+        import asyncio
+        calls = []
+        async def app(scope, receive, send):
+            calls.append(scope["path"])
+        async def receive():
+            return {"type": "http.request"}
+        async def exercise():
+            with patch.dict(os.environ, {"TT_API_KEY": "fixture-token"}):
+                middleware = serve.BearerAuthMiddleware(app)
+            for path in ("/health", "/tokenize", "/sleep", "/v1/models"):
+                for auth in (False, True):
+                    sent = []
+                    async def send(message):
+                        sent.append(message)
+                    scope = {"type": "http", "path": path, "headers": [(b"authorization", b"bearer fixture-token")] if auth else []}
+                    await middleware(scope, receive, send)
+                    if auth:
+                        self.assertEqual(calls[-1], path)
+                    else:
+                        self.assertEqual(sent[0]["status"], 401)
+            self.assertEqual(len(calls), 4)
+        asyncio.run(exercise())
 
 
-class ServeHTTPTests(unittest.TestCase):
-    def setUp(self):
-        self.model = Model()
-        self.model.allow_finish = threading.Event()
-        self.patches = contextlib.ExitStack()
-        self.patches.enter_context(patch.multiple(serve, MODEL=self.model, TOKENIZER=Tokenizer(),
-            MODEL_NAME="base:test", SYSTEM_PROMPT="", API_KEY="", BASE_MODEL="Qwen/Qwen3.5-2B",
-            REQUEST_SLOTS=threading.BoundedSemaphore(1)))
-        class TextStreamer:
-            def __init__(self, *args, **kwargs):
-                pass
-        self.patches.enter_context(patch.dict(sys.modules, {
-            "torch": SimpleNamespace(inference_mode=contextlib.nullcontext),
-            "transformers": SimpleNamespace(TextStreamer=TextStreamer),
-        }))
-        self.server = serve.ThreadingHTTPServer(("127.0.0.1", 0), serve.Handler)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        self.client = http.client.HTTPConnection(*self.server.server_address, timeout=5)
+    def test_larger_models_use_their_upstream_tool_parsers(self):
+        for model, parser in [
+            ("nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16", "qwen3_coder"),
+            ("meta-models/Muse-Glimmer-30B", "muse_glimmer"),
+        ]:
+            with self.subTest(model=model), tempfile.TemporaryDirectory() as tmp:
+                with patch.dict(os.environ, {"TT_BASE_MODEL": model, "TT_MODEL_NAME": "base"}, clear=True):
+                    args = serve.build_vllm_args("/verified/snapshot", None, Path(tmp))
+                self.assertEqual(args[args.index("--tool-call-parser") + 1], parser)
+                self.assertIn("--enable-auto-tool-choice", args)
 
-    def tearDown(self):
-        self.model.allow_finish.set()
-        self.client.close()
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join()
-        self.patches.close()
+    def test_launch_uses_upstream_server_and_native_qwen_tools(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {
+                "TT_BASE_MODEL": "Qwen/Qwen3.5-2B",
+                "TT_BASE_MODEL_REVISION": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+                "TT_MODEL_NAME": "base:Qwen/Qwen3.5-2B",
+                "TT_HOST": "127.0.0.1", "TT_PORT": "8123",
+                "TT_MAX_TOKENS": "128", "TT_MAX_CONCURRENT_REQUESTS": "2",
+            }, clear=True):
+                args = serve.build_vllm_args("/verified/snapshot", None, Path(tmp))
+        self.assertEqual(args[:2], ["serve", "/verified/snapshot"])
+        self.assertEqual(args[args.index("--served-model-name") + 1], "base:Qwen/Qwen3.5-2B")
+        self.assertEqual(args[args.index("--tool-call-parser") + 1], "qwen3_xml")
+        self.assertIn("--enable-auto-tool-choice", args)
+        self.assertIn("--language-model-only", args)
+        self.assertIn("--generation-config", args)
+        self.assertNotIn("--trust-remote-code", args)
+        self.assertIn("--no-enable-log-requests", args)
+        self.assertNotIn("--enable-lora", args)
 
-    def request(self, **extra):
-        body = {"model": "base:test", "messages": [{"role": "user", "content": "hi"}], **extra}
-        self.client.request("POST", "/v1/chat/completions", json.dumps(body), {"Content-Type": "application/json"})
-        return self.client.getresponse()
+    def test_adapter_is_registered_alongside_base_without_loading_weights(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            adapter = root / "adapter"
+            adapter.mkdir()
+            (adapter / "adapter_config.json").write_text(json.dumps({
+                "peft_type": "LORA", "r": 16, "base_model_name_or_path": "Qwen/Qwen3.5-2B"
+            }))
+            with patch.dict(os.environ, {"TT_BASE_MODEL": "Qwen/Qwen3.5-2B", "TT_MODEL_NAME": "local-tuned"}, clear=True):
+                args = serve.build_vllm_args("/verified/snapshot", str(adapter), root)
+            self.assertEqual(args[args.index("--served-model-name") + 1], "base:Qwen/Qwen3.5-2B")
+            self.assertEqual(json.loads(args[args.index("--lora-modules") + 1]), {
+                "name": "local-tuned", "path": str(adapter), "base_model_name": "base:Qwen/Qwen3.5-2B"
+            })
+            self.assertEqual(args[args.index("--max-lora-rank") + 1], "16")
 
-    def test_generation_error_sends_no_false_success_and_releases_capacity(self):
-        def fail(**kwargs):
-            kwargs["streamer"].on_finalized_text("partial ")
-            raise RuntimeError("private model data must not leak")
-        with patch.object(self.model, "generate", side_effect=fail):
-            response = self.request(stream=True)
-            data = response.read().decode()
-            self.assertEqual(response.status, 200)
-            self.assertIn('"error"', data)
-            self.assertNotIn("private model data", data)
-            self.assertNotIn("[DONE]", data)
-        self.assertFalse(serve.GENERATION_LOCK.locked())
-        response = self.request()
-        self.assertEqual(response.status, 200, response.read())
-
-    def test_disconnect_unwinds_generation_and_releases_capacity(self):
-        with patch.object(serve.Handler, "send_event", side_effect=BrokenPipeError) as send:
-            response = self.request(stream=True)
-            self.assertEqual(response.status, 200)
-            self.assertEqual(response.read(), b"")
-            send.assert_called_once()
-        self.assertFalse(serve.GENERATION_LOCK.locked())
-        response = self.request()
-        self.assertEqual(response.status, 200, response.read())
-
-    def test_busy_returns_429_and_health_remains_available(self):
-        serve.REQUEST_SLOTS.acquire()
+    def test_owner_prompt_is_literal_and_tool_history_is_preserved(self):
+        import json
         try:
-            response = self.request()
-            self.assertEqual(response.status, 429, response.read())
-            self.client.request("GET", "/health")
-            response = self.client.getresponse()
-            self.assertEqual(response.status, 200, response.read())
-        finally:
-            serve.REQUEST_SLOTS.release()
+            from jinja2 import Environment
+        except ImportError:
+            self.skipTest("Template rendering is also exercised in the locked-runtime integration smoke")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "snapshot"
+            source.mkdir()
+            original = "{{ messages | tojson }}"
+            (source / "chat_template.jinja").write_text(original)
+            owner = 'Owner: {{ dangerous }} "quoted"'
+            with patch.dict(os.environ, {"TT_BASE_MODEL": "Qwen/Qwen3.5-2B", "TT_MODEL_NAME": "base", "TT_SYSTEM_PROMPT": owner}, clear=True):
+                args = serve.build_vllm_args(str(source), None, root)
+            template = Path(args[args.index("--chat-template") + 1]).read_text()
+            history = [{"role": "system", "content": "Client context"}, {"role": "user", "content": "hi"},
+                {"role": "assistant", "tool_calls": [{"id": "call1", "type": "function", "function": {"name": "read", "arguments": "{}"}}]},
+                {"role": "tool", "tool_call_id": "call1", "content": "result"}]
+            messages = json.loads(Environment().from_string(template).render(messages=history))
+            self.assertEqual(messages[0], {"role": "system", "content": owner + "\n\nClient context"})
+            self.assertEqual(messages[1:], history[1:])
+            self.assertEqual((source / "chat_template.jinja").read_text(), original)
 
-    def test_auth_applies_to_discovery_and_generation(self):
-        with patch.object(serve, "API_KEY", "test-secret"):
-            response = self.request()
-            self.assertEqual(response.status, 401, response.read())
-            self.client.request("GET", "/v1/models", headers={"Authorization": "Bearer test-secret"})
-            response = self.client.getresponse()
-            self.assertEqual(response.status, 200)
-            self.assertEqual(json.loads(response.read())["data"][0]["id"], "base:test")
-
-    def test_rejects_context_overflow_before_generation(self):
-        self.model.config = SimpleNamespace(text_config=SimpleNamespace(max_position_embeddings=4))
-        response = self.request(max_tokens=3)
-        self.assertEqual(response.status, 400, response.read())
-        self.assertFalse(hasattr(self.model, "kwargs"))
-
-    def test_reports_length_finish_for_both_response_modes(self):
-        self.model.allow_finish.set()
-        for streaming in (False, True):
-            response = self.request(stream=streaming, max_completion_tokens=3)
-            self.assertEqual(response.status, 200)
-            body = response.read().decode()
-            self.assertIn('"finish_reason": "length"', body)
-            self.assertEqual(self.model.kwargs["max_new_tokens"], 3)
-
-    def test_rejects_unsupported_or_malformed_requests_before_generation(self):
-        cases = [
-            {"model": "other-model"}, {"stream": "true"}, {"stream_options": []},
-            {"stream_options": {"include_usage": "yes"}}, {"tools": [{"type": "function"}]},
-            {"tool_choice": "auto"}, {"functions": [{"name": "read"}]},
-            {"response_format": {"type": "json_object"}}, {"n": 2}, {"stop": ["END"]},
-            {"messages": [{"role": "tool", "content": "result", "tool_call_id": "1"}]},
-            {"messages": [{"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]}]},
-            {"max_tokens": True}, {"max_tokens": "12"}, {"temperature": "NaN"},
-            {"max_tokens": 2, "max_completion_tokens": 3},
-        ]
-        for body in cases:
-            with self.subTest(body=body):
-                response = self.request(**body)
-                self.assertEqual(response.status, 400, response.read())
-        self.assertFalse(hasattr(self.model, "kwargs"))
-
-    def test_stream_arrives_before_generation_finishes_and_reports_usage(self):
-        response = self.request(stream=True, stream_options={"include_usage": True})
-        self.assertEqual(response.status, 200, response.read() if response.status != 200 else "")
-        self.assertEqual(response.getheader("Content-Type"), "text/event-stream")
-        chunks = []
-        while True:
-            line = response.readline()
-            self.assertTrue(line, "stream closed before first content")
-            if line.startswith(b"data: {"):
-                chunk = json.loads(line[6:])
-                chunks.append(chunk)
-                if chunk["choices"] and chunk["choices"][0]["delta"].get("content"):
-                    break
-        self.assertEqual(chunks[-1]["choices"][0]["delta"]["content"], "hello ")
-        self.model.allow_finish.set()
-        rest = response.read().decode()
-        self.assertIn("[DONE]", rest)
-        chunks += [json.loads(line[6:]) for line in rest.splitlines() if line.startswith("data: {")]
-        self.assertEqual(chunks[-1]["usage"], {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5})
-        self.assertEqual(chunks[-2]["choices"][0]["finish_reason"], "stop")
-        self.assertTrue(self.model.kwargs["use_cache"])
-        self.assertEqual(len({c["id"] for c in chunks}), 1)
-
-
-class ServeImportTests(unittest.TestCase):
-    def test_merge_is_explicit_safe_and_does_not_save_artifacts(self):
+    def test_bootstrap_delegates_to_vllm_and_keeps_credentials_out_of_argv(self):
+        from types import SimpleNamespace
         from unittest.mock import Mock
-        model = Mock()
-        merged = Mock()
-        model.merge_and_unload.return_value = merged
-        with patch.dict(os.environ, {"TT_MERGE_ADAPTER": "true"}), \
-                patch.multiple(serve, BASE_MODEL="Qwen/Qwen3.5-2B", BASE_MODEL_REVISION="15852e8c16360a2fea060d615a32b45270f8a8fc", MODEL_ARTIFACT="/adapter"), \
-                patch.object(serve, "import_runtime_dependencies"), \
-                patch.object(serve, "configure_hugging_face_cache"), \
-                patch.object(serve, "resolve_adapter_path", return_value="/verified-adapter"), \
-                patch.object(serve, "load_text_model", return_value=(model, object(), "cpu")):
-            serve.load_runtime("/tmp/extraction")
-            model.merge_and_unload.assert_called_once_with(safe_merge=True)
-            merged.eval.assert_called_once()
-            self.assertIs(serve.MODEL, merged)
-            model.save_pretrained.assert_not_called()
-            merged.save_pretrained.assert_not_called()
+        upstream = Mock()
+        with patch.dict(os.environ, {"TT_BASE_MODEL": "Qwen/Qwen3.5-2B", "TT_BASE_MODEL_REVISION": "15852e8c16360a2fea060d615a32b45270f8a8fc", "TT_MODEL_NAME": "base", "TT_PORT": "0", "TT_API_KEY": "fixture-secret"}, clear=True):
+            with patch.object(serve, "prepare_model_source", return_value="/verified/snapshot"):
+                with patch.dict(sys.modules, {"vllm.entrypoints.cli.main": SimpleNamespace(main=upstream)}):
+                    serve.run_server()
+            upstream.assert_called_once()
+            self.assertEqual(os.environ["VLLM_API_KEY"], "fixture-secret")
+            self.assertNotIn("fixture-secret", " ".join(sys.argv))
+        self.assertFalse(hasattr(serve, "Handler"), "TT must not retain a second HTTP server")
 
-    def test_load_runtime_preserves_base_and_adapter_identity(self):
-        with patch.multiple(serve, BASE_MODEL="Qwen/Qwen3.5-2B", BASE_MODEL_REVISION="15852e8c16360a2fea060d615a32b45270f8a8fc"), \
-                patch.object(serve, "import_runtime_dependencies"), \
-                patch.object(serve, "configure_hugging_face_cache"), \
-                patch.object(serve, "resolve_adapter_path", return_value="/verified-adapter") as resolve, \
-                patch.object(serve, "load_text_model", return_value=(object(), object(), "cpu")) as load:
-            for artifact in (None, "/adapter.tar.gz"):
-                with patch.object(serve, "MODEL_ARTIFACT", artifact):
-                    serve.load_runtime("/tmp/extraction")
-                    self.assertEqual(load.call_args.args[0]["base_model"], "Qwen/Qwen3.5-2B")
-                    self.assertEqual(load.call_args.args[1], "/verified-adapter" if artifact else None)
-            resolve.assert_called_once_with("/adapter.tar.gz", Path("/tmp/extraction"))
+    def test_import_is_safe_without_runtime_or_environment(self):
+        import subprocess
+        subprocess.run([sys.executable, "-c", "import sys;sys.path.insert(0,sys.argv[1]);import serve;assert 'torch' not in sys.modules;assert 'vllm' not in sys.modules", str(Path(serve.__file__).parent)], env={"PATH": os.environ.get("PATH", "")}, check=True)
 
+    def test_port_conflict_fails_before_model_preparation(self):
+        import socket
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            with patch.dict(os.environ, {"TT_HOST": "127.0.0.1", "TT_PORT": str(listener.getsockname()[1])}):
+                with patch.object(serve, "prepare_model_source") as prepare:
+                    with self.assertRaises(OSError):
+                        serve.run_server()
+                    prepare.assert_not_called()
 
-    def test_occupied_port_fails_before_loading_weights(self):
-        server = serve.ThreadingHTTPServer(("127.0.0.1", 0), serve.Handler)
-        try:
-            with patch.multiple(serve, HOST="127.0.0.1", PORT=server.server_address[1]), patch.object(serve, "load_runtime") as load:
-                with self.assertRaises(OSError):
-                    serve.main()
-                load.assert_not_called()
-        finally:
-            server.server_close()
+    def test_missing_explicit_snapshot_never_falls_back_to_hub(self):
+        with patch.dict(os.environ, {"TT_BASE_MODEL": "Qwen/Qwen3.5-2B", "TT_BASE_MODEL_REVISION": "15852e8c16360a2fea060d615a32b45270f8a8fc", "TT_MODEL_SOURCE": "/nonexistent-tt-serving-snapshot"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "Explicit serving snapshot"):
+                serve.prepare_model_source()
 
+    def test_revision_mismatch_fails_before_any_snapshot_lookup(self):
+        with patch.dict(os.environ, {"TT_BASE_MODEL": "Qwen/Qwen3.5-2B", "TT_BASE_MODEL_REVISION": "wrong"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "Serving base model revision must be"):
+                serve.prepare_model_source()
 
-    def test_import_does_not_load_weights_or_require_environment(self):
-        result = subprocess.run(
-            [sys.executable, "-c", "import serve; assert serve.MODEL is None"],
-            cwd=SRC, env={k: v for k, v in os.environ.items() if not k.startswith("TT_")},
-            capture_output=True, text=True, timeout=10,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_adapter_identity_mismatch_is_rejected(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "adapter_config.json").write_text(json.dumps({"r": 16, "peft_type": "LORA", "base_model_name_or_path": "wrong-model"}))
+            with patch.dict(os.environ, {"TT_BASE_MODEL": "Qwen/Qwen3.5-2B", "TT_MODEL_NAME": "tuned"}, clear=True):
+                with self.assertRaisesRegex(ValueError, "adapter base"):
+                    serve.build_vllm_args("/verified/snapshot", tmp, root)
