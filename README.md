@@ -325,6 +325,11 @@ not silently serve the protected base model. Once activated, use
 
 `tt serve base` does not automatically inject the adjacent project spec.
 Pass `--spec tunedtensor.json` when the server should enforce its instructions.
+Both base and tuned serving support incremental OpenAI-compatible streaming.
+Use `tt serve <target> --print-client-config pi` to export an isolated Pi config
+for coding-question comparisons with tools disabled. See
+[Local serving and Pi comparisons](docs/local-runtime/serving.md) for the exact
+commands, performance guidance, and supported API boundary.
 
 Useful discovery commands:
 

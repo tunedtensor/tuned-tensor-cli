@@ -21,6 +21,7 @@ import {
   buildLocalBaseModelServerLaunch,
   buildLocalModelServerLaunch,
   serveLocalModel,
+  type LocalModelServerLaunch,
 } from "./model-server.js";
 import { prefetchBaseModel } from "./prefetch.js";
 import { createLocalStore, type LocalModelRecord, type LocalStore } from "./store.js";
@@ -152,12 +153,14 @@ const MODEL_SERVE_OPTIONS = [
   { name: "--max-tokens", value: "count", description: "Default response token limit" },
   { name: "--temperature", value: "number", description: "Default sampling temperature" },
   { name: "--top-p", value: "number", description: "Default nucleus sampling threshold" },
-  { name: "--max-concurrent-requests", value: "count", description: "Concurrent generation limit" },
+  { name: "--max-concurrent-requests", value: "count", description: "Admission limit (generation remains serialized)" },
+  { name: "--merge-adapter", description: "Merge LoRA into weights in memory for inference (extra startup memory)" },
   { name: "--spec", value: "path", description: "Behavior spec whose instructions are enforced" },
   { name: "--no-spec-prompt", description: "Do not enforce the stored behavior-spec prompt" },
   { name: "--allow-remote", description: "Allow a non-loopback bind" },
   { name: "--api-key-env", value: "name", description: "Environment variable containing a bearer token" },
   { name: "--print-command", description: "Validate and print the launch plan without starting" },
+  { name: "--print-client-config", value: "client", description: "Print Pi models.json for question-only use; does not start serving" },
 ] as const satisfies readonly CliOptionDefinition[];
 
 const COMMAND_DEFINITIONS: Record<string, CliCommandDefinition> = {
@@ -729,6 +732,47 @@ function modelServeDevice(argv: string[]): "cpu" | "cuda" | undefined {
   throw new Error(`--device must be cuda or cpu; got: ${value}`);
 }
 
+function printServeClientConfig(argv: string[], launch: LocalModelServerLaunch): boolean {
+  const client = readOption(argv, "--print-client-config");
+  if (client === undefined) return false;
+  if (client !== "pi") throw new Error("--print-client-config must be pi.");
+  if (hasFlag(argv, "--print-command")) throw new Error("Use only one of --print-command or --print-client-config.");
+  const apiKeyEnv = readOption(argv, "--api-key-env");
+  if (apiKeyEnv && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(apiKeyEnv)) {
+    throw new Error("--api-key-env must be a plain environment variable name for Pi config.");
+  }
+  const url = new URL(launch.url);
+  if (url.hostname === "0.0.0.0") url.hostname = "127.0.0.1";
+  if (url.hostname === "[::]") url.hostname = "[::1]";
+  url.pathname = "/v1";
+  printJson({
+    providers: {
+      "tt-local": {
+        baseUrl: url.toString(),
+        api: "openai-completions",
+        apiKey: apiKeyEnv ? "${" + apiKeyEnv + "}" : "tt-local",
+        compat: {
+          supportsStore: false,
+          supportsDeveloperRole: false,
+          supportsReasoningEffort: false,
+          supportsUsageInStreaming: true,
+          maxTokensField: "max_tokens",
+        },
+        models: [{
+          id: launch.modelName,
+          name: launch.modelName,
+          reasoning: false,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 16384,
+          maxTokens: Number(launch.env.TT_MAX_TOKENS),
+        }],
+      },
+    },
+  });
+  return true;
+}
+
 async function serveStoredModelFromCli(args: {
   argv: string[];
   modelId: string;
@@ -748,6 +792,7 @@ async function serveStoredModelFromCli(args: {
       temperature: readNumberOption(args.argv, "--temperature"),
       topP: readNumberOption(args.argv, "--top-p"),
       maxConcurrentRequests: readNumberOption(args.argv, "--max-concurrent-requests"),
+      mergeAdapter: hasFlag(args.argv, "--merge-adapter"),
       systemPrompt: await modelSystemPrompt({ argv: args.argv, model, store }),
       allowRemote: hasFlag(args.argv, "--allow-remote"),
       apiKeyEnv: readOption(args.argv, "--api-key-env"),
@@ -761,6 +806,7 @@ async function serveStoredModelFromCli(args: {
       })(),
     },
   });
+  if (printServeClientConfig(args.argv, launch)) return;
   if (hasFlag(args.argv, "--print-command")) {
     printJson({
       ok: true,
@@ -786,6 +832,7 @@ function serveOptionsFromArgv(argv: string[]) {
     temperature: readNumberOption(argv, "--temperature"),
     topP: readNumberOption(argv, "--top-p"),
     maxConcurrentRequests: readNumberOption(argv, "--max-concurrent-requests"),
+    mergeAdapter: hasFlag(argv, "--merge-adapter"),
     allowRemote: hasFlag(argv, "--allow-remote"),
     apiKeyEnv: readOption(argv, "--api-key-env"),
   };
@@ -840,6 +887,7 @@ async function serveBaseModelFromCli(args: {
       baseModelRevision: spec?.hyperparameters?.base_model_revision ?? defaultBaseModelRevision(baseModel),
     },
   });
+  if (printServeClientConfig(args.argv, launch)) return;
   if (hasFlag(args.argv, "--print-command")) {
     printJson({
       ok: true,

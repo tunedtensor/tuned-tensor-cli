@@ -29,6 +29,7 @@ export interface LocalModelServeOptions {
   allowRemote?: boolean;
   apiKeyEnv?: string;
   maxConcurrentRequests?: number;
+  mergeAdapter?: boolean;
   baseModelRevision?: string;
   baseModelArtifactUri?: string;
 }
@@ -74,6 +75,7 @@ function buildModelServerLaunch(args: {
   options?: LocalModelServeOptions;
 }): LocalModelServerLaunch {
   const options = args.options ?? {};
+  if (options.mergeAdapter && !args.artifactUri) throw new Error("--merge-adapter requires an adapter target.");
   const host = options.host ?? "127.0.0.1";
   const remote = !isLoopbackHost(host);
   if (remote && !options.allowRemote) {
@@ -133,6 +135,7 @@ function buildModelServerLaunch(args: {
         ? { TT_BASE_MODEL_REVISION: baseModelRevision }
         : {}),
       TT_MODEL_NAME: args.modelName,
+      TT_MERGE_ADAPTER: String(options.mergeAdapter ?? false),
       TT_MODEL_LOADER: resolveModelLoader(args.baseModel),
       TT_HOST: host,
       TT_PORT: String(port),

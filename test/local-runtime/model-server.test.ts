@@ -73,6 +73,15 @@ test("serving launches the bundled text-only Qwen adapter with safe model settin
   assert.equal(launch.url, "http://127.0.0.1:8123");
 });
 
+test("static adapter merging is opt-in and refuses a base-only launch", () => {
+  const config = localRunnerConfigSchema.parse({});
+  assert.equal(buildLocalModelServerLaunch({ model, config }).env.TT_MERGE_ADAPTER, "false");
+  assert.equal(buildLocalModelServerLaunch({ model, config, options: { mergeAdapter: true } }).env.TT_MERGE_ADAPTER, "true");
+  assert.throws(() => buildLocalBaseModelServerLaunch({
+    baseModel: "Qwen/Qwen3.5-2B", config, options: { mergeAdapter: true },
+  }), /--merge-adapter requires an adapter/);
+});
+
 test("protected-base serving omits the adapter while remaining offline", () => {
   const launch = buildLocalBaseModelServerLaunch({
     baseModel: "Qwen/Qwen3.5-2B",

@@ -542,6 +542,49 @@ test("stored models are verified before a serving launch plan is produced", asyn
     assert.equal(baseLaunch.status, 0, baseLaunch.stderr);
     assert.equal(JSON.parse(baseLaunch.stdout).base_model, "Qwen/Qwen3.5-2B");
 
+    for (const target of ["base", modelId, "active"]) {
+      const clientConfig = runCli(["serve", target, "--print-client-config", "pi", "--port", "8123"], root);
+      assert.equal(clientConfig.status, 0, clientConfig.stderr);
+      const provider = JSON.parse(clientConfig.stdout).providers["tt-local"];
+      assert.equal(provider.baseUrl, "http://127.0.0.1:8123/v1");
+      assert.equal(provider.api, "openai-completions");
+      assert.equal(provider.models[0].id, target === "base" ? "base:Qwen/Qwen3.5-2B" : modelId);
+      assert.equal(provider.compat.supportsDeveloperRole, false);
+      assert.equal(provider.compat.maxTokensField, "max_tokens");
+    }
+    const privateConfig = runCli([
+      "serve", "base", "--print-client-config", "pi", "--host", "0.0.0.0",
+      "--allow-remote", "--api-key-env", "TT_TEST_SERVE_KEY",
+    ], root, { TT_TEST_SERVE_KEY: "fixture-secret-never-export" });
+    assert.equal(privateConfig.status, 0, privateConfig.stderr);
+    const privateProvider = JSON.parse(privateConfig.stdout).providers["tt-local"];
+    assert.equal(privateProvider.baseUrl, "http://127.0.0.1:8000/v1");
+    // Exercise the pinned consumer: bare uppercase names are literals in Pi.
+    const { resolveConfigValue } = await import(new URL(
+      "./core/resolve-config-value.js", import.meta.resolve("@earendil-works/pi-coding-agent"),
+    ).href);
+    assert.equal(resolveConfigValue(privateProvider.apiKey, { TT_TEST_SERVE_KEY: "fixture-secret-never-export" }), "fixture-secret-never-export");
+    assert.equal(resolveConfigValue(privateProvider.apiKey, {}), undefined);
+    assert.equal(privateProvider.apiKey, "${TT_TEST_SERVE_KEY}");
+    assert.ok(!privateConfig.stdout.includes("fixture-secret-never-export"));
+    const unsafeKey = runCli([
+      "serve", "base", "--print-client-config", "pi", "--api-key-env", "!command",
+    ], root, { "!command": "fixture-secret" });
+    assert.equal(unsafeKey.status, 1);
+    assert.match(unsafeKey.stderr, /plain environment variable name/);
+
+    const mergedConfig = runCli(["serve", modelId, "--merge-adapter", "--print-client-config", "pi"], root);
+    assert.equal(mergedConfig.status, 0, mergedConfig.stderr);
+    const mergeBase = runCli(["serve", "base", "--merge-adapter", "--print-command"], root);
+    assert.equal(mergeBase.status, 1);
+    assert.match(mergeBase.stderr, /requires an adapter/);
+    const unsupportedClient = runCli(["serve", "base", "--print-client-config", "other"], root);
+    assert.equal(unsupportedClient.status, 1);
+    assert.match(unsupportedClient.stderr, /--print-client-config must be pi/);
+    const conflictingPrint = runCli(["serve", "base", "--print-client-config", "pi", "--print-command"], root);
+    assert.equal(conflictingPrint.status, 1);
+    assert.match(conflictingPrint.stderr, /Use only one/);
+
     const unsupportedDevice = runCli(["serve", modelId, "--device", "mps", "--print-command"], root);
     assert.equal(unsupportedDevice.status, 1);
     assert.match(unsupportedDevice.stderr, /--device must be cuda or cpu/);

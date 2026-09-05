@@ -24,7 +24,7 @@ from model_contract import assert_certified_base_model_revision, chat_template_k
 
 
 MODEL_ARTIFACT = os.environ.get("TT_MODEL_ARTIFACT")
-BASE_MODEL = os.environ["TT_BASE_MODEL"]
+BASE_MODEL = os.environ.get("TT_BASE_MODEL", "")
 MODEL_SOURCE = os.environ.get("TT_MODEL_SOURCE", BASE_MODEL)
 BASE_MODEL_REVISION = os.environ.get("TT_BASE_MODEL_REVISION")
 MODEL_NAME = os.environ.get("TT_MODEL_NAME", "tuned-tensor-local")
@@ -44,28 +44,34 @@ API_KEY = os.environ.get("TT_API_KEY", "")
 MAX_CONCURRENT_REQUESTS = int(os.environ.get("TT_MAX_CONCURRENT_REQUESTS", "1"))
 
 
-if MODEL_LOADER not in ("causal_lm", "image_text_to_text"):
-    raise ValueError(
-        f"The bundled model server does not support TT_MODEL_LOADER={MODEL_LOADER!r}; "
-        "expected causal_lm or image_text_to_text"
-    )
-assert_certified_base_model_revision(BASE_MODEL, BASE_MODEL_REVISION, "Serving base model revision")
-configure_hugging_face_cache(os.environ.get("HF_HOME"))
-import_runtime_dependencies()
-TEMP_DIR = TemporaryDirectory(prefix="tt-local-serve-")
-ADAPTER_PATH = (
-    resolve_adapter_path(MODEL_ARTIFACT, Path(TEMP_DIR.name))
-    if MODEL_ARTIFACT
-    else None
-)
-MODEL_PAYLOAD = {
-    "base_model": BASE_MODEL,
-    "model_source": MODEL_SOURCE,
-    "base_model_revision": BASE_MODEL_REVISION,
-    "device": DEVICE_REQUEST,
-    "model_loader": MODEL_LOADER,
-}
-MODEL, TOKENIZER, DEVICE = load_text_model(MODEL_PAYLOAD, ADAPTER_PATH, MODEL_LOADER)
+MODEL: Any = None
+TOKENIZER: Any = None
+DEVICE = DEVICE_REQUEST
+
+
+def load_runtime(temp_dir: str) -> None:
+    global MODEL, TOKENIZER, DEVICE
+    if MODEL_LOADER not in ("causal_lm", "image_text_to_text"):
+        raise ValueError(f"Unsupported TT_MODEL_LOADER={MODEL_LOADER!r}")
+    assert_certified_base_model_revision(BASE_MODEL, BASE_MODEL_REVISION, "Serving base model revision")
+    configure_hugging_face_cache(os.environ.get("HF_HOME"))
+    import_runtime_dependencies()
+    adapter_path = resolve_adapter_path(MODEL_ARTIFACT, Path(temp_dir)) if MODEL_ARTIFACT else None
+    MODEL, TOKENIZER, DEVICE = load_text_model({
+        "base_model": BASE_MODEL,
+        "model_source": MODEL_SOURCE,
+        "base_model_revision": BASE_MODEL_REVISION,
+        "device": DEVICE_REQUEST,
+        "model_loader": MODEL_LOADER,
+    }, adapter_path, MODEL_LOADER)
+    if os.environ.get("TT_MERGE_ADAPTER", "false") == "true":
+        if not adapter_path:
+            raise ValueError("Adapter merging requires an adapter target.")
+        # In-memory only. Safe merge refuses non-finite weights; never overwrite
+        # the verified base snapshot or adapter artifact.
+        MODEL = MODEL.merge_and_unload(safe_merge=True)
+        MODEL.eval()
+
 GENERATION_LOCK = threading.Lock()
 REQUEST_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
 
@@ -97,8 +103,10 @@ def normalize_messages(raw_messages: Any) -> list[dict[str, str]]:
     system_parts = [SYSTEM_PROMPT] if SYSTEM_PROMPT else []
     conversation: list[dict[str, str]] = []
     for raw in raw_messages:
-        if not isinstance(raw, dict) or raw.get("role") not in {"system", "user", "assistant", "tool"}:
+        if not isinstance(raw, dict) or raw.get("role") not in {"system", "user", "assistant"}:
             raise ValueError("Each message must have a supported role and text content.")
+        if raw.get("tool_calls") or raw.get("function_call") or "tool_call_id" in raw:
+            raise ValueError("Tool calling is not supported; use a question-only harness with tools disabled.")
         role = str(raw["role"])
         content = text_content(raw.get("content", ""))
         if role == "system":
@@ -121,7 +129,7 @@ def normalize_messages(raw_messages: Any) -> list[dict[str, str]]:
     return messages
 
 
-def generate_text(messages: list[dict[str, str]], generation: dict[str, Any]) -> tuple[str, int, int]:
+def generate_text(messages: list[dict[str, str]], generation: dict[str, Any], on_text=None) -> tuple[str, int, int]:
     try:
         prompt = TOKENIZER.apply_chat_template(
             messages,
@@ -134,8 +142,22 @@ def generate_text(messages: list[dict[str, str]], generation: dict[str, Any]) ->
     inputs = TOKENIZER(prompt, return_tensors="pt")
     if int(inputs["input_ids"].shape[-1]) > MAX_PROMPT_TOKENS:
         raise ValueError(f"Prompt exceeds the {MAX_PROMPT_TOKENS}-token limit.")
+    config = getattr(MODEL.config, "text_config", MODEL.config)
+    context_limit = getattr(config, "max_position_embeddings", None)
+    if isinstance(context_limit, int) and inputs["input_ids"].shape[-1] + generation["max_new_tokens"] > context_limit:
+        raise ValueError(f"Prompt plus requested output exceeds the model's {context_limit}-token context.")
     target_device = next(MODEL.parameters()).device
     inputs = {key: value.to(target_device) for key, value in inputs.items()}
+    streamer = None
+    if on_text is not None:
+        from transformers import TextStreamer
+
+        class ResponseStreamer(TextStreamer):
+            def on_finalized_text(self, text: str, stream_end: bool = False) -> None:
+                if text:
+                    on_text(text)
+
+        streamer = ResponseStreamer(TOKENIZER, skip_prompt=True, skip_special_tokens=True)
     with GENERATION_LOCK:
         import torch
 
@@ -144,6 +166,8 @@ def generate_text(messages: list[dict[str, str]], generation: dict[str, Any]) ->
                 **inputs,
                 max_new_tokens=int(generation["max_new_tokens"]),
                 pad_token_id=TOKENIZER.eos_token_id,
+                use_cache=True,
+                **({"streamer": streamer} if streamer else {}),
                 **sampling_kwargs(generation),
             )
     prompt_tokens = int(inputs["input_ids"].shape[-1])
@@ -153,6 +177,8 @@ def generate_text(messages: list[dict[str, str]], generation: dict[str, Any]) ->
 
 
 def bounded_number(value: Any, default: float, minimum: float, maximum: float) -> float:
+    if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
+        raise ValueError("Generation values must be JSON numbers.")
     number = float(default if value is None else value)
     if not math.isfinite(number) or number < minimum or number > maximum:
         raise ValueError(f"Generation value must be between {minimum} and {maximum}.")
@@ -202,6 +228,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_json(404, {"error": {"message": "Not found"}})
 
+    def send_event(self, payload: Any) -> None:
+        data = payload if isinstance(payload, str) else json.dumps(payload)
+        self.wfile.write(("data: " + data + "\n\n").encode("utf-8"))
+        self.wfile.flush()
+
     def do_POST(self) -> None:  # noqa: N802
         if not self.authorized():
             self.send_json(401, {"error": {"message": "Unauthorized"}})
@@ -209,6 +240,37 @@ class Handler(BaseHTTPRequestHandler):
         if self.path not in {"/v1/chat/completions", "/chat/completions"}:
             self.send_json(404, {"error": {"message": "Not found"}})
             return
+        stream_started = False
+        response_id = "chatcmpl-" + uuid.uuid4().hex
+        created = int(time.time())
+
+        def chunk(delta=None, finish_reason=None, usage=None):
+            payload = {
+                "id": response_id, "object": "chat.completion.chunk",
+                "created": created, "model": MODEL_NAME,
+                "choices": [] if usage is not None else [{
+                    "index": 0, "delta": delta or {}, "finish_reason": finish_reason,
+                }],
+            }
+            if usage is not None:
+                payload["usage"] = usage
+            return payload
+
+        def on_text(text):
+            nonlocal stream_started
+            if not stream_started:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("X-Accel-Buffering", "no")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.close_connection = True
+                stream_started = True
+                self.send_event(chunk({"role": "assistant", "content": ""}))
+            if text:
+                self.send_event(chunk({"content": text}))
+
         try:
             length = int(self.headers.get("content-length", "0"))
             if length <= 0 or length > MAX_REQUEST_BYTES:
@@ -216,12 +278,31 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 raise ValueError("Request body must be a JSON object.")
-            if body.get("stream"):
-                self.send_json(400, {"error": {"message": "Streaming is not supported yet."}})
-                return
+            if "model" in body and body["model"] != MODEL_NAME:
+                raise ValueError(f"This endpoint serves {MODEL_NAME!r}; request that exact model id.")
+            streaming = body.get("stream", False)
+            if not isinstance(streaming, bool):
+                raise ValueError("stream must be a boolean.")
+            stream_options = body.get("stream_options")
+            if stream_options is not None and (
+                not isinstance(stream_options, dict)
+                or not isinstance(stream_options.get("include_usage", False), bool)
+            ):
+                raise ValueError("stream_options must be an object with boolean include_usage.")
+            for field in ("tools", "functions", "function_call", "stop"):
+                if body.get(field):
+                    raise ValueError(f"{field} is not supported by the bundled text server; disable it in the client.")
+            if body.get("tool_choice") not in (None, "none"):
+                raise ValueError("Tool calling is not supported; disable tools in the client.")
+            if body.get("response_format") not in (None, {"type": "text"}):
+                raise ValueError("Only text response_format is supported.")
+            if body.get("n", 1) != 1:
+                raise ValueError("Only n=1 is supported.")
+            if body.get("max_tokens") is not None and body.get("max_completion_tokens") is not None:
+                raise ValueError("Use only one of max_tokens or max_completion_tokens.")
             messages = normalize_messages(body.get("messages"))
             generation = {
-                "max_new_tokens": bounded_integer(body.get("max_tokens"), DEFAULT_MAX_TOKENS, 1, 8192),
+                "max_new_tokens": bounded_integer(body.get("max_tokens", body.get("max_completion_tokens")), DEFAULT_MAX_TOKENS, 1, 8192),
                 "temperature": bounded_number(body.get("temperature"), DEFAULT_TEMPERATURE, 0, 5),
                 "top_p": bounded_number(body.get("top_p"), DEFAULT_TOP_P, 0, 1),
             }
@@ -230,19 +311,34 @@ class Handler(BaseHTTPRequestHandler):
                 return
             started = time.perf_counter()
             try:
-                content, prompt_tokens, completion_tokens = generate_text(messages, generation)
+                content, prompt_tokens, completion_tokens = generate_text(
+                    messages, generation, on_text if streaming else None,
+                )
             finally:
                 REQUEST_SLOTS.release()
             latency_ms = round((time.perf_counter() - started) * 1000)
+            usage = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            }
+            finish_reason = "length" if completion_tokens >= generation["max_new_tokens"] else "stop"
+            if streaming:
+                on_text("")  # EOS-only responses still need a valid stream.
+                self.send_event(chunk(finish_reason=finish_reason))
+                if (body.get("stream_options") or {}).get("include_usage"):
+                    self.send_event(chunk(usage=usage))
+                self.send_event("[DONE]")
+                return
             self.send_json(200, {
-                "id": "chatcmpl-" + uuid.uuid4().hex,
+                "id": response_id,
                 "object": "chat.completion",
                 "created": int(time.time()),
                 "model": MODEL_NAME,
                 "choices": [{
                     "index": 0,
                     "message": {"role": "assistant", "content": content},
-                    "finish_reason": "stop",
+                    "finish_reason": finish_reason,
                 }],
                 "usage": {
                     "prompt_tokens": prompt_tokens,
@@ -251,29 +347,41 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 "tt_local": {"latency_ms": latency_ms, "device": DEVICE},
             })
-        except (ValueError, TypeError, json.JSONDecodeError) as exc:
-            self.send_json(400, {"error": {"message": str(exc)}})
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            # Generation runs in this request thread: a failed stream write unwinds
+            # generate() immediately, releases the GPU lock/slot, and leaves no worker.
+            self.close_connection = True
         except Exception as exc:
-            print(f"Model server error: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
-            self.send_json(500, {"error": {"message": "Internal model server error."}})
+            client_error = isinstance(exc, (ValueError, TypeError))
+            message = str(exc) if client_error else "Internal model server error."
+            if not client_error:
+                print(f"Model server error: {type(exc).__name__}", file=sys.stderr, flush=True)
+            error = {"error": {"message": message}}
+            if stream_started:
+                try:
+                    self.send_event(error)
+                except (OSError, TimeoutError):
+                    pass
+                self.close_connection = True
+            else:
+                self.send_json(400 if client_error else 500, error)
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print("%s - %s" % (self.address_string(), fmt % args), flush=True)
 
 
 def main() -> None:
-    print(f"Serving {MODEL_NAME} on http://{HOST}:{PORT}", flush=True)
-    print(f"OpenAI-compatible endpoint: http://{HOST}:{PORT}/v1/chat/completions", flush=True)
-    print(f"Device: {DEVICE}", flush=True)
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
-    server.daemon_threads = True
-    server.request_queue_size = max(2, MAX_CONCURRENT_REQUESTS * 2)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("Model server stopped.", flush=True)
-    finally:
-        server.server_close()
+    # Reserve the port before allocating model memory. Context managers also
+    # close the socket and extracted adapter if loading fails.
+    with ThreadingHTTPServer((HOST, PORT), Handler) as server, TemporaryDirectory(prefix="tt-local-serve-") as temp_dir:
+        load_runtime(temp_dir)
+        print(f"Serving {MODEL_NAME} on http://{HOST}:{PORT}", flush=True)
+        print(f"OpenAI-compatible endpoint: http://{HOST}:{PORT}/v1/chat/completions", flush=True)
+        print(f"Device: {DEVICE}", flush=True)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("Model server stopped.", flush=True)
 
 
 if __name__ == "__main__":
