@@ -73,6 +73,34 @@ test("serving launches the bundled text-only Qwen adapter with safe model settin
   assert.equal(launch.url, "http://127.0.0.1:8123");
 });
 
+test("serving uses an isolated locked vLLM environment, not the training environment", () => {
+  const launch = buildLocalBaseModelServerLaunch({ baseModel: "Qwen/Qwen3.5-2B", config: localRunnerConfigSchema.parse({}) });
+  assert.ok(launch.commandArgs.some(value => value.endsWith("training/serving")));
+  assert.match(launch.env.UV_PROJECT_ENVIRONMENT ?? "", /uv-serving/);
+  assert.equal(launch.env.VLLM_NO_USAGE_STATS, "1");
+  assert.equal(launch.env.VLLM_ALLOW_RUNTIME_LORA_UPDATING, "0");
+});
+
+test("serving fails clearly on unsupported hosts before installing anything", async () => {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+  try {
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    await assert.rejects(serveLocalModel({} as never), /requires Linux and an NVIDIA CUDA GPU/);
+  } finally {
+    Object.defineProperty(process, "platform", descriptor);
+  }
+});
+
+test("vLLM resource budgets are explicit and validated", () => {
+  const config = localRunnerConfigSchema.parse({});
+  const launch = buildLocalModelServerLaunch({ model, config, options: { contextLength: 4096, gpuMemoryUtilization: 0.15 } });
+  assert.equal(launch.env.TT_CONTEXT_LENGTH, "4096");
+  assert.equal(launch.env.TT_GPU_MEMORY_UTILIZATION, "0.15");
+  for (const options of [{ contextLength: 0 }, { gpuMemoryUtilization: 1.1 }, { device: "cpu" as const }]) {
+    assert.throws(() => buildLocalModelServerLaunch({ model, config, options }));
+  }
+});
+
 test("protected-base serving omits the adapter while remaining offline", () => {
   const launch = buildLocalBaseModelServerLaunch({
     baseModel: "Qwen/Qwen3.5-2B",
@@ -194,7 +222,7 @@ test("serving verifies that a configured local snapshot matches the selected mod
         command: join(root, "must-not-spawn"),
         commandArgs: [],
       }),
-      /does not match requested base model/,
+      process.platform === "linux" ? /does not match requested base model/ : /requires Linux and an NVIDIA CUDA GPU/,
     );
   } finally {
     await rm(root, { recursive: true, force: true });

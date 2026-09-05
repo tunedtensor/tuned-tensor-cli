@@ -25,6 +25,8 @@
     "training/adapter/pyproject.toml",
     "training/adapter/uv.lock",
     "training/adapter/src/*.py",
+    "training/serving/pyproject.toml",
+    "training/serving/uv.lock",
     "training/foundation/pyproject.toml",
     "training/foundation/uv.lock",
     "training/foundation/src/*.py",
