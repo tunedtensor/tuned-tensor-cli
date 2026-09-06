@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.15.0] - 2026-09-06
+
 ### Changed
 
 - Use one local `tt` agent and CLI for local workflows and explicit `tt cloud`

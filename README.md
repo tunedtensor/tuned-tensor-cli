@@ -138,7 +138,7 @@ After a model is selected, the banner shows it and ordinary sentences go to
 the agent:
 
 ```text
-tt v0.14.0
+tt v0.15.0
 agent tunedtensor/managed · workflow model base
 ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
 
