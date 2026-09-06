@@ -147,7 +147,7 @@ def verify_snapshot(snapshot: Path, expected_model_id: str | None = None) -> tup
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Prefetch a TT Local Hugging Face base model.")
+    parser = argparse.ArgumentParser(description="Prefetch a TT Hugging Face base model for local use.")
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()

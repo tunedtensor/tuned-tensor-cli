@@ -1,8 +1,12 @@
 # Architecture
 
-This repository is the local CUDA runtime behind the unified `tt`
-workflow. The standalone `tt-local` product surface is deprecated.
-Its supported runtime boundary is text SFT of a registry-certified
+This document describes the local CUDA runtime bundled with the unified `tt`
+agent and CLI. The standalone `tt-local` product surface is deprecated. Local
+workflow commands need no TT token. Managed agent inference reuses a TT access
+token; BYO inference uses the selected provider's credentials. Cloud operations
+are explicit through `tt cloud` and use the TT account token.
+
+The local adapter runtime boundary is text SFT of a registry-certified
 Transformers causal LM into a LoRA adapter on CUDA. Certified checkpoints
 are `Qwen/Qwen3.5-2B` (pinned to Hugging Face snapshot
 `15852e8c16360a2fea060d615a32b45270f8a8fc`),
@@ -28,7 +32,7 @@ implementation details, not a public plugin framework.
 
 ## Boundaries
 
-The first version intentionally excludes:
+The local adapter runtime excludes:
 
 - arbitrary training or evaluation commands;
 - DPO, continued pretraining, and multimodal training;
@@ -40,7 +44,7 @@ The first version intentionally excludes:
 The next model or method should arrive with its own locked dependencies,
 resource defaults, data contract, and real CUDA acceptance test.
 
-TT Local currently ships two such methods:
+TT bundles two local training methods:
 
 - **Adapter** (`training/adapter`): certified Transformers checkpoints and
   PEFT LoRA SFT. Driven by `tt pipeline run`.
@@ -90,7 +94,7 @@ The bundled Python project owns four small operations:
 - `prefetch.py`: download and verify the pinned Hugging Face snapshot;
 - `evaluate.py`: generate predictions without receiving reference answers;
 - `train.py`: perform CUDA-only, model-specific LoRA SFT;
-- `serve.py`: load the base model and verified adapter for inference.
+- `serve.py`: prepare the verified base model and adapter for the vLLM serving runtime.
 
 Training uses assistant-only loss. Prompt tokens have label `-100`, and
 truncation removes older prompt tokens before it removes any answer token.
@@ -126,7 +130,7 @@ hide a valid artifact. Serving verifies the manifest again.
 The runner config controls only:
 
 - state, artifact, and Hugging Face cache paths;
-- CUDA or CPU inference for evaluation and serving;
+- CUDA or CPU evaluation, with local serving through the CUDA vLLM runtime;
 - deterministic generation and scoring limits.
 
 The training project, Python entrypoints, working directory, and child

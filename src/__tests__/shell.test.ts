@@ -572,7 +572,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       expect(output).not.toContain("groq");
       expect(output).toContain("Other providers: /login <id> or /model <id>");
       expect(output).toMatch(/openai[\s\S]*auth required/);
-      expect(output).toContain("Use /login <provider> to save a key.");
+      expect(output).toContain("Use /login tunedtensor for your TT token, or /login <provider> for a BYO key.");
       expect(output).toContain("/login <provider>");
       expect(output).toContain("Suggestions");
       expect(output).toContain("openai/gpt-5.6-sol");

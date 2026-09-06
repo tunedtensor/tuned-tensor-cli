@@ -167,7 +167,7 @@ const MODEL_SERVE_OPTIONS = [
 const COMMAND_DEFINITIONS: Record<string, CliCommandDefinition> = {
   info: {
     usage: "tt info",
-    description: "Show the installed TT Local version and runner status.",
+    description: "Show the installed TT local runtime version and runner status.",
     options: [],
     maxPositionals: 0,
   },
@@ -464,7 +464,7 @@ async function loadCliBehaviorSpec(inputPath: string, runId?: string) {
     );
   }
   if (input.kind !== "spec") {
-    throw new Error(`TT Local CLI expects a tunedtensor.json behavior spec, not a full run request: ${input.path}`);
+    throw new Error(`TT expects a tunedtensor.json behavior spec, not a full run request: ${input.path}`);
   }
   return input;
 }
@@ -494,7 +494,7 @@ function formatEvent(event: LocalRunProgressEvent): string {
     .filter((value): value is string => Boolean(value))
     .slice(0, 5)
     .join(" ");
-  return sanitizeLogLine(`[tt-local] ${event.stage}: ${event.message}${detailText ? ` (${detailText})` : ""}`);
+  return sanitizeLogLine(`[tt] ${event.stage}: ${event.message}${detailText ? ` (${detailText})` : ""}`);
 }
 
 function createConsoleReporter(options: { verbose: boolean; quiet: boolean }): LocalRunReporter | undefined {
@@ -506,7 +506,7 @@ function createConsoleReporter(options: { verbose: boolean; quiet: boolean }): L
       process.stderr.write(`${formatEvent(event)}\n`);
     },
     onLog(log) {
-      const line = sanitizeLogLine(`[tt-local] ${log.stage}${log.stream ? ` ${log.stream}` : ""}: ${log.message}`);
+      const line = sanitizeLogLine(`[tt] ${log.stage}${log.stream ? ` ${log.stream}` : ""}: ${log.message}`);
       // tqdm redraws the same progress line several times per step; collapse
       // consecutive duplicates so --verbose output stays readable.
       if (line === lastLogLine) return;
@@ -822,7 +822,7 @@ async function serveStoredModelFromCli(args: {
     });
     return;
   }
-  process.stderr.write(`[tt-local] verified ${verified.integrity.checked} artifact file(s)\n`);
+  process.stderr.write(`[tt] verified ${verified.integrity.checked} artifact file(s)\n`);
   await serveLocalModel(launch);
 }
 
@@ -979,7 +979,7 @@ async function main(argv: string[]): Promise<void> {
       } else if (input.kind === "spec") {
         request = input.request;
       } else {
-        throw new Error(`TT Local CLI expects a tunedtensor.json behavior spec, not a full run request: ${input.path}`);
+        throw new Error(`TT expects a tunedtensor.json behavior spec, not a full run request: ${input.path}`);
       }
     }
     const checks = await runDoctor(configSelection.config, request, foundationSpec);
@@ -1073,7 +1073,7 @@ async function main(argv: string[]): Promise<void> {
       return;
     }
     if (loaded.kind !== "spec") {
-      throw new Error(`TT Local CLI expects a tunedtensor.json behavior spec, not a full run request: ${loaded.path}`);
+      throw new Error(`TT expects a tunedtensor.json behavior spec, not a full run request: ${loaded.path}`);
     }
     const input = loaded;
     assertLocalRunInputReady(input.request);

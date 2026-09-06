@@ -48,7 +48,7 @@ export interface LocalModelServerLaunch {
 function localArtifactPath(uri: string): string {
   if (uri.startsWith("file://")) return fileURLToPath(uri);
   if (/^[a-z][a-z0-9+.-]*:/i.test(uri)) {
-    throw new Error(`TT Local serving requires a local file artifact, got: ${uri}`);
+    throw new Error(`Local TT serving requires a local file artifact, got: ${uri}`);
   }
   return resolve(uri);
 }

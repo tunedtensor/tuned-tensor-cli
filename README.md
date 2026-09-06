@@ -81,8 +81,8 @@ npm link
 ## Conversational terminal
 
 The interactive agent harness and conversation state run on your laptop.
-Inference runs through the provider/model you select, which may be a
-local endpoint or a remote provider.
+Inference uses the TT managed model or a BYO provider you select. A BYO
+provider may be a local endpoint or a remote service.
 
 Run `tt` to open the primary conversational workflow. The agent can inspect the
 project, derive the canonical pipeline from `tunedtensor.json`, present the
@@ -99,8 +99,9 @@ tt
 Get a token from the dashboard's **Settings → API Keys** page. You can also
 set `TUNED_TENSOR_API_KEY` in CI. When there is no saved BYO selection, TT
 selects `tunedtensor/managed` automatically. In the shell, `/login tunedtensor`
-saves the same account token. The model and request limits are controlled by
-the server. `tt usage` shows the configured daily allowance and reported usage.
+saves the same account token. Managed inference requires no OpenRouter key
+or additional login. The server controls the model and request limits.
+`tt usage` shows the configured daily allowance and reported usage.
 
 For BYO OpenRouter inference:
 
@@ -109,13 +110,15 @@ For BYO OpenRouter inference:
 › /model openrouter/<model-id>
 ```
 
-`/login` asks which provider, then prompts for its key with hidden input.
-`/login <provider>` skips the provider prompt. `/model openrouter` lists the
-bundled catalog, but you can select any OpenRouter model ID, including one
+`/login` asks which provider, then prompts for the TT access token or BYO
+provider key with hidden input. `/login <provider>` skips the provider prompt.
+`/model openrouter` lists the bundled catalog, but you can select any OpenRouter model ID, including one
 newer than that catalog. OpenRouter validates the selected ID. New IDs use
 conservative context/output defaults; custom metadata can be supplied in
-`~/.tuned-tensor/agent/models.json`. Use `--thinking off` when your model does
-not support reasoning. BYO inference is billed by your provider.
+`~/.tuned-tensor/agent/models.json`. For a model without reasoning support,
+configure it with
+`tt agent configure --provider openrouter --model <model-id> --thinking off`.
+BYO inference is billed by your provider.
 
 Provider keys are stored under TT's local agent config, separately from the
 account token. The managed provider never stores your TT token in provider
@@ -135,8 +138,8 @@ After a model is selected, the banner shows it and ordinary sentences go to
 the agent:
 
 ```text
-tt v0.13.1-beta.2
-agent anthropic/claude-sonnet-4-5 · workflow model base
+tt v0.14.0
+agent tunedtensor/managed · workflow model base
 ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
 
 Ask TT anything. Known commands run directly.
@@ -200,22 +203,21 @@ A changed workspace or spec requires a new review.
 
 Useful shell controls include `/help`, `/status`, `/context`, `/model`,
 `/login`, `/cd`, `/clear`, and `/exit`.
-The shell banner and `/context` surface the assistant's configured provider and
-model (`agent provider/model`) separately from the workflow model, so the
-model answering your prompts is always visible. `/model` shows and changes the
-laptop-local TT agent model: run it with no arguments to list providers and the
-managed model and suggested BYO models, `/model <provider>`
-to list that provider's models, search
-with `/model <query>` (only the closest matches are shown), or switch with
-`/model <provider>/<model>` (for example `/model anthropic/claude-sonnet-4-5`).
-`/login` asks which provider to authenticate, then prompts for that provider's
-API key with hidden input. `/login <provider>` skips the provider prompt.
+The shell banner and `/context` show the inference selection (`agent
+provider/model`) separately from the workflow model. The managed alias identifies
+inference through the server-selected model. Run `/model` with no arguments to
+list the managed option and suggested BYO models, `/model <provider>` to list
+that provider's models, or `/model <query>` to search. Switch with
+`/model <provider>/<model>`, including `/model tunedtensor/managed` to return
+to managed inference.
 For managed inference, `tt agent configure --provider tunedtensor` needs no
 model argument. For BYO inference, both provider and model are required.
 The equivalent non-interactive commands are `tt agent models`,
 `tt agent configure`, and `tt agent status`.
-`tt agent configure --thinking` accepts `off`, `minimal`, `low`, `medium`,
-`high`, `xhigh`, or `max`. Selection metadata can be overridden per process with
+For BYO models, `tt agent configure --thinking` accepts `off`, `minimal`, `low`, `medium`,
+`high`, `xhigh`, or `max`; managed inference uses the server's reasoning policy
+and leaves the CLI thinking option off. Selection metadata can be overridden
+per process with
 `TUNED_TENSOR_AGENT_PROVIDER`, `TUNED_TENSOR_AGENT_MODEL`, and
 `TUNED_TENSOR_AGENT_THINKING`. These values are not credentials.
 The shell keeps normal terminal scrollback and command history only for the
@@ -386,7 +388,8 @@ Nemotron path is intended for DGX Spark-class unified memory, uses activation
 checkpointing, and adapts bounded shared attention/Mamba projections rather
 than every routed expert matrix. Muse Glimmer is a vision-language checkpoint
 whose text tower is fine-tuned through the image-text-to-text loader with the
-vision tower frozen and unused. Evaluation and serving may use CPU. Training
+vision tower frozen and unused. Evaluation may use CPU; packaged local
+serving requires Linux and NVIDIA CUDA. Training
 artifacts, datasets, and model weights remain on the execution host.
 
 Activation is optional and requires the run to pass a configured

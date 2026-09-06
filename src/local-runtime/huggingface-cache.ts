@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 /**
- * TT Local treats `paths.modelCache` as Hugging Face's `HF_HOME`. Model
+ * The TT local runtime treats `paths.modelCache` as Hugging Face's `HF_HOME`. Model
  * snapshots therefore live below `<modelCache>/hub`, matching the default
  * layout used by huggingface_hub and Transformers.
  */
@@ -38,7 +38,7 @@ export function minimalMachineLearningEnvironment(
   ));
   // PyTorch 2.13 can route ordinary CUDA operations through optional Triton
   // JIT kernels. Triton's first-use helper compilation requires system Python
-  // development headers, which are not part of a normal packaged TT Local
+  // development headers, which are not part of a normal packaged TT
   // install. Prefer PyTorch's eager fallback unless the launching environment
   // explicitly opts back in with TORCH_DISABLE_NATIVE_JIT=0.
   result.TORCH_DISABLE_NATIVE_JIT ??= "1";
@@ -56,7 +56,7 @@ export function resolveHuggingFaceCacheLayout(modelCache: string): HuggingFaceCa
 /**
  * Returns a child-process environment in which current Hugging Face cache
  * variables agree and deprecated Transformers overrides are removed. Explicit
- * TT Local configuration wins over inherited shell variables, avoiding a
+ * TT local configuration wins over inherited shell variables, avoiding a
  * second cache tree during prefetch, training, evaluation, or serving.
  */
 export function withHuggingFaceCacheEnvironment(

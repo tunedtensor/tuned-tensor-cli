@@ -89,9 +89,9 @@ export function projectCloudSpec(
 }
 
 /**
- * Project a shared tunedtensor.json onto the TT Local behavior-spec contract.
+ * Project a shared tunedtensor.json onto the TT local behavior-spec contract.
  *
- * Cloud-only executable eval cases are omitted because TT Local uses its own
+ * Cloud-only executable eval cases are omitted because the local runtime uses its own
  * held-out base-versus-tuned evaluation contract.
  */
 export function projectLocalSpec(

@@ -41,7 +41,7 @@ export type FoundationPythonEntrypoint =
   | "rl.py"
   | "-c";
 
-/** Build a command for the one locked Python runtime shipped with TT Local. */
+/** Build a command for the locked adapter Python runtime bundled with TT. */
 export function buildBundledPythonCommand(
   entrypoint: BundledPythonEntrypoint,
   args: string[] = [],

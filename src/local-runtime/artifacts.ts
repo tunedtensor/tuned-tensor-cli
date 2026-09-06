@@ -437,7 +437,7 @@ export async function writeArtifactManifest(
       || (options.model.artifact_kind === "file" && options.model.format !== "tar.gz")
       || (options.model.artifact_kind === "directory" && options.model.format !== "huggingface-directory")
     ) {
-      throw new Error("TT Local model artifacts must be verified, servable Transformers PEFT adapters.");
+      throw new Error("TT local model artifacts must be verified, servable Transformers PEFT adapters.");
     }
     if (
       (options.model.base_model_artifact_uri === undefined)

@@ -45,7 +45,7 @@ export const MANAGED_AGENT_SELECTION: AgentSelection = {
 export function validateAccessToken(value: string): string {
   const token = value.trim();
   if (!token.startsWith("tt_") || token.length !== 51) {
-    throw new Error("Invalid API key format. Keys start with tt_ and are 51 characters long.");
+    throw new Error("Invalid TT access token format. Tokens start with tt_ and are 51 characters long.");
   }
   return token;
 }

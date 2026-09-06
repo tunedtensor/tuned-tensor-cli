@@ -56,7 +56,7 @@ describe("project spec projections", () => {
     ]);
   });
 
-  it("projects only TT Local fields for local operations", () => {
+  it("projects only local runtime fields for local operations", () => {
     const projection = projectLocalSpec(sharedSpec);
 
     expect(projection.body).toEqual({

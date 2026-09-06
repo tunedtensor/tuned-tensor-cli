@@ -26,8 +26,10 @@ this GPU. Spark unified memory should show Nemotron and Muse Glimmer as
 trainable; consumer cards typically only fit Qwen LoRA. `tt status` and the
 shell agent reuse the cached report.
 
-TT Local requires Node 22+, `uv`, working CUDA PyTorch, and enough free space
-for the Hugging Face cache plus run artifacts.
+Local TT training requires Node 22.19+, `uv`, working CUDA PyTorch, and enough free space
+for the Hugging Face cache plus run artifacts. Local commands need no TT
+access token. Agent inference can use your TT token through the managed proxy,
+or your own provider credentials and model.
 
 ## Create a project
 

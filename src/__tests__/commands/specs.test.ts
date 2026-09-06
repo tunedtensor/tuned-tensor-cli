@@ -253,7 +253,7 @@ describe("specs commands", () => {
         );
       });
 
-      it("recognizes and omits TT Local fields from the cloud body", async () => {
+      it("recognizes and omits local runtime fields from the cloud body", async () => {
         const path = writeFixture("shared.json", {
           name: "Shared Spec",
           base_model: "Qwen/Qwen3.5-2B",

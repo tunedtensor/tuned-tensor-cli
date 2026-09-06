@@ -17,13 +17,13 @@ export interface AgentCommandsOptions {
 export function registerAgentCommands(parent: Command, options: AgentCommandsOptions): void {
   const agent = parent.command("agent").description("Configure the laptop-local TT agent");
 
-  agent.command("status").description("Show the selected local provider, model, thinking, and auth state")
+  agent.command("status").description("Show the inference provider, model, thinking, and authentication state")
     .action(async () => {
       const runtime = await options.getRuntime();
       const summary = describeAgentModel(runtime, options.env);
       if (!summary) {
         throw new Error(
-          "The local agent is not configured. Run `tt agent configure --provider <provider> --model <model>`.",
+          "The agent is not configured. Run `tt auth login` for managed inference, or configure a BYO provider and model with `tt agent configure`. Local workflow commands need no token.",
         );
       }
       const value = {
@@ -69,7 +69,7 @@ export function registerAgentCommands(parent: Command, options: AgentCommandsOpt
       }
     });
 
-  agent.command("configure").description("Select the local provider, model, and thinking level")
+  agent.command("configure").description("Select managed inference or a BYO provider, model, and thinking level")
     .requiredOption("--provider <provider>", "Provider ID")
     .option("--model <model>", "BYO model ID (managed is automatic for tunedtensor)")
     .option("--thinking <level>", "off, minimal, low, medium, high, xhigh, or max")
