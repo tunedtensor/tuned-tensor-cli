@@ -498,20 +498,29 @@ test("prefetch report rejects downloader-substituted cache metadata", async () =
       mkdir(join(repository, "blobs"), { recursive: true }),
       mkdir(join(attackerHome, "hub"), { recursive: true }),
     ]);
-    await assert.rejects(
-      verifyModelPrefetchCacheReport({
-        modelId,
-        revision: pinnedRevision,
-        modelCache: configuredHome,
-        output: {
-          model_cache: attackerHome,
-          hf_home: attackerHome,
-          hub_cache: join(attackerHome, "hub"),
-          snapshot_path: snapshot,
-        },
-      }),
-      /unexpected model cache/,
-    );
+    // The three checks run concurrently. Isolate each substitution so the
+    // assertion does not depend on which filesystem request rejects first.
+    for (const [field, value, label] of [
+      ["model_cache", attackerHome, "model cache"],
+      ["hf_home", attackerHome, "HF home"],
+      ["hub_cache", join(attackerHome, "hub"), "hub cache"],
+    ] as const) {
+      await assert.rejects(
+        verifyModelPrefetchCacheReport({
+          modelId,
+          revision: pinnedRevision,
+          modelCache: configuredHome,
+          output: {
+            model_cache: configuredHome,
+            hf_home: configuredHome,
+            hub_cache: join(configuredHome, "hub"),
+            snapshot_path: snapshot,
+            [field]: value,
+          },
+        }),
+        new RegExp(`unexpected ${label}`),
+      );
+    }
 
     const configuredAlias = join(root, "configured-cache-alias");
     await symlink(configuredHome, configuredAlias, "dir");

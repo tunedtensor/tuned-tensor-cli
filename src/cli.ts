@@ -10,6 +10,7 @@ import { LocalAgentStore } from "./agent-store.js";
 import { createPiModelRuntime, readStoredProviderSecrets, type AgentModelRuntime } from "./agent-model.js";
 import type { AgentToolApi } from "./agent-tools.js";
 import type { AgentMutationApi, AgentMutationGuard } from "./agent-approval.js";
+import { createCloudActionContext } from "./agent-approval.js";
 import * as api from "./client.js";
 import { getApiKey, getBaseUrl, getAgentSelection, getAgentConfigDir, getConfigRevision } from "./config.js";
 import { TunedTensorAgentSession } from "./agent.js";
@@ -129,6 +130,7 @@ async function createDefaultAgentClient(
     toolApi,
     mutationApi,
     cloudEnabled: Boolean(secret),
+    cloudContext: secret ? createCloudActionContext(accountOpts.baseUrl, secret) : undefined,
     runPipelineCommand: async (args, options) => await (
       runtime.runSelfCommand ?? runSelfCommand
     )(args, {

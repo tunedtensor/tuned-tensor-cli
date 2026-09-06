@@ -321,7 +321,10 @@ training and dispatching cloud-targeted pipeline JSON are not supported;
 
 With a TT token, the local agent can inspect cloud resources, run reports,
 balances, transactions, and managed usage. It can prepare cloud spec edits for
-`/approve`. Starting or cancelling cloud training remains an explicit direct
+`/approve`. Those proposals show the API origin and remain bound to the token
+and origin used during preparation. After changing either, return to the
+original account and origin or prepare a new proposal. Starting or cancelling
+cloud training remains an explicit direct
 CLI command. Without a TT token these account tools are unavailable, while
 local workflow commands and BYO inference continue to work.
 

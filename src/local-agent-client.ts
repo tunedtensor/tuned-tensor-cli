@@ -5,6 +5,7 @@ import type {
   AgentConversationClient,
   AgentStreamEvent,
   AgentTurnResult,
+  CloudActionContext,
 } from "./agent-client.js";
 import {
   approvePreparedAction,
@@ -68,6 +69,7 @@ export interface LocalAgentClientOptions {
   toolApi: AgentToolApi;
   mutationApi: AgentMutationApi;
   cloudEnabled?: boolean;
+  cloudContext?: CloudActionContext;
   runPipelineCommand?: LocalPipelineCommandRunner;
   createAgent?: (options: LocalPiAgentOptions) => LocalPiAgent;
   now?: () => Date;
@@ -115,6 +117,16 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
   const now = () => (options.now ?? (() => new Date()))().toISOString();
   const selected = resolveAgentModel(options.modelRuntime, options.selection);
   const settlingActions = new Set<string>();
+  const isCloudMutation = (action: AgentAction) => action.operation === "create_spec" || action.operation === "update_spec";
+  const assertCloudApprovalContext = (action: AgentAction) => {
+    if (!isCloudMutation(action)) return;
+    const expected = options.cloudContext;
+    if (!options.cloudEnabled || !expected
+      || action.cloud_context?.origin !== expected.origin
+      || action.cloud_context?.credential_fingerprint !== expected.credential_fingerprint) {
+      throw new Error("This cloud action is not bound to the current TT account and API origin. Return to the original account and origin, or prepare a new action before approving.");
+    }
+  };
 
   const persist = async (state: StoredAgentThread) => {
     state.thread.updated_at = now();
@@ -159,7 +171,11 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
         get: async (path, query) => options.store.redact(await options.toolApi.get(path, query)),
         postRead: async (path, body) => options.store.redact(await options.toolApi.postRead(path, options.store.redact(body))),
         propose: async (incoming) => {
-          const action = options.store.redact(await options.toolApi.propose({ ...incoming, thread_id: threadId, turn_id: turnId }));
+          const proposed = await options.toolApi.propose({ ...incoming, thread_id: threadId, turn_id: turnId });
+          const action = options.store.redact(isCloudMutation(proposed)
+            ? { ...proposed, cloud_context: options.cloudContext, preview: { api_origin: options.cloudContext?.origin } }
+            : proposed);
+          assertCloudApprovalContext(action);
           if (!state.actions.some((item) => item.id === action.id)) state.actions.push(action);
           if (!actions.some((item) => item.id === action.id)) actions.push(action);
           await persist(state);
@@ -243,6 +259,9 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
         let state = states.find((candidate) => candidate.actions.some((candidate) => candidate.id === actionId));
         action = state?.actions.find((candidate) => candidate.id === actionId);
         if (!state || !action) throw new Error(`No local action matches ${actionId}.`);
+        // Check before claiming or contacting the API so changing accounts
+        // cannot redirect an approval or consume its one-way claim.
+        assertCloudApprovalContext(action);
         try {
           await preflightPreparedAction(action, {
             workspaceRoot,
@@ -259,6 +278,7 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
         state = states.find((candidate) => candidate.actions.some((candidate) => candidate.id === actionId));
         action = state?.actions.find((candidate) => candidate.id === actionId);
         if (!state || !action) throw new Error(`No claimed local action matches ${actionId}.`);
+        assertCloudApprovalContext(action);
         onEvent({ type: "action_started", payload: { action_id: actionId } });
         const output = await approvePreparedAction(
           action,

@@ -20,6 +20,13 @@ export interface AgentAction {
   preview?: unknown;
   method?: string;
   path?: string;
+  cloud_context?: CloudActionContext;
+}
+
+/** Non-secret binding of a local approval to one TT account credential and API origin. */
+export interface CloudActionContext {
+  origin: string;
+  credential_fingerprint: string;
 }
 
 export interface AgentThreadDetail {
@@ -48,8 +55,8 @@ export interface AgentTurnContext {
 /**
  * UI-facing conversation seam implemented by the local agent runtime.
  *
- * This contract intentionally has no transport assumptions: ordinary CLI
- * flows do not call hosted `/agent/*` runtime endpoints.
+ * Threads and turn orchestration stay local. Managed model inference uses a
+ * separate proxy transport and does not change this conversation contract.
  */
 export interface AgentConversationClient {
   createThread(): Promise<AgentThread>;

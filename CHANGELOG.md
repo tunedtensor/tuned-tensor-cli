@@ -26,6 +26,9 @@
   and explicit command overrides when publishing local evidence.
 - Keep TT tokens out of BYO provider routing and provider files. The reserved
   managed provider cannot inherit custom endpoint or model overrides.
+- Bind cloud spec approvals to the TT credential and API origin used during
+  preparation, so switching accounts or deployments cannot redirect a saved
+  proposal. Unbound legacy proposals require fresh preparation.
 - Correct local serving documentation to require Linux and NVIDIA CUDA for
   the packaged vLLM runtime; CPU evaluation remains available.
 
