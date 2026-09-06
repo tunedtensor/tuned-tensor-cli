@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+## [0.14.0] - 2026-09-05
+
+### Changed
+
+- `tt serve` now launches vLLM 0.28.0 in a separate, locked Python 3.12
+  environment instead of maintaining a custom Transformers HTTP and generation
+  server. Training environments and verified model artifacts are unchanged.
+- Serving now requires Linux and an NVIDIA CUDA GPU; CPU/MPS serving is not
+  supported. vLLM owns streaming, batching, caching, and native tool-call parsing.
+- A tuned launch exposes both the verified LoRA adapter and its certified base
+  as separate model IDs sharing base weights, without merging the adapter.
+
+### Added
+
+- Explicit serving context-length, GPU-memory-utilization, and concurrent-request
+  budgets, plus `tt serve <target> --print-client-config pi` for isolated client
+  configuration with matching model IDs, capacity limits, and indirect credentials.
+- Pi and OpenCode integration guidance. Real fixture-read/tool-result/answer
+  loops were verified on GB10 with Qwen3.5-2B and a one-step all-linear LoRA:
+  Pi for base and tuned models, OpenCode for the tuned model. This is integration
+  coverage, not a larger-model or tuning-quality benchmark.
+
+### Security
+
+- Preserve model/revision/artifact verification, offline weight loading, owner-spec
+  prompts, and explicit remote-bind authorization. Missing explicit snapshots fail
+  closed; owner prompts retain tool-call and tool-result history.
+- Apply the selected bearer key to all HTTP routes, including upstream tokenizer
+  and administrative endpoints. Credentials remain out of process arguments and
+  exported client files; request/output logging is disabled.
+- Detect occupied ports before loading weights and terminate the serving process
+  group on shutdown.
+
 ## [0.13.1] - 2026-09-01
 
 ### Changed

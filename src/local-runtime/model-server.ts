@@ -12,9 +12,9 @@ import {
   resolveRequestedBaseModelRevision,
 } from "./model-registry.js";
 import {
-  buildBundledPythonCommand,
-  withBundledPythonEnvironment,
-} from "./process-runner.js";
+  buildServingPythonCommand,
+  withServingPythonEnvironment,
+} from "./serving-runtime.js";
 import type { LocalModelRecord } from "./store.js";
 import { verifyLocalBaseModel } from "./prefetch.js";
 
@@ -29,6 +29,8 @@ export interface LocalModelServeOptions {
   allowRemote?: boolean;
   apiKeyEnv?: string;
   maxConcurrentRequests?: number;
+  contextLength?: number;
+  gpuMemoryUtilization?: number;
   baseModelRevision?: string;
   baseModelArtifactUri?: string;
 }
@@ -74,6 +76,10 @@ function buildModelServerLaunch(args: {
   options?: LocalModelServeOptions;
 }): LocalModelServerLaunch {
   const options = args.options ?? {};
+  const device = options.device ?? args.config.evaluation.inference.device;
+  if (device !== "cuda") throw new Error("The pinned vLLM serving runtime requires CUDA; CPU serving is not supported.");
+  const contextLength = boundedNumber("contextLength", options.contextLength ?? 16384, 512, 131072, true);
+  const gpuMemoryUtilization = boundedNumber("gpuMemoryUtilization", options.gpuMemoryUtilization ?? 0.8, 0.05, 0.95);
   const host = options.host ?? "127.0.0.1";
   const remote = !isLoopbackHost(host);
   if (remote && !options.allowRemote) {
@@ -122,8 +128,8 @@ function buildModelServerLaunch(args: {
   const baseModelRevision = localBaseModelPath
     ? defaultBaseModelRevision(args.baseModel)
     : requestedBaseModelRevision;
-  const entrypoint = buildBundledPythonCommand("serve.py");
-  const env = withBundledPythonEnvironment(
+  const entrypoint = buildServingPythonCommand();
+  const env = withServingPythonEnvironment(
     withOfflineHuggingFaceCacheEnvironment({
       ...minimalMachineLearningEnvironment(process.env),
       ...(artifactPath ? { TT_MODEL_ARTIFACT: artifactPath } : {}),
@@ -133,10 +139,12 @@ function buildModelServerLaunch(args: {
         ? { TT_BASE_MODEL_REVISION: baseModelRevision }
         : {}),
       TT_MODEL_NAME: args.modelName,
+      TT_CONTEXT_LENGTH: String(contextLength),
+      TT_GPU_MEMORY_UTILIZATION: String(gpuMemoryUtilization),
       TT_MODEL_LOADER: resolveModelLoader(args.baseModel),
       TT_HOST: host,
       TT_PORT: String(port),
-      TT_DEVICE: options.device ?? args.config.evaluation.inference.device,
+      TT_DEVICE: device,
       TT_MAX_TOKENS: String(maxTokens),
       TT_TEMPERATURE: String(temperature),
       TT_TOP_P: String(topP),
@@ -195,6 +203,7 @@ export async function verifyLocalModelServerLaunch(
 }
 
 export async function serveLocalModel(launch: LocalModelServerLaunch): Promise<void> {
+  if (process.platform !== "linux") throw new Error("Local vLLM serving requires Linux and an NVIDIA CUDA GPU.");
   await verifyLocalModelServerLaunch(launch);
   await new Promise<void>((resolveServer, reject) => {
     const child = spawn(launch.command, launch.commandArgs, {

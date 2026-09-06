@@ -72,7 +72,7 @@ export function defaultCacheRoot(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export function pythonEnvironmentPath(
-  kind: "uv" | "uv-foundation",
+  kind: "uv" | "uv-foundation" | "uv-serving",
   hash: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
