@@ -28,7 +28,7 @@ export function registerPushCommand(parent: Command) {
     .description("Push local spec to the Tuned Tensor API")
     .option("-f, --file <path>", "Spec file path", DEFAULT_SPEC_FILE)
     .action(async (cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const filePath = resolve(cmdOpts.file);
       const spec = loadSpec(cmdOpts.file);
       const evalCaseErrors = validateEvalCases(spec);

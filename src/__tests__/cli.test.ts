@@ -165,7 +165,7 @@ describe("unified command routing", () => {
     });
   });
 
-  it("promotes local commands to the root and hides hosted commands", async () => {
+  it("promotes local commands to the root and namespaces cloud commands", async () => {
     const runLocalCommand = vi.fn(async (
       _args: string[],
       _options?: unknown,
@@ -186,7 +186,7 @@ describe("unified command routing", () => {
       expect.arrayContaining(["runs", "models", "doctor", "hardware", "init", "shell", "status", "agent", "pipeline"]),
     );
     expect(names).not.toEqual(
-      expect.arrayContaining(["push", "balance", "topup", "cloud", "eval", "specs", "datasets", "label", "auth", "publish"]),
+      expect.arrayContaining(["push", "eval", "specs", "datasets", "label"]),
     );
 
     await program.parseAsync(["node", "tt", "runs", "list", "--json"]);

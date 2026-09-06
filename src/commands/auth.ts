@@ -8,7 +8,7 @@ import {
   writeConfig,
   getApiKey,
   getBaseUrl,
-  DEFAULT_BASE_URL,
+  validateAccessToken,
 } from "../config.js";
 import {
   printSuccess,
@@ -73,7 +73,7 @@ export function registerAuthCommands(parent: Command) {
           );
         }
 
-        const settingsUrl = `${DEFAULT_BASE_URL}/dashboard/settings`;
+        const settingsUrl = `${getBaseUrl(parent.optsWithGlobals()).replace(/\/$/, "")}/dashboard/settings`;
         console.log();
         console.log(
           `  To get your API key, go to ${chalk.bold("Settings → API Keys")} in the Tuned Tensor dashboard:`,
@@ -84,20 +84,14 @@ export function registerAuthCommands(parent: Command) {
         apiKey = await promptForApiKey();
       }
 
-      apiKey = apiKey.trim();
+      apiKey = validateAccessToken(apiKey);
 
-      if (!apiKey.startsWith("tt_") || apiKey.length !== 51) {
-        throw new Error(
-          "Invalid API key format. Keys start with tt_ and are 51 characters long.",
-        );
-      }
-
-      updateConfig({ api_key: apiKey });
+      updateConfig({ api_key: apiKey, base_url: getBaseUrl(parent.optsWithGlobals()) });
       if (isJsonMode()) {
         printJson({
           authenticated: true,
           key_prefix: `${apiKey.slice(0, 8)}...`,
-          base_url: getBaseUrl(parent.opts()),
+          base_url: getBaseUrl(parent.optsWithGlobals()),
         });
         return;
       }
@@ -124,7 +118,7 @@ export function registerAuthCommands(parent: Command) {
     .command("status")
     .description("Show current authentication status")
     .action(() => {
-      const opts = parent.opts();
+      const opts = parent.optsWithGlobals();
       const apiKey = getApiKey(opts);
       const baseUrl = getBaseUrl(opts);
 

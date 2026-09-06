@@ -41,7 +41,7 @@ export function registerTopupCommands(parent: Command) {
     .option("-a, --amount <usd>", "Amount in USD (e.g. 25)")
     .option("--no-open", "Print checkout URL instead of opening the browser")
     .action(async (options) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
 
       let amountUsd: number | null;
 

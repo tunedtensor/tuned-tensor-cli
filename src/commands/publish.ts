@@ -152,9 +152,10 @@ export function registerPublishCommand(parent: Command) {
     .option("-y, --yes", "Skip confirmation prompt")
     .option("--dry-run", "Show what would be published without uploading")
     .action(async (runId: string | undefined, cmdOpts) => {
+      const inherited = parent.optsWithGlobals() as ClientOpts;
       const opts: ClientOpts = {
-        apiKey: cmdOpts.apiKey,
-        baseUrl: cmdOpts.baseUrl,
+        apiKey: cmdOpts.apiKey ?? inherited.apiKey,
+        baseUrl: cmdOpts.baseUrl ?? inherited.baseUrl,
       };
 
       if (!cmdOpts.dryRun && !getApiKey(opts)) {

@@ -254,7 +254,7 @@ def load_image(value):
     except Exception as exc:
         raise RuntimeError(
             "Multimodal requests require Pillow. Install the serving runtime with "
-            "'tt models setup-runtime --force' or install pillow in the selected Python environment."
+            "'tt cloud models setup-runtime --force' or install pillow in the selected Python environment."
         ) from exc
 
     if value.startswith("data:image/"):
@@ -507,7 +507,7 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("content-length", "0"))
             body = json.loads(self.rfile.read(length) or b"{}")
             if body.get("stream"):
-                self.send_json(400, {"error": {"message": "Streaming is not supported by tt models serve yet."}})
+                self.send_json(400, {"error": {"message": "Streaming is not supported by tt cloud models serve yet."}})
                 return
 
             raw_messages = body.get("messages")
@@ -761,7 +761,7 @@ function pickRuntimePython(explicitPython?: string): string {
     }
   }
   throw new Error(
-    "Could not find Python 3.10, 3.11, or 3.12. Install one, then run `tt models setup-runtime --python <path>`.",
+    "Could not find Python 3.10, 3.11, or 3.12. Install one, then run `tt cloud models setup-runtime --python <path>`.",
   );
 }
 
@@ -782,16 +782,16 @@ print(json.dumps({"missing": missing}))
     missing = JSON.parse(out).missing;
   } catch (err) {
     const suffix = python === runtimePythonPath(cacheDir)
-      ? " Re-run `tt models setup-runtime` to repair it."
-      : " Run `tt models setup-runtime` to create an isolated serving runtime.";
+      ? " Re-run `tt cloud models setup-runtime` to repair it."
+      : " Run `tt cloud models setup-runtime` to create an isolated serving runtime.";
     throw new Error(`Python serving runtime check failed for ${python}.${suffix}`);
   }
 
   if (missing.length > 0) {
     const managedPython = runtimePythonPath(cacheDir);
     const installHint = python === managedPython
-      ? "Run `tt models setup-runtime --force` to repair it."
-      : "Run `tt models setup-runtime` first, or pass --python <path> to a Python environment with the serving dependencies installed.";
+      ? "Run `tt cloud models setup-runtime --force` to repair it."
+      : "Run `tt cloud models setup-runtime` first, or pass --python <path> to a Python environment with the serving dependencies installed.";
     throw new Error(
       `Python serving runtime is missing: ${missing.join(", ")}. ${installHint}`,
     );
@@ -1260,7 +1260,7 @@ export function registerModelsCommands(parent: Command) {
     .option("-p, --page <n>", "Page number", "1")
     .option("--per-page <n>", "Results per page", "20")
     .action(async (cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const { data, meta } = await get<Model[]>(
         "/models",
         { page: cmdOpts.page, per_page: cmdOpts.perPage },
@@ -1287,7 +1287,7 @@ export function registerModelsCommands(parent: Command) {
     .description("Show model details")
     .argument("<id>", "Model ID (full UUID or 4+ char prefix)")
     .action(async (id: string) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const fullId = await resolveModelId(id, opts);
       const { data } = await get<Model>(`/models/${fullId}`, undefined, opts);
 
@@ -1311,7 +1311,7 @@ export function registerModelsCommands(parent: Command) {
     .option("-o, --output <path>", "Output file or directory")
     .option("-f, --force", "Overwrite the output file if it already exists")
     .action(async (id: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const fullId = await resolveModelId(id, opts);
       const { data } = await get<ModelDownload>(
         `/models/${fullId}/download`,
@@ -1363,7 +1363,7 @@ export function registerModelsCommands(parent: Command) {
     .option("--keep-intermediate", "Keep the intermediate f16 GGUF after quantization")
     .option("--print-command", "Print the planned commands without executing them")
     .action(async (target: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
 
       const format = String(cmdOpts.format).toLowerCase();
       if (format !== "gguf") {
@@ -1582,7 +1582,7 @@ export function registerModelsCommands(parent: Command) {
       }
 
       printSuccess(`Serving runtime ready at ${venvDir}`);
-      console.log(`Use it with: tt models serve <model-id> --spec ${DEFAULT_SPEC_FILE}`);
+      console.log(`Use it with: tt cloud models serve <model-id> --spec ${DEFAULT_SPEC_FILE}`);
     });
 
   models
@@ -1609,7 +1609,7 @@ export function registerModelsCommands(parent: Command) {
     .option("--log-file <path>", "Write managed serving JSONL request logs to a file")
     .option("--print-command", "Print the underlying Python command without starting it")
     .action(async (target: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const cacheDir = resolve(cmdOpts.cacheDir || defaultCacheDir());
       mkdirSync(cacheDir, { recursive: true });
       const python = resolveServePython(cacheDir, cmdOpts.python);
@@ -1731,7 +1731,7 @@ export function registerModelsCommands(parent: Command) {
     .description("Delete a model")
     .argument("<id>", "Model ID (full UUID or 4+ char prefix)")
     .action(async (id: string) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const fullId = await resolveModelId(id, opts);
       await del(`/models/${fullId}`, opts);
 

@@ -521,7 +521,7 @@ export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
     chalk.dim(
       configured
         ? "Ask TT anything. Known commands run directly."
-        : "Use /model to choose a provider and model. Workflow commands work now.",
+        : "Use /login tunedtensor for managed inference, or /model for your own provider. Workflow commands work now.",
     ),
   ];
   return `${lines.join("\n")}\n\n`;
@@ -824,7 +824,9 @@ export class TunedTensorShellSession {
         }
         const label = provider.name !== provider.id ? provider.name : provider.id;
         const apiKey = await this.io.promptSecret(`${label} API key: `);
-        const result = await loginAgentProvider(runtime, provider.id, apiKey);
+        const result = await loginAgentProvider(runtime, provider.id, apiKey, {
+          baseUrl: this.env.TUNED_TENSOR_URL,
+        });
         await this.refreshContext();
         this.io.write(
           `${successMark()} Saved ${result.provider} credentials. Chat and /model can use this provider now.\n`,

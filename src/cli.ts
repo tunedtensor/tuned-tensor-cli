@@ -9,8 +9,9 @@ import { createLocalAgentClient, type LocalPiAgent, type LocalPiAgentOptions } f
 import { LocalAgentStore } from "./agent-store.js";
 import { createPiModelRuntime, readStoredProviderSecrets, type AgentModelRuntime } from "./agent-model.js";
 import type { AgentToolApi } from "./agent-tools.js";
-import type { AgentMutationApi } from "./agent-approval.js";
-import { getApiKey, getAgentSelection, getAgentConfigDir, getConfigRevision } from "./config.js";
+import type { AgentMutationApi, AgentMutationGuard } from "./agent-approval.js";
+import * as api from "./client.js";
+import { getApiKey, getBaseUrl, getAgentSelection, getAgentConfigDir, getConfigRevision } from "./config.js";
 import { TunedTensorAgentSession } from "./agent.js";
 import { executeLocalCommand } from "./local-runner.js";
 import {
@@ -28,28 +29,31 @@ import { isJsonMode, setJsonMode } from "./output.js";
 import { registerLocalCommands } from "./commands/local.js";
 import { registerAgentCommands } from "./commands/agent.js";
 import { registerPipelineCommands } from "./commands/pipeline.js";
+import { registerAuthCommands } from "./commands/auth.js";
+import { registerBalanceCommands } from "./commands/balance.js";
+import { registerTopupCommands } from "./commands/topup.js";
+import { registerPublishCommand } from "./commands/publish.js";
+import { registerCloudCommands, registerUsageCommand } from "./commands/cloud.js";
 import { checkForCliUpdate, formatCliUpdateNotice } from "./update-check.js";
 export { extractPassthroughOptions } from "./passthrough.js";
 
-const LOCAL_ONLY_MESSAGE = "This build of tt is local-only.";
-
-function rejectLocalOnly(): never {
-  throw new Error(LOCAL_ONLY_MESSAGE);
-}
-
-function createLocalOnlyToolApi(): AgentToolApi {
+function createAccountToolApi(opts: api.ClientOpts): AgentToolApi {
   return {
-    get: async () => rejectLocalOnly(),
-    postRead: async () => rejectLocalOnly(),
+    get: async (path, query) => api.get(path, query, opts),
+    postRead: async (path, body) => api.post(path, body, opts),
     propose: async (action) => action,
   };
 }
 
-function createLocalOnlyMutationApi(): AgentMutationApi {
+function createAccountMutationApi(opts: api.ClientOpts): AgentMutationApi {
+  const headers = (guard?: AgentMutationGuard): Record<string, string> | undefined => guard ? {
+    "x-tuned-tensor-action-id": guard.actionId,
+    ...(guard.expectedUpdatedAt ? { "x-tuned-tensor-expected-updated-at": guard.expectedUpdatedAt } : {}),
+  } : undefined;
   return {
-    get: async () => rejectLocalOnly(),
-    post: async () => rejectLocalOnly(),
-    put: async () => rejectLocalOnly(),
+    get: async (path) => api.get(path, undefined, opts),
+    post: async (path, body, guard) => api.post(path, body, opts, headers(guard)),
+    put: async (path, body, guard) => api.put(path, body, opts, headers(guard)),
   };
 }
 
@@ -102,13 +106,14 @@ async function createDefaultAgentClient(
   const selection = getAgentSelection(env);
   if (!selection) {
     throw new Error(
-      "The laptop-local agent is not configured. Use /model to choose a provider and model, then try again.",
+      "The laptop-local agent is not configured. Use /login tunedtensor for managed inference, or /login and /model for your own provider. Local workflow commands need no token.",
     );
   }
   const modelRuntime = await getModelRuntime();
-  const toolApi = runtime.agentToolApi ?? createLocalOnlyToolApi();
-  const mutationApi = runtime.agentMutationApi ?? createLocalOnlyMutationApi();
   const secret = getApiKey({ apiKey: env.TUNED_TENSOR_API_KEY });
+  const accountOpts = { apiKey: secret, baseUrl: getBaseUrl({ baseUrl: env.TUNED_TENSOR_URL }) };
+  const toolApi = runtime.agentToolApi ?? createAccountToolApi(accountOpts);
+  const mutationApi = runtime.agentMutationApi ?? createAccountMutationApi(accountOpts);
   const providerSecrets = Object.entries(env)
     .filter(([name, value]) => value && /(?:API_KEY|TOKEN|SECRET)$/i.test(name))
     .map(([, value]) => value!)
@@ -123,6 +128,7 @@ async function createDefaultAgentClient(
     modelRuntime,
     toolApi,
     mutationApi,
+    cloudEnabled: Boolean(secret),
     runPipelineCommand: async (args, options) => await (
       runtime.runSelfCommand ?? runSelfCommand
     )(args, {
@@ -137,14 +143,31 @@ async function createDefaultAgentClient(
 
 function createModelRuntimeGetter(
   runtime: CliRuntime,
+  getEnvironment: () => NodeJS.ProcessEnv = () => runtime.env ?? process.env,
 ): () => Promise<AgentModelRuntime & { streamSimple?: (...args: any[]) => any }> {
   const injected = runtime.modelRuntime;
   let promise: Promise<AgentModelRuntime & { streamSimple?: (...args: any[]) => any }> | undefined;
+  let builtFingerprint: string | undefined;
   return async () => {
     if (injected) return injected;
-    promise ??= createPiModelRuntime();
+    const env = getEnvironment();
+    const fingerprint = agentConfigFingerprint(env);
+    if (!promise || builtFingerprint !== fingerprint) {
+      builtFingerprint = fingerprint;
+      const attempt = createPiModelRuntime(env);
+      promise = attempt;
+      attempt.catch(() => { if (promise === attempt) promise = undefined; });
+    }
     return await promise;
   };
+}
+
+function agentConfigFingerprint(env: NodeJS.ProcessEnv): string {
+  return JSON.stringify([
+    getConfigRevision(), getAgentSelection(env),
+    getApiKey({ apiKey: env.TUNED_TENSOR_API_KEY }),
+    getBaseUrl({ baseUrl: env.TUNED_TENSOR_URL }),
+  ]);
 }
 
 function createLazyDefaultAgentClient(
@@ -154,11 +177,11 @@ function createLazyDefaultAgentClient(
   getModelRuntime: () => Promise<AgentModelRuntime & { streamSimple?: (...args: any[]) => any }>,
 ): AgentConversationClient {
   let pending: Promise<AgentConversationClient> | undefined;
-  let builtRevision = -1;
+  let builtFingerprint: string | undefined;
   const client = () => {
-    const revision = getConfigRevision();
-    if (!pending || builtRevision !== revision) {
-      builtRevision = revision;
+    const fingerprint = agentConfigFingerprint(env);
+    if (!pending || builtFingerprint !== fingerprint) {
+      builtFingerprint = fingerprint;
       // Retry on the next call if creation fails (for example when the user
       // configures the agent later in the same shell session). Changing the
       // model with `/model` writes config and bumps the revision, which also
@@ -246,12 +269,14 @@ export async function runSelfCommand(
 }
 
 function childEnvironment(
-  root: { color?: boolean },
+  root: { color?: boolean; apiKey?: string; baseUrl?: string },
   base: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   return {
     ...base,
     ...(root.color === false ? { FORCE_COLOR: "0" } : {}),
+    ...(root.apiKey ? { TUNED_TENSOR_API_KEY: root.apiKey } : {}),
+    ...(root.baseUrl ? { TUNED_TENSOR_URL: root.baseUrl } : {}),
   };
 }
 
@@ -265,7 +290,7 @@ export function createProgram(
   const invokeLocal = runtime.runLocalCommand ?? executeLocalCommand;
   const launchShell = runtime.startShell ?? startInteractiveShell;
   const cwd = runtime.cwd ?? process.cwd();
-  const getModelRuntime = createModelRuntimeGetter(runtime);
+  const getModelRuntime = createModelRuntimeGetter(runtime, () => childEnvironment(program.opts(), env));
 
   const shellRunner = async (
     request: ShellCommandRequest,
@@ -312,6 +337,8 @@ export function createProgram(
     .version(version)
     .option("--json", "Output raw JSON")
     .option("--no-color", "Disable colors")
+    .option("--api-key <key>", "TT access token for managed inference and cloud operations")
+    .option("--base-url <url>", "Tuned Tensor API base URL")
     .showSuggestionAfterError()
     .hook("preAction", () => {
       const root = program.opts<{ json?: boolean; color?: boolean }>();
@@ -331,8 +358,14 @@ export function createProgram(
     stderr: runtime.stderr ?? process.stderr,
   });
   registerPipelineCommands(program);
+  registerAuthCommands(program);
+  registerBalanceCommands(program);
+  registerTopupCommands(program);
+  registerUsageCommand(program);
+  registerPublishCommand(program);
+  registerCloudCommands(program);
   registerAgentCommands(program, {
-    env,
+    get env() { return childEnvironment(program.opts(), env); },
     output: runtime.stdout ?? process.stdout,
     getRuntime: getModelRuntime,
   });
@@ -372,6 +405,9 @@ Examples:
   tt pipeline run --spec tunedtensor.json --dry-run
   tt serve active
   tt runs list
+  tt auth login          Enable managed agent inference and cloud access
+  tt cloud runs list
+  tt usage
 `,
   );
 

@@ -103,7 +103,7 @@ describe("local agent conversation client", () => {
     expect(created[0]?.systemPrompt).toContain("prepare_pipeline_run");
     expect(created[0]?.systemPrompt).toMatch(/approved pipeline actions are dry-runs only/i);
     expect(created[0]?.systemPrompt).toMatch(/real training requires an explicit direct.*tt pipeline run/is);
-    expect(created[0]?.systemPrompt).toMatch(/no hosted account/i);
+    expect(created[0]?.systemPrompt).toMatch(/account and cloud tools are unavailable/i);
     expect(created[0]?.systemPrompt).toMatch(/adapter.*foundation.*describe_pipeline/is);
     expect(created[0]?.systemPrompt).toContain("search_hugging_face");
     expect(created[0]?.systemPrompt).toMatch(/models or datasets/i);

@@ -157,15 +157,15 @@ describe("parseSlashCommand", () => {
 });
 
 describe("command completion", () => {
-  it("completes local commands and slash commands", () => {
+  it("completes local, cloud, account, and slash commands", () => {
     const complete = createCommandCompleter();
 
     expect(complete("runs c")[0]).toContain("runs compare");
     expect(complete("/mo")[0]).toEqual(["/model"]);
     expect(complete("/lo")[0]).toEqual(["/login"]);
-    expect(complete("cl")[0].join(" ")).not.toMatch(/\bcloud\b/);
-    expect(complete("auth")[0].join(" ")).not.toMatch(/\bauth\b/);
-    expect(complete("publish")[0].join(" ")).not.toMatch(/\bpublish\b/);
+    expect(complete("cl")[0]).toContain("cloud runs list");
+    expect(complete("auth")[0]).toContain("auth login");
+    expect(complete("publish")[0]).toEqual(["publish"]);
     expect(complete("pipeline")[0]).toContain("pipeline init");
     expect(complete("doctor")[0]).toContain("doctor");
   });
@@ -269,7 +269,7 @@ describe("renderShellBanner", () => {
     expect(banner).toContain("agent");
     expect(banner).toContain("workflow model");
     expect(banner).toContain("ctrl+c stop/clear");
-    expect(banner).toContain("Use /model to choose a provider and model");
+    expect(banner).toContain("Use /login tunedtensor for managed inference");
     expect(banner).toContain("Workflow commands work now");
     expect(banner).not.toContain("Ask TT anything");
     expect(banner).not.toContain("██");

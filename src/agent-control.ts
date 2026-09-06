@@ -8,6 +8,9 @@ import {
 import {
   AGENT_THINKING_LEVELS,
   getAgentSelection,
+  getBaseUrl,
+  MANAGED_AGENT_PROVIDER,
+  validateAccessToken,
   updateConfig,
   type AgentSelection,
   type AgentThinkingLevel,
@@ -21,12 +24,14 @@ import {
 
 /** Providers shown in `/login` and `/model` so onboarding stays short. */
 export const FEATURED_AGENT_PROVIDERS = [
+  "tunedtensor",
   "openai",
   "openrouter",
 ] as const;
 
 /** Explicit `/model` suggestions. First matching catalog id wins. */
 export const RECOMMENDED_AGENT_MODELS = [
+  { provider: "tunedtensor", ids: ["managed"] },
   { provider: "openai", ids: ["gpt-5.6-sol"] },
   {
     provider: "openrouter",
@@ -235,6 +240,7 @@ export async function loginAgentProvider(
   runtime: AgentModelRuntime,
   provider: string,
   apiKey: string,
+  options: { baseUrl?: string } = {},
 ): Promise<{ provider: string }> {
   const choice = findAgentProvider(runtime, provider);
   if (!choice) {
@@ -244,7 +250,11 @@ export async function loginAgentProvider(
   if (!key) {
     throw new Error("API key cannot be empty.");
   }
-  persistProviderApiKey(choice.id, key);
+  if (choice.id === MANAGED_AGENT_PROVIDER) {
+    updateConfig({ api_key: validateAccessToken(key), base_url: getBaseUrl(options) });
+  } else {
+    persistProviderApiKey(choice.id, key);
+  }
   if (typeof runtime.setRuntimeApiKey === "function") {
     await runtime.setRuntimeApiKey(choice.id, key);
   }
