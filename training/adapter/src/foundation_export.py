@@ -8,10 +8,14 @@ CHAT_TEMPLATE = """{%- if not messages or messages[0]['role'] != 'system' -%}
 {{- '<|system|>You are a helpful assistant.<|end|>' -}}
 {%- endif -%}
 {%- for message in messages -%}
+{%- set content = message['content'] -%}
+{%- if message['role'] == 'system' -%}
+{%- set content = (content | trim) or 'You are a helpful assistant.' -%}
+{%- endif -%}
 {%- if message['role'] not in ['system', 'user', 'assistant'] -%}
 {{- raise_exception('Foundation chat supports system, user and assistant messages only.') -}}
 {%- endif -%}
-{{- '<|' + message['role'] + '|>' + message['content'] + '<|end|>' -}}
+{{- '<|' + message['role'] + '|>' + content + '<|end|>' -}}
 {%- endfor -%}
 {%- if add_generation_prompt -%}{{- '<|assistant|>' -}}{%- endif -%}"""
 

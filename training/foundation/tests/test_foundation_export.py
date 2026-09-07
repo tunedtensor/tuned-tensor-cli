@@ -71,6 +71,14 @@ class FoundationExportTests(unittest.TestCase):
             self.assertEqual(prompt, format_prompt('', 'hello'))
             self.assertEqual(restored.encode(prompt), tokenizer.encode(prompt).ids)
             self.assertEqual(restored.eos_token_id, tokenizer.token_to_id('<|end|>'))
+            for system in ['', ' \n\t', '  Be helpful. \n']:
+                with self.subTest(system=system):
+                    prompt = restored.apply_chat_template([
+                        {'role': 'system', 'content': system},
+                        {'role': 'user', 'content': ' hello '},
+                    ], tokenize=False, add_generation_prompt=True)
+                    self.assertEqual(prompt, format_prompt(system, ' hello '))
+                    self.assertEqual(restored.encode(prompt), tokenizer.encode(prompt).ids)
 
 
 if __name__ == '__main__':

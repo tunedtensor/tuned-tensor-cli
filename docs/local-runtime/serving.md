@@ -19,8 +19,11 @@ not mutate the training runtime.
   require a working CUDA toolkit/C++ toolchain. Model loading remains offline.
 - Foundation model directories are supported through a temporary GPT-2 export;
   pass `tt serve foundation --checkpoint <model-dir> --tokenizer <tokenizer.json>`.
-  The tokenizer must be the one used during training. Context defaults to the
-  checkpoint limit. Text completions and chat are supported; foundation tool-call
+  The tokenizer must be the one used during training. Export checks vocabulary
+  size and required special tokens, not tokenizer identity: a different tokenizer
+  with the same vocabulary size can pass these checks and produce incorrect text.
+  Keep each model paired with its original training tokenizer. Context defaults to
+  the checkpoint limit. Text completions and chat are supported; foundation tool-call
   parsing and image inputs are not supported.
 - Qwen3.5-2B base and a one-step, rank-16 `all-linear` TT-shaped adapter have been
   exercised on GB10. The registry's Nemotron and Muse Glimmer architectures have
