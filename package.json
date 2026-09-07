@@ -13,12 +13,15 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
     "test": "npm run test:cli && npm run test:local-runtime && npm run test:python",
     "test:cli": "vitest run",
+    "test:workflows": "vitest run src/__tests__/workflows",
+    "eval:agent": "tsx scripts/eval-agent.ts",
     "test:local-runtime": "node --import tsx --test \"test/local-runtime/**/*.test.ts\"",
     "test:python": "python3 -m unittest discover -s training/adapter/tests -p 'test_*.py' && uv run --frozen --project training/foundation python -m unittest discover -s training/foundation/tests -p 'test_*.py'",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check": "npm run typecheck && npm test && npm run build"
   },
   "files": [
     "dist",

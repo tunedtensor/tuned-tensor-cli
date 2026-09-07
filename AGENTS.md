@@ -15,7 +15,10 @@ All standard dev commands are in `package.json` scripts and documented in `READM
 - `npm run build` — build via tsup → `dist/index.js`
 - `npm run dev` — tsup watch mode for development
 - `npm run typecheck` — TypeScript type checking
-- `npm test` — vitest unit tests (all tests mock the API, no network needed)
+- `npm test` — CLI, workflow, local runtime, and Python regression tests
+- `npm run test:workflows` — focused conversation and model lifecycle contracts
+- `npm run check` — typecheck, all tests, and build
+- `npm run eval:agent -- --help` — opt-in real model evaluation; see `docs/testing.md`
 
 ### Running the CLI locally
 
@@ -31,7 +34,10 @@ After `npm run build`, run `npm link` to make the `tt` command available globall
   token; its endpoint and model cannot be overridden through `models.json`.
   Provider auth and custom models live under
   `~/.tuned-tensor/agent/` (`auth.json`, `models.json`, threads).
-- All tests are fully self-contained with mocked API calls — no API key or network access is needed to run the test suite.
+- Standard tests need no API key or GPU. Workflow tests use temporary workspaces
+  and controlled model/process responses while exercising production code.
+  `uv` may fetch locked Python dependencies on the first run. Real provider
+  evaluation is separate and opt-in; never add it to the default test gate.
 
 ## Releasing
 
