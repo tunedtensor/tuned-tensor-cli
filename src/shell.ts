@@ -832,7 +832,7 @@ export class TunedTensorShellSession {
         await this.refreshContext();
         this.io.write(
           result.provider === MANAGED_AGENT_PROVIDER
-            ? `${successMark()} TT access token saved for managed inference and cloud operations.\n`
+            ? `${successMark()} TT access token saved for managed inference and cloud operations. Agent model saved: tunedtensor/managed.\n`
             : `${successMark()} Saved ${result.provider} credentials. Chat and /model can use this provider now.\n`,
         );
         return "continue";
