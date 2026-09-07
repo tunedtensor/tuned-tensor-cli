@@ -10,6 +10,7 @@ import {
   getAgentSelection,
   getBaseUrl,
   MANAGED_AGENT_PROVIDER,
+  MANAGED_AGENT_SELECTION,
   validateAccessToken,
   updateConfig,
   type AgentSelection,
@@ -251,7 +252,11 @@ export async function loginAgentProvider(
     throw new Error("API key cannot be empty.");
   }
   if (choice.id === MANAGED_AGENT_PROVIDER) {
-    updateConfig({ api_key: validateAccessToken(key), base_url: getBaseUrl(options) });
+    updateConfig({
+      api_key: validateAccessToken(key),
+      base_url: getBaseUrl(options),
+      agent: { ...MANAGED_AGENT_SELECTION },
+    });
   } else {
     persistProviderApiKey(choice.id, key);
   }

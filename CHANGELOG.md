@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- Make `/login tunedtensor` select and save `tunedtensor/managed`, replacing
+  a previously saved BYO model so managed inference stays selected after restart.
+  Confirm the saved model in the login success message.
+
 ## [0.15.0] - 2026-09-07
 
 ### Changed

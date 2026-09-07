@@ -129,4 +129,31 @@ describe("managed inference and BYO routing", () => {
     await restored.setRuntimeApiKey("openrouter", "byo-openrouter-key");
     expect(resolveAgentModel(restored, getAgentSelection({})!).model.id).toBe(selection.model);
   });
+
+  it("replaces a saved BYO selection on TT login and routes through TT after restart", async () => {
+    const { url, requests } = await inferenceServer();
+    writeConfig({
+      base_url: url,
+      agent: { provider: "openrouter", model: "~deepseek/deepseek-v4-flash-latest", thinking: "high" },
+    });
+    const runtime = await createPiModelRuntime();
+    await loginAgentProvider(runtime, "tunedtensor", token);
+    const managed = { provider: "tunedtensor", model: "managed", thinking: "off" };
+    expect(readConfig().agent).toEqual(managed);
+    expect(getAgentSelection({})).toEqual(managed);
+    expect(resolveAgentModel(runtime, getAgentSelection({})!).model.provider).toBe("tunedtensor");
+
+    const restored = await createPiModelRuntime();
+    const { model } = resolveAgentModel(restored, getAgentSelection({})!);
+    const result = await restored.completeSimple(model as never, {
+      messages: [{ role: "user", content: "Hi", timestamp: 1 }],
+    });
+    expect(result.stopReason).toBe("stop");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      path: "/api/v1/agent/chat/completions",
+      authorization: `Bearer ${token}`,
+      body: { model: "managed" },
+    });
+  });
 });

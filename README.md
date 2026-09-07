@@ -99,7 +99,8 @@ tt
 Get a token from the dashboard's **Settings → API Keys** page. You can also
 set `TUNED_TENSOR_API_KEY` in CI. When there is no saved BYO selection, TT
 selects `tunedtensor/managed` automatically. In the shell, `/login tunedtensor`
-saves the same account token. Managed inference requires no OpenRouter key
+saves the same account token and switches the saved agent selection to
+`tunedtensor/managed`, including after restart. Managed inference requires no OpenRouter key
 or additional login. The server controls the model and request limits.
 `tt usage` shows the configured daily allowance and reported usage.
 
