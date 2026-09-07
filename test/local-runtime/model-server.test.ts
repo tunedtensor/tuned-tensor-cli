@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { localRunnerConfigSchema } from "../../src/local-runtime/contracts.js";
 import { QWEN_3_5_2B_REVISION } from "../../src/local-runtime/model-registry.js";
 import {
+  buildFoundationModelServerLaunch,
   buildLocalBaseModelServerLaunch,
   buildLocalModelServerLaunch,
   serveLocalModel,
@@ -248,5 +249,27 @@ test("an explicitly remote bind requires and forwards only the selected bearer t
   } finally {
     if (previous === undefined) delete process.env.TT_TEST_SERVE_KEY;
     else process.env.TT_TEST_SERVE_KEY = previous;
+  }
+});
+
+
+test("foundation launch uses checkpoint context and rejects oversized contexts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-foundation-serve-"));
+  try {
+    await writeFile(join(root, "config.json"), JSON.stringify({ sequence_length: 128 }));
+    await writeFile(join(root, "model.safetensors"), "fixture");
+    await writeFile(join(root, "tokenizer.json"), "{}");
+    const args = { checkpoint: root, tokenizer: join(root, "tokenizer.json"),
+      config: localRunnerConfigSchema.parse({ paths: { baseModel: "/unrelated/adapter" } }) };
+    const launch = buildFoundationModelServerLaunch(args);
+    assert.equal(launch.env.TT_CONTEXT_LENGTH, "128");
+    assert.equal(launch.env.TT_FOUNDATION_CHECKPOINT, root);
+    assert.equal(launch.env.TT_MODEL_SOURCE, undefined);
+    assert.equal(launch.env.TT_BASE_MODEL_REVISION, undefined);
+    assert.throws(() => buildFoundationModelServerLaunch({ ...args, options: { contextLength: 129 } }), /exceeds/);
+    assert.throws(() => buildFoundationModelServerLaunch({ ...args, options: { device: "cpu" } }), /requires CUDA/);
+    assert.throws(() => buildFoundationModelServerLaunch({ ...args, options: { host: "0.0.0.0" } }), /allow-remote/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

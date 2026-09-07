@@ -38,6 +38,15 @@ class UpstreamLaunchTests(unittest.TestCase):
         asyncio.run(exercise())
 
 
+    def test_foundation_uses_plain_vllm_without_lora_or_tool_parser(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"TT_BASE_MODEL": "foundation", "TT_MODEL_NAME": "foundation",
+                                        "TT_CONTEXT_LENGTH": "128"}, clear=True):
+                args = serve.build_vllm_args(tmp, None, Path(tmp))
+            self.assertNotIn("--enable-lora", args)
+            self.assertNotIn("--tool-call-parser", args)
+            self.assertEqual(args[args.index("--max-model-len") + 1], "128")
+
     def test_larger_models_use_their_upstream_tool_parsers(self):
         for model, parser in [
             ("nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16", "qwen3_coder"),

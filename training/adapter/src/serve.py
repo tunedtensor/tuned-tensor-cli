@@ -64,9 +64,10 @@ def build_vllm_args(model_source: str, adapter_path: str | None, temp_dir: Path)
         "Qwen/Qwen3.5-2B": "qwen3_xml",
         "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16": "qwen3_coder",
         "meta-models/Muse-Glimmer-30B": "muse_glimmer",
-    }[base]
-    args += ["--enable-auto-tool-choice", "--tool-call-parser", parser]
-    if base != "meta-models/Muse-Glimmer-30B":
+    }.get(base)
+    if parser:
+        args += ["--enable-auto-tool-choice", "--tool-call-parser", parser]
+    if parser and base != "meta-models/Muse-Glimmer-30B":
         args += ["--default-chat-template-kwargs", '{"enable_thinking":false}']
     if adapter_path:
         config = json.loads((Path(adapter_path) / "adapter_config.json").read_text())
@@ -124,11 +125,17 @@ def run_server() -> None:
     family = socket.AF_INET6 if ":" in host else socket.AF_INET
     with socket.socket(family, socket.SOCK_STREAM) as probe:
         probe.bind((host, port))
-    model_source = prepare_model_source()
     if os.environ.get("TT_API_KEY"):
         os.environ["VLLM_API_KEY"] = os.environ["TT_API_KEY"]
     with TemporaryDirectory(prefix="tt-serve-") as temp:
-        adapter = resolve_adapter_path(os.environ.get("TT_MODEL_ARTIFACT"), Path(temp))
+        if os.environ.get("TT_FOUNDATION_CHECKPOINT"):
+            from foundation_export import export_foundation
+            model_source = export_foundation(os.environ["TT_FOUNDATION_CHECKPOINT"],
+                os.environ["TT_FOUNDATION_TOKENIZER"], Path(temp) / "foundation")
+            adapter = None
+        else:
+            model_source = prepare_model_source()
+            adapter = resolve_adapter_path(os.environ.get("TT_MODEL_ARTIFACT"), Path(temp))
         args = build_vllm_args(model_source, adapter, Path(temp))
         from vllm.entrypoints.cli.main import main
         previous = sys.argv

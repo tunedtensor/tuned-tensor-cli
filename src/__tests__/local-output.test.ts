@@ -217,7 +217,7 @@ describe("human local rendering", () => {
             train: { status: "ready" },
             finetune: { status: "ready" },
             inference: { status: "ready" },
-            serve: { reason: "tt serve cannot host foundation checkpoints yet" },
+            serve: { reason: "Foundation serving requires Linux and an NVIDIA CUDA GPU" },
           },
           notes: [],
         },

@@ -18,6 +18,7 @@ import { runDoctor } from "./doctor.js";
 import { assessHardware } from "./hardware.js";
 import { assertUsableModelArtifact, defaultBaseModelRevision } from "./model-registry.js";
 import {
+  buildFoundationModelServerLaunch,
   buildLocalBaseModelServerLaunch,
   buildLocalModelServerLaunch,
   serveLocalModel,
@@ -99,7 +100,7 @@ Commands:
   hardware [--config local-runner.json] [--quick]
   validate [tunedtensor.json] [--config local-runner.json]
   run [tunedtensor.json] [--config local-runner.json] [--dry-run] [--verbose] [--quiet]
-  serve <model-id|active|base> [--config local-runner.json] [--host 127.0.0.1] [--port 8000]
+  serve <model-id|active|base|foundation> [--config local-runner.json] [--host 127.0.0.1] [--port 8000]
   runs list|get|events|report|compare [args] [--config local-runner.json]
   models list|get|verify|prefetch|verify-base|active|activate|rollback|serve [args] [--config local-runner.json]
 
@@ -147,6 +148,8 @@ const VERBOSE_OPTION = { name: "--verbose", description: "Stream subprocess outp
 const QUIET_OPTION = { name: "--quiet", description: "Suppress progress output on stderr" } as const;
 const MODEL_SERVE_OPTIONS = [
   CONFIG_OPTION,
+  { name: "--checkpoint", value: "path", description: "Foundation model directory (target: foundation)" },
+  { name: "--tokenizer", value: "path", description: "Foundation tokenizer.json (target: foundation)" },
   { name: "--host", value: "host", description: "Bind host (localhost by default)" },
   { name: "--port", value: "port", description: "Bind port" },
   { name: "--device", value: "device", description: "cuda (pinned vLLM runtime)" },
@@ -154,7 +157,7 @@ const MODEL_SERVE_OPTIONS = [
   { name: "--temperature", value: "number", description: "Default sampling temperature" },
   { name: "--top-p", value: "number", description: "Default nucleus sampling threshold" },
   { name: "--max-concurrent-requests", value: "count", description: "Maximum sequences in an upstream generation batch" },
-  { name: "--context-length", value: "count", description: "Total context token budget (default 16384)" },
+  { name: "--context-length", value: "count", description: "Total context token budget (foundation: checkpoint limit; otherwise 16384)" },
   { name: "--gpu-memory-utilization", value: "fraction", description: "vLLM GPU memory budget fraction (default 0.8)" },
   { name: "--spec", value: "path", description: "Behavior spec whose instructions are enforced" },
   { name: "--no-spec-prompt", description: "Do not enforce the stored behavior-spec prompt" },
@@ -218,8 +221,8 @@ const COMMAND_DEFINITIONS: Record<string, CliCommandDefinition> = {
     maxPositionals: 1,
   },
   serve: {
-    usage: "tt serve <model-id|active|base> [options]",
-    description: "Serve a verified adapter, the active model, or the protected base.",
+    usage: "tt serve <model-id|active|base|foundation> [options]",
+    description: "Serve an adapter, pretrained base, or foundation checkpoint with vLLM.",
     options: MODEL_SERVE_OPTIONS,
     minPositionals: 1,
     maxPositionals: 1,
@@ -286,7 +289,7 @@ const COMMAND_GROUPS: Record<string, CliCommandGroup> = {
         maxPositionals: 0,
       },
       serve: {
-        usage: "tt models serve <model-id|active|base> [options]",
+        usage: "tt models serve <model-id|active|base|foundation> [options]",
         description: "Alias for `tt serve`.",
         options: MODEL_SERVE_OPTIONS,
         minPositionals: 1,
@@ -692,7 +695,7 @@ async function modelSystemPrompt(args: {
       throw new Error(`--spec must contain a tunedtensor.json behavior spec: ${resolve(specPath)}`);
     }
     if (isFoundationSpecFile(local.data)) {
-      throw new Error("Foundation specs have no Hugging Face base model. `tt serve` cannot host them yet.");
+      throw new Error("Foundation specs have no Hugging Face base model. Use `tt serve foundation --checkpoint <model-dir> --tokenizer <tokenizer.json>`.");
     }
     spec = local.data;
   } else {
@@ -759,7 +762,7 @@ function printServeClientConfig(argv: string[], launch: LocalModelServerLaunch):
           supportsUsageInStreaming: true,
           maxTokensField: "max_tokens",
         },
-        models: [...new Set([launch.modelName, `base:${launch.env.TT_BASE_MODEL}`])].map((id) => ({
+        models: [...new Set(launch.env.TT_FOUNDATION_CHECKPOINT ? [launch.modelName] : [launch.modelName, `base:${launch.env.TT_BASE_MODEL}`])].map((id) => ({
           id,
           name: id,
           // This endpoint exports ordinary text/tool calls, not reasoning-effort controls.
@@ -862,7 +865,7 @@ async function serveBaseModelFromCli(args: {
     )
     : undefined;
   if (spec && isFoundationSpecFile(spec)) {
-    throw new Error("Foundation specs have no Hugging Face base model. `tt serve` cannot host them yet.");
+    throw new Error("Foundation specs have no Hugging Face base model. Use `tt serve foundation --checkpoint <model-dir> --tokenizer <tokenizer.json>`.");
   }
   let baseModel = spec?.base_model;
   if (!baseModel) {
@@ -910,6 +913,47 @@ async function serveModelTargetFromCli(args: {
   target: string;
   config: LocalRunnerConfig;
 }): Promise<void> {
+  if (args.target === "foundation") {
+    const checkpoint = readOption(args.argv, "--checkpoint");
+    const tokenizer = readOption(args.argv, "--tokenizer");
+    if (!checkpoint || !tokenizer) {
+      throw new Error("Foundation serving requires --checkpoint <model-dir> and --tokenizer <tokenizer.json>.");
+    }
+    const specPath = readOption(args.argv, "--spec");
+    if (specPath && hasFlag(args.argv, "--no-spec-prompt")) {
+      throw new Error("Use only one of --spec or --no-spec-prompt.");
+    }
+    const spec = specPath
+      ? localBehaviorSpecFileSchema.parse(JSON.parse(await readFile(resolve(specPath), "utf8")))
+      : undefined;
+    if (spec && !isFoundationSpecFile(spec)) throw new Error("Foundation serving requires a foundation spec.");
+    const launch = buildFoundationModelServerLaunch({
+      checkpoint,
+      tokenizer,
+      config: args.config,
+      options: {
+        ...serveOptionsFromArgv(args.argv),
+        systemPrompt: spec ? buildSystemMessage(spec) : undefined,
+      },
+    });
+    if (printServeClientConfig(args.argv, launch)) return;
+    if (hasFlag(args.argv, "--print-command")) {
+      printJson({
+        ok: true,
+        model_id: launch.modelName,
+        url: launch.url,
+        command: launch.displayCommand,
+        checkpoint: launch.env.TT_FOUNDATION_CHECKPOINT,
+        tokenizer: launch.env.TT_FOUNDATION_TOKENIZER,
+      });
+      return;
+    }
+    await serveLocalModel(launch);
+    return;
+  }
+  if (readOption(args.argv, "--checkpoint") || readOption(args.argv, "--tokenizer")) {
+    throw new Error("--checkpoint and --tokenizer require the foundation target.");
+  }
   if (args.target === "base") {
     return serveBaseModelFromCli(args);
   }
