@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Added
+
+- Serve completed foundation pretrain, fine-tune, and RL model artifacts with
+  `tt serve foundation --checkpoint <model-dir> --tokenizer <tokenizer.json>`.
+  A temporary GPT-2 export uses the existing pinned vLLM runtime on Linux/CUDA,
+  with text/chat completions, streaming, authentication, and checkpoint-bounded
+  context. Foundation tool-call parsing and resumable optimizer checkpoints are
+  not supported. Supply the original training tokenizer: vocabulary and special
+  token checks do not establish tokenizer identity.
+- CPU export parity tests for foundation logits, cached generation, and chat
+  token formatting, included in the default test suite.
+
+### Fixed
+
+- Match foundation training's system-prompt normalization during serving,
+  including defaults for empty or whitespace-only system messages, without
+  changing user or assistant content.
+- Save foundation checkpoints on CPU when tied embedding and output weights
+  share tensor storage.
+
 ## [0.15.1] - 2026-09-07
 
 ### Added
