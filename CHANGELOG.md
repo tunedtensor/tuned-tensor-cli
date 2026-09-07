@@ -2,8 +2,24 @@
 
 ## Unreleased
 
+## [0.15.1] - 2026-09-07
+
+### Added
+
+- Workflow regression tests covering conversational proposals and approvals,
+  training and held-out evaluation, artifact verification, activation, serving
+  selection, failure handling, and reuse. They run in the existing CI and release
+  gate; `npm run test:workflows` selects the focused suite and `npm run check`
+  runs typechecking, all tests, and the build.
+- An opt-in live agent evaluation with bounded provider calls, synthetic
+  workspaces, and recorded assertions and evidence. Document the automated
+  guarantees, manual review, and real-GPU release acceptance in `docs/testing.md`.
+
 ### Fixed
 
+- Verify reusable model artifacts and evaluation evidence before refreshing
+  their manifest during a resumed run, so altered weights or saved scores
+  cannot gain trusted checksums and be reused silently.
 - Make `/login tunedtensor` select and save `tunedtensor/managed`, replacing
   a previously saved BYO model so managed inference stays selected after restart.
   Confirm the saved model in the login success message.

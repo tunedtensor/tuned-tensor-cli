@@ -1179,12 +1179,27 @@ async function prepareStage(args: {
   let canReuse = preparedExists
     && existingMetadata?.source_fingerprint === prepared.metadata.source_fingerprint;
   if (canReuse) {
+    // A reused baseline can refresh the manifest before the train stage runs.
+    // Verify existing adapter bytes first so that refresh cannot bless changes.
     canReuse = await verifyReusableArtifacts(args.artifacts, [
       args.artifacts.stageMetadataJson,
       args.artifacts.trainingJsonl,
-    ]);
+    ], { verifyModel: true });
   }
   if (canReuse) {
+    // Each pipeline step refreshes the whole manifest. Check all reusable stage
+    // evidence before the first refresh can replace its recorded checksums.
+    // Absent outputs or stale fingerprints still follow normal recomputation.
+    for (const stage of ["baseline", "train", "candidate"] as const) {
+      await canReuseStageArtifact({
+        stage,
+        prepared,
+        config: args.config,
+        additionalPaths: stage === "train"
+          ? []
+          : generalRegressionRequiredPaths(prepared, stage),
+      });
+    }
     await throwIfCancelled(args.store, args.request);
     await updateRun({
       ...args,

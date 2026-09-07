@@ -432,7 +432,13 @@ npm run build
 npm run dev
 npm run typecheck
 npm test
+npm run test:workflows  # Focused product workflow regressions; no model key or GPU
+npm run check           # Typecheck, all tests, and build (the release gate)
 ```
+
+See [the testing proposal and workflow contracts](docs/testing.md) for what the
+suite guarantees, how to evaluate a real agent with `npm run eval:agent`, and
+the remaining steps toward the full conversational product promise.
 
 ## License
 
