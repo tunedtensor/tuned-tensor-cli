@@ -2,9 +2,10 @@
 
 `tt serve` verifies TT artifacts and launches **vLLM 0.28.0**. vLLM owns model
 execution, batching, KV/prefix caching, streaming, and native tool-call parsing.
-There is no TT inference loop, HTTP server, or proxy between the harness and
-vLLM. The serving dependencies are locked separately from training, in an
-external cache environment; an npm upgrade does not mutate the training runtime.
+This local serving path connects the harness directly to vLLM; TT's managed
+agent proxy is a separate inference option. The serving dependencies are locked
+separately from training, in an external cache environment; an npm upgrade does
+not mutate the training runtime.
 
 ## Requirements and scope
 
@@ -77,7 +78,9 @@ tt serve local-<run-id> --config local-runner.json \
 
 Use the same launch options as the running server. Exporting config verifies the
 TT target but does not start a server. Adapter exports include both model IDs.
-For example, in a disposable coding-fixture directory:
+The exported `tt-local` provider ID names this local endpoint; it is not a
+separate CLI or package and uses no TT account token. For example, in a
+disposable coding-fixture directory:
 
 ```bash
 pi --provider tt-local --model 'base:Qwen/Qwen3.5-2B' \
@@ -107,7 +110,7 @@ OpenCode can connect directly using its existing custom provider support:
   "provider": {
     "tt-local": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "TT local",
+      "name": "TT local endpoint",
       "options": { "baseURL": "http://127.0.0.1:8000/v1" },
       "models": {
         "base:Qwen/Qwen3.5-2B": {

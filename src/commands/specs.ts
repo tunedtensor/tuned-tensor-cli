@@ -95,7 +95,7 @@ export function registerSpecsCommands(parent: Command) {
     .option("-p, --page <n>", "Page number", "1")
     .option("--per-page <n>", "Results per page", "20")
     .action(async (cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const { data, meta } = await get<BehaviorSpec[]>(
         "/behavior-specs",
         { page: cmdOpts.page, per_page: cmdOpts.perPage },
@@ -124,7 +124,7 @@ export function registerSpecsCommands(parent: Command) {
     .description("Show spec details")
     .argument("<id>", "Spec ID (full UUID or 8+ char prefix)")
     .action(async (id: string) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const fullId = await resolveSpecId(id, opts);
       const { data } = await get<BehaviorSpec>(`/behavior-specs/${fullId}`, undefined, opts);
 
@@ -163,7 +163,7 @@ export function registerSpecsCommands(parent: Command) {
     .option("-n, --name <name>", "Spec name")
     .option("--model <model>", "Base model ID")
     .action(async (cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       let body: Record<string, unknown>;
 
       if (cmdOpts.file) {
@@ -189,7 +189,7 @@ export function registerSpecsCommands(parent: Command) {
     .option("-n, --name <name>", "New name")
     .option("--model <model>", "New base model ID")
     .action(async (id: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       let body: Record<string, unknown>;
 
       if (cmdOpts.file) {
@@ -216,7 +216,7 @@ export function registerSpecsCommands(parent: Command) {
     .description("Delete a behaviour spec")
     .argument("<id>", "Spec ID (full UUID or 8+ char prefix)")
     .action(async (id: string) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const fullId = await resolveSpecId(id, opts);
       await del(`/behavior-specs/${fullId}`, opts);
 

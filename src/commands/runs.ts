@@ -651,6 +651,17 @@ async function buildRunRequestBody(
 export function registerRunsCommands(parent: Command) {
   const runs = parent.command("runs").description("Manage runs");
 
+  runs.command("archive")
+    .description("Archive an inactive local run report published to the dashboard")
+    .argument("<id>", "Published run ID or prefix")
+    .action(async (id: string) => {
+      const opts = parent.optsWithGlobals() as ClientOpts;
+      const fullId = await resolveRunId(id, opts);
+      const { data } = await post(`/runs/${fullId}/archive`, undefined, opts);
+      if (isJsonMode()) return printJson(data);
+      printSuccess(`Archived run ${shortId(fullId)}.`);
+    });
+
   runs
     .command("list")
     .description("List runs")
@@ -659,7 +670,7 @@ export function registerRunsCommands(parent: Command) {
     .option("--per-page <n>", "Results per page", "20")
     .option("--summary", "Request compact run summaries without detailed eval payloads or events")
     .action(async (cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
 
       let path = "/runs";
       const query: Record<string, string | number> = {
@@ -700,7 +711,7 @@ export function registerRunsCommands(parent: Command) {
     .description("Show run details and eval results")
     .argument("<id>", "Run ID (full UUID or 8+ char prefix)")
     .action(async (id: string) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const fullId = await resolveRunId(id, opts);
       const { data } = await get<Run>(`/runs/${fullId}`, undefined, opts);
 
@@ -764,7 +775,7 @@ export function registerRunsCommands(parent: Command) {
       .argument("<spec-id>", "Behaviour spec ID (full UUID or 8+ char prefix)"),
   )
     .action(async (specId: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const body = await buildRunRequestBody(cmdOpts, opts);
       const fullSpecId = await resolveSpecId(specId, opts);
       const { data } = await post<RunEstimate>(
@@ -784,7 +795,7 @@ export function registerRunsCommands(parent: Command) {
       .argument("<spec-id>", "Behaviour spec ID (full UUID or 8+ char prefix)"),
   )
     .action(async (specId: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const body = await buildRunRequestBody(cmdOpts, opts);
       const fullSpecId = await resolveSpecId(specId, opts);
       const { data } = await post<Run>(
@@ -804,7 +815,7 @@ export function registerRunsCommands(parent: Command) {
     .description("Cancel a running run")
     .argument("<id>", "Run ID (full UUID or 8+ char prefix)")
     .action(async (id: string) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const fullId = await resolveRunId(id, opts);
       const { data } = await post<Run>(`/runs/${fullId}/cancel`, undefined, opts);
 
@@ -818,7 +829,7 @@ export function registerRunsCommands(parent: Command) {
     .argument("<id>", "Run ID (full UUID or 8+ char prefix)")
     .option("--interval <ms>", "Poll interval in milliseconds", "5000")
     .action(async (id: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const interval = Number(cmdOpts.interval);
       const fullId = await resolveRunId(id, opts);
       const spinner = ora(`Watching run ${shortId(fullId)}...`).start();
@@ -859,7 +870,7 @@ export function registerRunsCommands(parent: Command) {
     .description("Show live run diagnostics")
     .argument("<id>", "Run ID (full UUID or 8+ char prefix)")
     .action(async (id: string) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const fullId = await resolveRunId(id, opts);
       const { data } = await get<RunDiagnostics>(
         `/runs/${fullId}/diagnostics`,
@@ -879,7 +890,7 @@ export function registerRunsCommands(parent: Command) {
     .option("--limit <n>", "Number of examples to show", "5")
     .option("--mode <mode>", "Example mode: regressions or failures", "regressions")
     .action(async (id: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const fullId = await resolveRunId(id, opts);
       const { data } = await get<RunReport>(
         `/runs/${fullId}/report`,

@@ -301,7 +301,7 @@ export function registerDatasetsCommands(parent: Command) {
     .option("-p, --page <n>", "Page number", "1")
     .option("--per-page <n>", "Results per page", "20")
     .action(async (cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const { data, meta } = await get<Dataset[]>(
         "/datasets",
         { page: cmdOpts.page, per_page: cmdOpts.perPage },
@@ -329,7 +329,7 @@ export function registerDatasetsCommands(parent: Command) {
     .description("Show dataset details")
     .argument("<id>", "Dataset ID (full UUID or 4+ char prefix)")
     .action(async (id: string) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const fullId = await resolveDatasetId(id, opts);
       const { data } = await get<Dataset>(`/datasets/${fullId}`, undefined, opts);
 
@@ -363,7 +363,7 @@ export function registerDatasetsCommands(parent: Command) {
     .option("-d, --description <desc>", "Dataset description")
     .option("--format <format>", "Dataset format: jsonl or document_ocr_jsonl")
     .action(async (file: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
 
       if (!existsSync(file)) {
         printError(`File not found: ${file}`);
@@ -417,7 +417,7 @@ export function registerDatasetsCommands(parent: Command) {
     .description("Delete a dataset")
     .argument("<id>", "Dataset ID (full UUID or 4+ char prefix)")
     .action(async (id: string) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const fullId = await resolveDatasetId(id, opts);
       await del(`/datasets/${fullId}`, opts);
 

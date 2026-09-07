@@ -28,7 +28,7 @@ test("doctor probes the locked uv runtime with one cache contract and mandatory 
     assert.ok(plan.env.UV_PROJECT_ENVIRONMENT);
     const probe = plan.args.at(-1) ?? "";
     assert.match(probe, /assert torch\.cuda\.is_available\(\)/);
-    assert.match(probe, /TT Local training requires CUDA/);
+    assert.match(probe, /TT local training requires CUDA/);
     assert.match(probe, /compute_capability/);
   }
 });
@@ -46,7 +46,7 @@ if [ "$1" = "--version" ]; then
   echo "uv 0.test"
   exit 0
 fi
-echo "TT Local training requires CUDA but torch.cuda.is_available() is false" >&2
+echo "TT local training requires CUDA but torch.cuda.is_available() is false" >&2
 exit 1
 `, "utf8");
     await writeFile(nvidiaSmi, "#!/bin/sh\necho 'NVIDIA DGX Spark'\n", "utf8");

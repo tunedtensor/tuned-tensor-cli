@@ -5,7 +5,7 @@ import {
   listAgentModels,
   setAgentModel,
 } from "../agent-control.js";
-import type { AgentThinkingLevel } from "../config.js";
+import { MANAGED_AGENT_PROVIDER, MANAGED_AGENT_MODEL, type AgentThinkingLevel } from "../config.js";
 import { isJsonMode } from "../output.js";
 
 export interface AgentCommandsOptions {
@@ -17,13 +17,13 @@ export interface AgentCommandsOptions {
 export function registerAgentCommands(parent: Command, options: AgentCommandsOptions): void {
   const agent = parent.command("agent").description("Configure the laptop-local TT agent");
 
-  agent.command("status").description("Show the selected local provider, model, thinking, and auth state")
+  agent.command("status").description("Show the inference provider, model, thinking, and authentication state")
     .action(async () => {
       const runtime = await options.getRuntime();
       const summary = describeAgentModel(runtime, options.env);
       if (!summary) {
         throw new Error(
-          "The local agent is not configured. Run `tt agent configure --provider <provider> --model <model>`.",
+          "The agent is not configured. Run `tt auth login` for managed inference, or configure a BYO provider and model with `tt agent configure`. Local workflow commands need no token.",
         );
       }
       const value = {
@@ -69,17 +69,20 @@ export function registerAgentCommands(parent: Command, options: AgentCommandsOpt
       }
     });
 
-  agent.command("configure").description("Select the local provider, model, and thinking level")
+  agent.command("configure").description("Select managed inference or a BYO provider, model, and thinking level")
     .requiredOption("--provider <provider>", "Provider ID")
-    .requiredOption("--model <model>", "Model ID")
-    .option("--thinking <level>", "off, minimal, low, medium, high, xhigh, or max", "medium")
-    .action(async (commandOptions: { provider: string; model: string; thinking: string }) => {
+    .option("--model <model>", "BYO model ID (managed is automatic for tunedtensor)")
+    .option("--thinking <level>", "off, minimal, low, medium, high, xhigh, or max")
+    .action(async (commandOptions: { provider: string; model?: string; thinking?: string }) => {
+      const managed = commandOptions.provider === MANAGED_AGENT_PROVIDER;
+      const model = commandOptions.model || (managed ? MANAGED_AGENT_MODEL : undefined);
+      if (!model) throw new Error("--model is required when using your own provider.");
       const result = setAgentModel(
         await options.getRuntime(),
         options.env,
         commandOptions.provider,
-        commandOptions.model,
-        { thinking: commandOptions.thinking as AgentThinkingLevel, adjustThinking: false },
+        model,
+        { thinking: (commandOptions.thinking || (managed ? "off" : "medium")) as AgentThinkingLevel, adjustThinking: false },
       );
       const value = { execution: "local", ...result.selection };
       options.output.write(isJsonMode()

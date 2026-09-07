@@ -92,8 +92,8 @@ def assert_certified_request() -> None:
 def require_cuda() -> dict[str, Any]:
     if not torch.cuda.is_available():
         raise RuntimeError(
-            "TT Local bundled training requires an NVIDIA CUDA GPU. "
-            "Run this workflow on DGX Spark and verify it first with tt-local doctor."
+            "TT local training requires an NVIDIA CUDA GPU. "
+            "Run this workflow on a supported CUDA host and verify it first with tt doctor."
         )
     device_index = torch.cuda.current_device()
     properties = torch.cuda.get_device_properties(device_index)

@@ -1,4 +1,5 @@
-import type { AgentAction } from "./agent-client.js";
+import { createHash } from "node:crypto";
+import type { AgentAction, CloudActionContext } from "./agent-client.js";
 import {
   canonicalWorkspace,
   createLocalSpecProject,
@@ -28,6 +29,13 @@ export interface AgentMutationGuard {
 }
 
 export type PersistAction = (action: AgentAction) => Promise<void>;
+
+export function createCloudActionContext(baseUrl: string, token: string): CloudActionContext {
+  return {
+    origin: new URL(baseUrl).origin,
+    credential_fingerprint: createHash("sha256").update(token).digest("hex"),
+  };
+}
 
 export interface AgentApprovalOptions {
   workspaceRoot?: string;

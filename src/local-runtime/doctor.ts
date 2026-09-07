@@ -194,7 +194,7 @@ function pythonProbeSource(device: LocalRunnerConfig["evaluation"]["inference"][
     "import json",
     "import torch, transformers, peft, huggingface_hub",
     `requested = ${JSON.stringify(device)}`,
-    "assert torch.cuda.is_available(), 'TT Local training requires CUDA but torch.cuda.is_available() is false'",
+    "assert torch.cuda.is_available(), 'TT local training requires CUDA but torch.cuda.is_available() is false'",
     "props = torch.cuda.get_device_properties(0)",
     "print(json.dumps({'python_ok': True, 'torch': torch.__version__, 'transformers': transformers.__version__, 'cuda_available': True, 'cuda_device': torch.cuda.get_device_name(0), 'compute_capability': list(torch.cuda.get_device_capability(0)), 'total_memory_bytes': props.total_memory, 'evaluation_device': requested}))",
   ].join("; ");

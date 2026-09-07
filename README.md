@@ -1,35 +1,38 @@
 # tt - Tuned Tensor CLI
 
-`tt` is one terminal for local Tuned Tensor workflows:
+`tt` is the local agent and CLI for Tuned Tensor. Use it to converse, run
+workflows on your laptop or in the cloud, inspect metrics, and check account
+usage. The web app is the dashboard for reviewing cloud runs and published
+local evidence.
 
-- a laptop-local conversational agent;
-- CUDA fine-tuning, held-out evaluation, artifact verification, model
-  activation, and OpenAI-compatible serving on hardware you control.
+Local training, evaluation, inspection, and serving need no TT access token.
+Agent inference is a separate choice:
 
-## Cloud sunset
+- **Managed:** sign in once with `tt auth login`. TT reuses your access token
+  through the Tuned Tensor model proxy. The server selects the model; no
+  OpenRouter key or model selection is needed.
+- **Bring your own:** use your own OpenRouter or other provider credentials
+  and choose the model. Your requests go directly to that provider. TT does
+  not apply its managed model policy to BYO requests.
 
-This release unregisters the hosted API commands (`tt auth`, `tt publish`,
-`tt push`, `tt balance`, `tt topup`, `tt cloud`, and the rest of the managed
-tree). The modules remain in the repository so they can be restored later.
-`tt local …` is kept as a hidden alias. `tt run` is also retained as a hidden
-compatibility alias for the canonical adapter pipeline; new scripts should use
-`tt pipeline run --spec tunedtensor.json`.
+A saved BYO selection stays selected after TT login. Switch back with
+`tt agent configure --provider tunedtensor` or `/model tunedtensor/managed`.
+Inference choice is independent of whether a training workflow runs locally or
+in the cloud. Cloud account operations always require a TT access token.
 
-## Migrating from 0.11
+## Unified commands
 
-`0.13` is the local-only CLI. If you are coming from `0.11.0`:
+Local workflows remain the default: `tt pipeline run`, `tt runs list`,
+`tt models list`, and `tt serve`. Cloud workflows are explicit:
+`tt cloud runs start`, `tt cloud runs list`, and `tt cloud models list`.
+`tt usage` reports managed agent allowance and usage; `tt balance` reports
+cloud training credits. `tt publish` uploads local run evidence to the dashboard.
 
-- Run `tt` for the conversational workflow, `tt pipeline run` for explicit or
-  automated execution, and `tt serve` for the serving lifecycle. `tt run` and
-  `tt local …` remain hidden compatibility aliases.
-- Hosted account commands (`tt auth`, `tt publish`, `tt push`, and the rest)
-  are unregistered.
-- `Qwen/Qwen3.5-2B` is pinned to Hugging Face snapshot
-  `15852e8c16360a2fea060d615a32b45270f8a8fc`. Prefetch, train, eval, and serve
-  reject any other revision.
-- `tt serve active` fails unless an adapter is activated. Activation requires
-  a `generalRegression` suite in `local-runner.json`.
-- `tt info` reports `status: local`.
+TT includes the former TT Local runtime. `tt local …` and `tt run` remain
+hidden compatibility aliases; new scripts should use root commands and
+`tt pipeline run --spec tunedtensor.json`. Existing token-free local projects
+and saved BYO provider settings continue to work. Cloud operations previously
+hidden in the local-only release are available under `tt cloud`.
 
 ## Install
 
@@ -78,35 +81,53 @@ npm link
 ## Conversational terminal
 
 The interactive agent harness and conversation state run on your laptop.
-Inference runs through the provider/model you select, which may be a
-local endpoint or a remote provider.
+Inference uses the TT managed model or a BYO provider you select. A BYO
+provider may be a local endpoint or a remote service.
 
 Run `tt` to open the primary conversational workflow. The agent can inspect the
 project, derive the canonical pipeline from `tunedtensor.json`, present the
-resolved plan, and prepare a sealed dry-run for `/approve`. Workflow commands such
-as `runs list` and `doctor` also work immediately. Chat waits until you choose a
-provider and model from inside the shell:
+resolved plan, and prepare a sealed dry-run for `/approve`. Workflow commands
+such as `runs list` and `doctor` work immediately without any credentials.
 
-```text
-tt v0.13.1-beta.2
-agent not configured · workflow model base
-ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
+For managed inference, save your TT access token with hidden input:
 
-Use /model to choose a provider and model. Workflow commands work now.
-› /model
-› /login openai
-› /model openai
-› /model openai/gpt-5.6-sol
+```bash
+tt auth login
+tt
 ```
 
-Use `/login` to save a provider API key. The shell asks which provider, then
-prompts for the key with hidden input and stores it under TT's local agent
-config. `/login <provider>` skips the provider prompt.
-`tt` does not accept provider secrets as flags and does not read
-`~/.pi/agent/`. `/model` and `/login` show OpenAI and OpenRouter.
-Other catalog providers remain available if you type their id.
-Unauthenticated entries are marked `auth required`. Local endpoints such as
-Ollama still need a placeholder `apiKey` in `models.json`.
+Get a token from the dashboard's **Settings → API Keys** page. You can also
+set `TUNED_TENSOR_API_KEY` in CI. When there is no saved BYO selection, TT
+selects `tunedtensor/managed` automatically. In the shell, `/login tunedtensor`
+saves the same account token. Managed inference requires no OpenRouter key
+or additional login. The server controls the model and request limits.
+`tt usage` shows the configured daily allowance and reported usage.
+
+For BYO OpenRouter inference:
+
+```text
+› /login openrouter
+› /model openrouter/<model-id>
+```
+
+`/login` asks which provider, then prompts for the TT access token or BYO
+provider key with hidden input. `/login <provider>` skips the provider prompt.
+`/model openrouter` lists the bundled catalog, but you can select any OpenRouter model ID, including one
+newer than that catalog. OpenRouter validates the selected ID. New IDs use
+conservative context/output defaults; custom metadata can be supplied in
+`~/.tuned-tensor/agent/models.json`. For a model without reasoning support,
+configure it with
+`tt agent configure --provider openrouter --model <model-id> --thinking off`.
+BYO inference is billed by your provider.
+
+Provider keys are stored under TT's local agent config, separately from the
+account token. The managed provider never stores your TT token in provider
+files and does not accept endpoint/model overrides in `models.json`; use a
+separate BYO provider for custom endpoints. `tt` does not read `~/.pi/agent/`.
+`/model` and `/login` feature Tuned Tensor, OpenAI, and OpenRouter. Other
+catalog providers remain available by ID. Unauthenticated entries are marked
+`auth required`. Local endpoints such as Ollama use a placeholder `apiKey` in
+`models.json` and need no TT account.
 
 Before the shell opens, `tt` performs a short, non-blocking npm version check.
 If a newer stable release is available it recommends
@@ -117,8 +138,8 @@ After a model is selected, the banner shows it and ordinary sentences go to
 the agent:
 
 ```text
-tt v0.13.1-beta.2
-agent anthropic/claude-sonnet-4-5 · workflow model base
+tt v0.15.0
+agent tunedtensor/managed · workflow model base
 ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
 
 Ask TT anything. Known commands run directly.
@@ -182,20 +203,21 @@ A changed workspace or spec requires a new review.
 
 Useful shell controls include `/help`, `/status`, `/context`, `/model`,
 `/login`, `/cd`, `/clear`, and `/exit`.
-The shell banner and `/context` surface the assistant's configured provider and
-model (`agent provider/model`) separately from the workflow model, so the
-model answering your prompts is always visible. `/model` shows and changes the
-laptop-local TT agent model: run it with no arguments to list providers and the
-two suggested models (GPT-5.6 Sol and DeepSeek V4 Flash), `/model <provider>`
-to list that provider's models, search
-with `/model <query>` (only the closest matches are shown), or switch with
-`/model <provider>/<model>` (for example `/model anthropic/claude-sonnet-4-5`).
-`/login` asks which provider to authenticate, then prompts for that provider's
-API key with hidden input. `/login <provider>` skips the provider prompt.
+The shell banner and `/context` show the inference selection (`agent
+provider/model`) separately from the workflow model. The managed alias identifies
+inference through the server-selected model. Run `/model` with no arguments to
+list the managed option and suggested BYO models, `/model <provider>` to list
+that provider's models, or `/model <query>` to search. Switch with
+`/model <provider>/<model>`, including `/model tunedtensor/managed` to return
+to managed inference.
+For managed inference, `tt agent configure --provider tunedtensor` needs no
+model argument. For BYO inference, both provider and model are required.
 The equivalent non-interactive commands are `tt agent models`,
 `tt agent configure`, and `tt agent status`.
-`tt agent configure --thinking` accepts `off`, `minimal`, `low`, `medium`,
-`high`, `xhigh`, or `max`. Selection metadata can be overridden per process with
+For BYO models, `tt agent configure --thinking` accepts `off`, `minimal`, `low`, `medium`,
+`high`, `xhigh`, or `max`; managed inference uses the server's reasoning policy
+and leaves the CLI thinking option off. Selection metadata can be overridden
+per process with
 `TUNED_TENSOR_AGENT_PROVIDER`, `TUNED_TENSOR_AGENT_MODEL`, and
 `TUNED_TENSOR_AGENT_THINKING`. These values are not credentials.
 The shell keeps normal terminal scrollback and command history only for the
@@ -260,8 +282,8 @@ When `--config` is omitted, `pipeline run` uses `local-runner.json` beside the
 selected spec when that file exists.
 
 `--only` and `--skip` preserve dependency safety: a selected step cannot refer
-to an omitted predecessor. Cloud-targeted steps fail closed unless you pass
-`--dry-run`. Foundation documents are local-only. The TT agent may describe,
+to an omitted predecessor. Cloud-targeted pipeline steps can be inspected with `--dry-run`; actual
+cloud execution uses `tt cloud runs`, described below. Foundation documents are local-only. The TT agent may describe,
 validate, and prepare a sealed pipeline action; only deterministic `/approve`
 handling can execute it.
 
@@ -272,6 +294,61 @@ skipped, while an interrupted pretrain step restores model, optimizer,
 scheduler, RNG, counters, and token cursor. See
 [Long foundation runs](docs/local-runtime/foundation-long-runs.md) before an
 unattended job.
+
+## Cloud runs and account reporting
+
+Use the same TT token for cloud operations and managed inference. A BYO model
+selection continues to work while you operate cloud runs with that token.
+
+```bash
+tt auth login
+tt cloud push --file tunedtensor.json
+tt cloud runs estimate <spec-id>
+tt cloud runs start <spec-id>
+tt cloud runs watch <run-id>
+tt cloud runs report <run-id>
+tt cloud runs list
+tt cloud models list
+tt usage
+tt balance
+```
+
+Use the spec ID returned by `push`. `tt cloud specs`, `tt cloud datasets`,
+`tt cloud label`, and `tt cloud models` expose the corresponding account
+operations; each command's `--help` documents its arguments. Cloud foundation
+training and dispatching cloud-targeted pipeline JSON are not supported;
+`tt cloud runs` uses the hosted adapter workflow.
+
+With a TT token, the local agent can inspect cloud resources, run reports,
+balances, transactions, and managed usage. It can prepare cloud spec edits for
+`/approve`. Those proposals show the API origin and remain bound to the token
+and origin used during preparation. After changing either, return to the
+original account and origin or prepare a new proposal. Starting or cancelling
+cloud training remains an explicit direct
+CLI command. Without a TT token these account tools are unavailable, while
+local workflow commands and BYO inference continue to work.
+
+`tt usage` reports the server-configured daily managed inference allowance.
+Each provider completion, including a tool follow-up, consumes one request;
+failed and cancelled requests also count. Token/cost coverage shows which
+requests have provider usage reports, so incomplete reporting is not mistaken
+for zero consumption. The displayed provider cost is informational, not a
+charge to cloud training credits. BYO provider usage is separate. `tt balance`
+shows cloud training credits and recent transactions; `tt topup` opens checkout.
+
+Publish a local report for review in the dashboard:
+
+```bash
+tt publish <local-run-id> --dry-run
+tt publish <local-run-id>
+tt cloud runs archive <published-run-id>
+```
+
+Publishing shows the upload before confirmation and includes the spec, metrics,
+prompts, and example model outputs. Archiving is supported for inactive local
+reports published to the dashboard. Local model weights stay on your machine.
+Use `--json` with reporting commands for scripts. `TUNED_TENSOR_URL` or
+`--base-url` selects an alternate Tuned Tensor API deployment.
 
 ## Quick start
 
@@ -314,7 +391,8 @@ Nemotron path is intended for DGX Spark-class unified memory, uses activation
 checkpointing, and adapts bounded shared attention/Mamba projections rather
 than every routed expert matrix. Muse Glimmer is a vision-language checkpoint
 whose text tower is fine-tuned through the image-text-to-text loader with the
-vision tower frozen and unused. Evaluation and serving may use CPU. Training
+vision tower frozen and unused. Evaluation may use CPU; packaged local
+serving requires Linux and NVIDIA CUDA. Training
 artifacts, datasets, and model weights remain on the execution host.
 
 Activation is optional and requires the run to pass a configured

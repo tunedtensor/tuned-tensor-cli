@@ -1,54 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import { createProgram } from "../cli.js";
 
-describe("local-only CLI surface", () => {
-  it("does not register hosted commands", () => {
+describe("unified local and cloud CLI surface", () => {
+  it("keeps local commands at the root and cloud operations in an explicit namespace", () => {
     const program = createProgram("test");
     const names = program.commands.map((command) => command.name());
-    expect(names).not.toEqual(
-      expect.arrayContaining([
-        "push",
-        "balance",
-        "topup",
-        "cloud",
-        "eval",
-        "specs",
-        "datasets",
-        "label",
-      ]),
-    );
-    expect(names).toEqual(
-      expect.arrayContaining([
-        "info",
-        "init",
-        "doctor",
-        "hardware",
-        "validate",
-        "run",
-        "serve",
-        "runs",
-        "models",
-        "agent",
-        "pipeline",
-        "status",
-        "shell",
-      ]),
-    );
-    expect(names).not.toEqual(
-      expect.arrayContaining(["auth", "publish"]),
-    );
-  });
-
-  it("omits cloud wording from root help", () => {
-    const help = createProgram("test").helpInformation();
-    expect(help).not.toMatch(/\bcloud\b/i);
-    expect(help).not.toMatch(/--api-key/);
-    expect(help).not.toMatch(/--base-url/);
-    expect(help).not.toMatch(/\btt auth\b/);
-    expect(help).not.toMatch(/\btt publish\b/);
+    expect(names).toEqual(expect.arrayContaining([
+      "info", "init", "doctor", "hardware", "validate", "serve", "runs", "models",
+      "agent", "pipeline", "status", "shell", "cloud", "auth", "balance", "topup", "usage", "publish",
+    ]));
+    expect(names).not.toEqual(expect.arrayContaining(["specs", "datasets", "push", "label"]));
+    const cloud = program.commands.find((command) => command.name() === "cloud")!;
+    expect(cloud.commands.map((command) => command.name())).toEqual(expect.arrayContaining([
+      "push", "specs", "datasets", "label", "runs", "models",
+    ]));
+    const help = program.helpInformation();
+    expect(help).toMatch(/cloud/);
+    expect(help).toMatch(/TT access token/);
     expect(help).not.toMatch(/^\s+run\b/m);
-    expect(help).toMatch(/^\s+pipeline\b/m);
-    expect(help).toMatch(/^\s+serve\b/m);
     expect(help.match(/Commands:/g)?.length).toBe(1);
   });
 
@@ -56,10 +25,10 @@ describe("local-only CLI surface", () => {
     const { createTunedTensorTools } = await import("../agent-tools.js");
     const names = createTunedTensorTools({
       get: async () => {
-        throw new Error("This build of tt is local-only.");
+        throw new Error("No TT access token is configured.");
       },
       postRead: async () => {
-        throw new Error("This build of tt is local-only.");
+        throw new Error("No TT access token is configured.");
       },
       propose: async (action) => action,
     }, { localOnly: true, workspaceRoot: process.cwd() }).map((tool) => tool.name);

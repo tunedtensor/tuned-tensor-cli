@@ -62,7 +62,7 @@ export function registerBalanceCommands(parent: Command) {
     .description("Show credit balance and recent transactions")
     .option("-n, --limit <n>", "Number of transactions to show (default 10)", "10")
     .action(async (options) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const limit = Number(options.limit) || 10;
 
       const [{ data: balance }, { data: transactions }] = await Promise.all([

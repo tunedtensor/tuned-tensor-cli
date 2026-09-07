@@ -221,7 +221,7 @@ async function projectSpecArguments(
     "spec_snapshot",
   ].filter((key) => key in body);
   if ("spec_snapshot" in body || runRequestKeys.length >= 2) {
-    // The public TT Local CLI deliberately rejects full run-request payloads.
+    // The TT local command surface deliberately rejects full run-request payloads.
     // Preserve that diagnostic instead of projecting one into a partial spec.
     return {
       args,

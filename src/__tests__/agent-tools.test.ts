@@ -185,6 +185,18 @@ describe("Tuned Tensor agent tools", () => {
     });
   });
 
+  it("describes cloud execution through the cloud run commands", async () => {
+    const described = await tool("describe_pipeline", fakeApi()).execute("describe-cloud", { target: "cloud" });
+    expect(described.details).toMatchObject({
+      scope: { execution: "cloud", access_token_required: true },
+      commands: {
+        push: "tt cloud push --file tunedtensor.json",
+        estimate: "tt cloud runs estimate <spec-id>",
+        run: "tt cloud runs start <spec-id>",
+      },
+    });
+  });
+
   it("examine_hardware inventories the host and persists a snapshot", async () => {
     const root = mkdtempSync(join(tmpdir(), "tt-examine-hardware-"));
     const bin = join(root, "bin");
@@ -452,7 +464,7 @@ exit 1
     expect(createTunedTensorTools(fakeApi()).map((candidate) => candidate.name)).toEqual([
       "list_specs", "get_spec", "list_runs", "get_run", "diagnose_run",
       "report_run", "estimate_run", "list_datasets", "get_dataset",
-      "list_models", "get_model", "get_balance", "list_transactions",
+      "list_models", "get_model", "get_balance", "get_agent_usage", "list_transactions",
       "examine_hardware", "describe_pipeline", "search_hugging_face", "inspect_training_source", "validate_pipeline",
       "prepare_create_spec", "prepare_update_spec",
     ]);

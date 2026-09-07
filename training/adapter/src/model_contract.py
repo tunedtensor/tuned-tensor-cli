@@ -110,7 +110,7 @@ def assert_certified_model_config(
             )
         return
     else:
-        raise ValueError(f"{label} is not a certified TT Local base-model architecture")
+        raise ValueError(f"{label} is not a certified TT base-model architecture")
 
     for name, expected in certified.items():
         actual = _field(text_config, name)

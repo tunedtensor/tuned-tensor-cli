@@ -276,7 +276,7 @@ export function assertCertifiedBaseModelConfig(
     return;
   }
   throw new Error(
-    `${label} is not a certified TT Local base-model architecture.`,
+    `${label} is not a certified TT base-model architecture.`,
   );
 }
 

@@ -404,6 +404,8 @@ export function createTunedTensorTools(
       async (p) => await api.get(`/models/${p.id}`)),
     define("get_balance", "Get balance", "Get account credit balance.", Empty,
       async () => await api.get("/billing/balance")),
+    define("get_agent_usage", "Get managed agent usage", "Get the account's managed inference allowance and reported token usage. Each model request including tool follow-ups uses the daily allowance; BYO provider usage is separate.", Empty,
+      async () => await api.get("/agent/usage")),
     define("list_transactions", "List transactions", "List credit ledger transactions.", Type.Object({
       page: Type.Optional(Page), per_page: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 10 })),
     }, { additionalProperties: false }), async (p) => await api.get("/billing/transactions", {
@@ -459,6 +461,23 @@ export function createTunedTensorTools(
             run: "tt pipeline run --file tunedtensor.pipeline.json --spec tunedtensor.json",
           },
           ...(host ? { host } : {}),
+        };
+      }
+      if (p.target === "cloud") {
+        return {
+          version: 1,
+          engine,
+          scope: { execution: "cloud", cli: "tt cloud", access_token_required: true },
+          canonical: canonicalPipeline("cloud"),
+          commands: {
+            login: "tt auth login",
+            push: "tt cloud push --file tunedtensor.json",
+            estimate: "tt cloud runs estimate <spec-id>",
+            run: "tt cloud runs start <spec-id>",
+            watch: "tt cloud runs watch <run-id>",
+            report: "tt cloud runs report <run-id>",
+          },
+          note: "Use the spec ID returned by push. Cloud recipes cannot be dispatched by tt pipeline run; cloud runs use the hosted run API.",
         };
       }
       return {

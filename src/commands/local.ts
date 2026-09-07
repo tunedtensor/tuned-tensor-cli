@@ -56,7 +56,7 @@ function childEnvironment(
 /**
  * Register the local CUDA workflow at the root of `tt`.
  *
- * Hosted command modules stay on disk but are not registered. `tt local …`
+ * Cloud operations are registered separately under `tt cloud`. `tt local …`
  * remains as a hidden alias so older scripts keep working.
  */
 export function registerLocalCommands(
@@ -111,7 +111,7 @@ export function registerLocalCommands(
     .description("Hidden alias for the local CUDA workflow")
     .helpOption(false)
     .allowUnknownOption()
-    .argument("[args...]", "TT Local command and arguments")
+    .argument("[args...]", "Local command and arguments")
     .action(async (args: string[]) => {
       await runPassthrough(args);
     });

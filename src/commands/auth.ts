@@ -8,7 +8,7 @@ import {
   writeConfig,
   getApiKey,
   getBaseUrl,
-  DEFAULT_BASE_URL,
+  validateAccessToken,
 } from "../config.js";
 import {
   printSuccess,
@@ -28,7 +28,7 @@ export async function promptForApiKey(
     || (output as { isTTY?: boolean }).isTTY !== true
   ) {
     throw new Error(
-      "An API key is required in non-interactive mode. Pass it to `tt auth login <key>` or set TUNED_TENSOR_API_KEY.",
+      "A TT access token is required in non-interactive mode. Pass it to `tt auth login <key>` or set TUNED_TENSOR_API_KEY.",
     );
   }
 
@@ -46,7 +46,7 @@ export async function promptForApiKey(
   });
 
   try {
-    const pending = rl.question("Enter your API key (tt_...): ");
+    const pending = rl.question("Enter your TT access token (tt_...): ");
     muted = true;
     return await pending;
   } finally {
@@ -57,26 +57,26 @@ export async function promptForApiKey(
 }
 
 export function registerAuthCommands(parent: Command) {
-  const auth = parent.command("auth").description("Manage authentication");
+  const auth = parent.command("auth").description("Manage the TT access token for managed inference and cloud operations");
 
   auth
     .command("login")
-    .description("Store an API key for authentication")
-    .argument("[key]", "API key (tt_...). If omitted, you will be prompted.")
+    .description("Save a TT access token for managed inference and cloud operations")
+    .argument("[key]", "TT access token (tt_...). If omitted, you will be prompted.")
     .action(async (key?: string) => {
       let apiKey = key;
 
       if (!apiKey) {
         if (isJsonMode()) {
           throw new Error(
-            "An API key argument is required in JSON mode. Use `tt --json auth login <key>`.",
+            "A TT access token argument is required in JSON mode. Use `tt --json auth login <key>`.",
           );
         }
 
-        const settingsUrl = `${DEFAULT_BASE_URL}/dashboard/settings`;
+        const settingsUrl = `${getBaseUrl(parent.optsWithGlobals()).replace(/\/$/, "")}/dashboard/settings`;
         console.log();
         console.log(
-          `  To get your API key, go to ${chalk.bold("Settings → API Keys")} in the Tuned Tensor dashboard:`,
+          `  To get your TT access token, go to ${chalk.bold("Settings → API Keys")} in the Tuned Tensor dashboard:`,
         );
         console.log(`  ${chalk.hex("#A78BFA").underline(settingsUrl)}`);
         console.log();
@@ -84,31 +84,25 @@ export function registerAuthCommands(parent: Command) {
         apiKey = await promptForApiKey();
       }
 
-      apiKey = apiKey.trim();
+      apiKey = validateAccessToken(apiKey);
 
-      if (!apiKey.startsWith("tt_") || apiKey.length !== 51) {
-        throw new Error(
-          "Invalid API key format. Keys start with tt_ and are 51 characters long.",
-        );
-      }
-
-      updateConfig({ api_key: apiKey });
+      updateConfig({ api_key: apiKey, base_url: getBaseUrl(parent.optsWithGlobals()) });
       if (isJsonMode()) {
         printJson({
           authenticated: true,
           key_prefix: `${apiKey.slice(0, 8)}...`,
-          base_url: getBaseUrl(parent.opts()),
+          base_url: getBaseUrl(parent.optsWithGlobals()),
         });
         return;
       }
       printSuccess(
-        `API key stored (${apiKey.slice(0, 8)}...). You're ready to go.`,
+        `TT access token stored (${apiKey.slice(0, 8)}...).`,
       );
     });
 
   auth
     .command("logout")
-    .description("Remove stored credentials")
+    .description("Remove the stored TT access token")
     .action(() => {
       const current = readConfig();
       const { api_key: _removed, ...rest } = current;
@@ -117,14 +111,14 @@ export function registerAuthCommands(parent: Command) {
         printJson({ authenticated: false });
         return;
       }
-      printSuccess("Credentials removed.");
+      printSuccess("Stored TT access token removed.");
     });
 
   auth
     .command("status")
     .description("Show current authentication status")
     .action(() => {
-      const opts = parent.opts();
+      const opts = parent.optsWithGlobals();
       const apiKey = getApiKey(opts);
       const baseUrl = getBaseUrl(opts);
 
@@ -140,12 +134,12 @@ export function registerAuthCommands(parent: Command) {
       if (apiKey) {
         printDetail([
           ["Authenticated", "Yes"],
-          ["API Key", apiKey.slice(0, 8) + "..."],
+          ["Access token", apiKey.slice(0, 8) + "..."],
           ["Base URL", baseUrl],
         ]);
       } else {
         printWarning(
-          "Not authenticated. Run `tt auth login` to store an API key.",
+          "No TT access token configured. Run `tt auth login` for managed inference or cloud access. Local commands need no token.",
         );
         printDetail([["Base URL", baseUrl]]);
       }

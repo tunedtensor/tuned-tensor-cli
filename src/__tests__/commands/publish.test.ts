@@ -198,7 +198,9 @@ function writeStoreFixture() {
 
 function buildProgram() {
   const program = new Command();
-  program.option("--json", "JSON mode");
+  program.option("--json", "JSON mode")
+    .option("--api-key <key>", "TT token")
+    .option("--base-url <url>", "API origin");
   registerPublishCommand(program);
   program.exitOverride();
   return program;
@@ -223,6 +225,20 @@ afterEach(() => {
 });
 
 describe("publish command", () => {
+  it.each([false, true])("honors inherited account options and child overrides: %s", async (childOverride) => {
+    vi.mocked(client.post).mockResolvedValue({ data: { id: "hosted-run", spec_id: "hosted-spec" } });
+    const childKey = `tt_${"b".repeat(48)}`;
+    await buildProgram().parseAsync([
+      "node", "tt", "--api-key", FAKE_KEY, "--base-url", "https://parent.example",
+      "publish", "--yes",
+      ...(childOverride ? ["--api-key", childKey, "--base-url", "https://child.example"] : []),
+    ]);
+    expect(client.post).toHaveBeenCalledWith("/publish/runs", expect.anything(), {
+      apiKey: childOverride ? childKey : FAKE_KEY,
+      baseUrl: childOverride ? "https://child.example" : "https://parent.example",
+    });
+  });
+
   it("defaults to the latest completed run and posts the evidence bundle", async () => {
     vi.mocked(client.post).mockResolvedValue({
       data: {

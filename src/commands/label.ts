@@ -278,7 +278,7 @@ export function registerLabelCommands(parent: Command) {
     .option("-n, --name <name>", "Job name (defaults to filename)")
     .option("--watch", "Block and show progress until labeling finishes")
     .action(async (file: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
 
       if (!existsSync(file)) {
         printError(`File not found: ${file}`);
@@ -328,7 +328,7 @@ export function registerLabelCommands(parent: Command) {
         printSuccess(
           `Labeling started: ${job.name} (${shortId(job.id)}) — est. ${formatCents(job.est_cost_cents)}. Runs in the cloud; no need to stay connected.`,
         );
-        console.log(`Follow progress with \`tt label watch ${shortId(job.id)}\`.`);
+        console.log(`Follow progress with \`tt cloud label watch ${shortId(job.id)}\`.`);
         return;
       }
 
@@ -338,7 +338,7 @@ export function registerLabelCommands(parent: Command) {
         `Labeling ${finished.status === "awaiting_review" ? "complete" : finished.status}: ${finished.labeled_count}/${finished.row_count} rows labeled.`,
       );
       console.log(
-        `Review with \`tt label rows ${shortId(job.id)} --status labeled\`, then \`tt label promote ${shortId(job.id)} --name <dataset-name>\`.`,
+        `Review with \`tt cloud label rows ${shortId(job.id)} --status labeled\`, then \`tt cloud label promote ${shortId(job.id)} --name <dataset-name>\`.`,
       );
     });
 
@@ -347,7 +347,7 @@ export function registerLabelCommands(parent: Command) {
     .description("Watch a labeling job until it is ready for review")
     .argument("<id>", "Labeling job ID (full UUID or 4+ char prefix)")
     .action(async (id: string) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const jobId = await resolveLabelingJobId(id, opts);
       const job = await watchJob(jobId, opts);
 
@@ -368,7 +368,7 @@ export function registerLabelCommands(parent: Command) {
     .option("-p, --page <n>", "Page number", "1")
     .option("--per-page <n>", "Results per page", "20")
     .action(async (cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const { data, meta } = await get<LabelingJob[]>(
         "/labeling-jobs",
         { page: cmdOpts.page, per_page: cmdOpts.perPage },
@@ -398,7 +398,7 @@ export function registerLabelCommands(parent: Command) {
     .description("Show labeling job details and review progress")
     .argument("<id>", "Labeling job ID (full UUID or 4+ char prefix)")
     .action(async (id: string) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const jobId = await resolveLabelingJobId(id, opts);
       const { data } = await get<LabelingJob & { counts: RowCounts }>(
         `/labeling-jobs/${jobId}`,
@@ -421,7 +421,7 @@ export function registerLabelCommands(parent: Command) {
     .option("-p, --page <n>", "Page number", "1")
     .option("--per-page <n>", "Results per page", "50")
     .action(async (id: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const jobId = await resolveLabelingJobId(id, opts);
       const query: Record<string, string> = {
         page: cmdOpts.page,
@@ -458,7 +458,7 @@ export function registerLabelCommands(parent: Command) {
     .option("--all", "Accept all unreviewed labeled rows")
     .option("--rows <indexes>", "Comma-separated row indexes (e.g. 0,3,12)")
     .action(async (id: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       if (!cmdOpts.all && !cmdOpts.rows) {
         printError("Provide --all or --rows <indexes>.");
         process.exit(1);
@@ -494,7 +494,7 @@ export function registerLabelCommands(parent: Command) {
     .argument("<id>", "Labeling job ID (full UUID or 4+ char prefix)")
     .requiredOption("--rows <indexes>", "Comma-separated row indexes (e.g. 0,3,12)")
     .action(async (id: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const jobId = await resolveLabelingJobId(id, opts);
       const indexes = parseIndexList(cmdOpts.rows);
       const rowIds = await resolveRowIds(jobId, indexes, opts);
@@ -517,7 +517,7 @@ export function registerLabelCommands(parent: Command) {
     .option("-o, --output <text>", "Replacement output text")
     .option("-f, --file <path>", "Read replacement output from a file")
     .action(async (id: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       if (!cmdOpts.output && !cmdOpts.file) {
         printError("Provide --output <text> or --file <path>.");
         process.exit(1);
@@ -543,7 +543,7 @@ export function registerLabelCommands(parent: Command) {
     .option("-d, --description <desc>", "Dataset description")
     .option("--include-unreviewed", "Also include unreviewed labeled rows")
     .action(async (id: string, cmdOpts) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const jobId = await resolveLabelingJobId(id, opts);
       const { data } = await post<{ id: string; name: string; row_count: number }>(
         `/labeling-jobs/${jobId}/promote`,
@@ -560,7 +560,7 @@ export function registerLabelCommands(parent: Command) {
         `Dataset created: ${data.name} (${shortId(data.id)}) — ${data.row_count} rows.`,
       );
       console.log(
-        `Start a run with \`tt runs start <spec-id> --dataset ${shortId(data.id)}\`.`,
+        `Start a run with \`tt cloud runs start <spec-id> --dataset ${shortId(data.id)}\`.`,
       );
     });
 
@@ -569,7 +569,7 @@ export function registerLabelCommands(parent: Command) {
     .description("Cancel a labeling job and release unused credits")
     .argument("<id>", "Labeling job ID (full UUID or 4+ char prefix)")
     .action(async (id: string) => {
-      const opts = parent.opts() as ClientOpts;
+      const opts = parent.optsWithGlobals() as ClientOpts;
       const jobId = await resolveLabelingJobId(id, opts);
       const { data } = await post<LabelingJob>(
         `/labeling-jobs/${jobId}/cancel`,

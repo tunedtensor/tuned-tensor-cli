@@ -34,6 +34,22 @@ export interface AgentSelection {
   thinking: AgentThinkingLevel;
 }
 
+export const MANAGED_AGENT_PROVIDER = "tunedtensor";
+export const MANAGED_AGENT_MODEL = "managed";
+export const MANAGED_AGENT_SELECTION: AgentSelection = {
+  provider: MANAGED_AGENT_PROVIDER,
+  model: MANAGED_AGENT_MODEL,
+  thinking: "off",
+};
+
+export function validateAccessToken(value: string): string {
+  const token = value.trim();
+  if (!token.startsWith("tt_") || token.length !== 51) {
+    throw new Error("Invalid TT access token format. Tokens start with tt_ and are 51 characters long.");
+  }
+  return token;
+}
+
 const CONFIG_FILE_NAME = "config.json";
 
 function getConfigPath(): string {
@@ -97,8 +113,14 @@ export function getAgentSelection(
 ): AgentSelection | undefined {
   const stored = readConfig().agent;
   const provider = env.TUNED_TENSOR_AGENT_PROVIDER || stored?.provider;
-  const model = env.TUNED_TENSOR_AGENT_MODEL || stored?.model;
-  const rawThinking = env.TUNED_TENSOR_AGENT_THINKING || stored?.thinking || "medium";
+  const model = env.TUNED_TENSOR_AGENT_MODEL
+    || (provider === MANAGED_AGENT_PROVIDER ? MANAGED_AGENT_MODEL : stored?.model);
+  if (!provider && !model && (env.TUNED_TENSOR_API_KEY || readConfig().api_key)) {
+    return { ...MANAGED_AGENT_SELECTION };
+  }
+  const rawThinking = env.TUNED_TENSOR_AGENT_THINKING
+    || (stored?.provider === provider ? stored?.thinking : undefined)
+    || (provider === MANAGED_AGENT_PROVIDER ? "off" : "medium");
   if (!AGENT_THINKING_LEVELS.includes(rawThinking as AgentThinkingLevel)) {
     throw new Error(
       "Agent thinking must be off, minimal, low, medium, high, xhigh, or max.",

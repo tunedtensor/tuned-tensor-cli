@@ -227,7 +227,7 @@ export function registerPipelineCommands(parent: Command): void {
       for (const warning of hostWarnings) printWarning(warning);
       const remote = plan.steps.find((step) => step.target !== "local");
       if (remote) {
-        throw new Error(`Step "${remote.id}" targets cloud execution. This CLI is local-only; rewrite that step to local or use --dry-run.`);
+        throw new Error(`Step "${remote.id}" targets cloud execution. Pipeline execution requires local targets; use tt cloud runs for hosted execution, or --dry-run to inspect this plan.`);
       }
       const input = await loadLocalRunInput(resolve(options.spec));
       if (isParsedFoundationPipeline(document) || input.kind === "foundation-spec") {

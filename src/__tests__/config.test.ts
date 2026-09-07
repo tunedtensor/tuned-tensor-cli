@@ -152,6 +152,30 @@ describe("config", () => {
   });
 
   describe("local agent model selection", () => {
+    it("needs no token for local workflows and automatically uses a saved TT token for managed inference", () => {
+      expect(configModule.getAgentSelection({})).toBeUndefined();
+      configModule.writeConfig({ api_key: "tt_saved" });
+      expect(configModule.getAgentSelection({})).toEqual({
+        provider: "tunedtensor", model: "managed", thinking: "off",
+      });
+    });
+
+    it("preserves an explicit BYO selection when a TT token is available", () => {
+      const agent = { provider: "openrouter", model: "vendor/new-model", thinking: "high" } as const;
+      configModule.writeConfig({ api_key: "tt_saved", agent });
+      expect(configModule.getAgentSelection({})).toEqual(agent);
+      expect(configModule.getAgentSelection({ TUNED_TENSOR_AGENT_PROVIDER: "tunedtensor" })).toEqual({
+        provider: "tunedtensor", model: "managed", thinking: "off",
+      });
+    });
+
+    it("automatically uses a TT environment token without saving a model selection", () => {
+      expect(configModule.getAgentSelection({ TUNED_TENSOR_API_KEY: "tt_env" })).toEqual({
+        provider: "tunedtensor", model: "managed", thinking: "off",
+      });
+      expect(configModule.readConfig()).toEqual({});
+    });
+
     it("stores only non-secret metadata and applies environment overrides", () => {
       configModule.updateConfig({
         agent: {

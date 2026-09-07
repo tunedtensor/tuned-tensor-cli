@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+## [0.15.0] - 2026-09-07
+
+### Changed
+
+- Use one local `tt` agent and CLI for local workflows and explicit `tt cloud`
+  operations. Local training, inspection, and serving need no TT access token.
+- `tt auth login` enables managed agent inference with the same TT token used
+  for cloud access. The server selects the model; no OpenRouter key or model
+  selection is required. Existing BYO selections are preserved, and BYO
+  OpenRouter users can choose model IDs beyond the bundled catalog.
+- Restore cloud specs, datasets, labeling, runs, and models under `tt cloud`,
+  plus account commands, `tt publish`, and published local-report archiving.
+  `tt usage` reports managed inference allowance and usage coverage;
+  `tt balance` reports cloud training credits.
+- Align onboarding, help, runtime messages, and documentation with the unified
+  TT interface. Retain legacy aliases and local provider IDs for compatibility.
+
+### Fixed
+
+- Save the selected API origin alongside the TT token during login, so later
+  managed requests use the same deployment. Honor inherited account options
+  and explicit command overrides when publishing local evidence.
+- Keep TT tokens out of BYO provider routing and provider files. The reserved
+  managed provider cannot inherit custom endpoint or model overrides.
+- Bind cloud spec approvals to the TT credential and API origin used during
+  preparation, so switching accounts or deployments cannot redirect a saved
+  proposal. Unbound legacy proposals require fresh preparation.
+- Correct local serving documentation to require Linux and NVIDIA CUDA for
+  the packaged vLLM runtime; CPU evaluation remains available.
+
 ## [0.14.0] - 2026-09-05
 
 ### Changed

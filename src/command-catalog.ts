@@ -3,7 +3,9 @@ export type WorkflowMode = "local";
 export type CommandGroup =
   | "Workflow"
   | "Inspect"
-  | "Serving";
+  | "Serving"
+  | "Account"
+  | "Cloud";
 
 export interface CatalogCommand {
   path: string;
@@ -51,6 +53,51 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   { path: "status", description: "Show local project context.", group: "Inspect", modes: LOCAL },
   { path: "agent models", description: "List provider models for the laptop-local TT agent.", group: "Inspect", modes: LOCAL },
   { path: "agent configure", description: "Select the laptop-local TT agent model.", group: "Inspect", modes: LOCAL },
+  { path: "cloud specs list", description: "List behaviour specs", group: "Cloud", modes: LOCAL },
+  { path: "cloud specs get", description: "Show spec details", group: "Cloud", modes: LOCAL },
+  { path: "cloud specs create", description: "Create a behaviour spec", group: "Cloud", modes: LOCAL },
+  { path: "cloud specs update", description: "Update a behaviour spec", group: "Cloud", modes: LOCAL },
+  { path: "cloud specs delete", description: "Delete a behaviour spec", group: "Cloud", modes: LOCAL },
+  { path: "cloud datasets list", description: "List datasets", group: "Cloud", modes: LOCAL },
+  { path: "cloud datasets get", description: "Show dataset details", group: "Cloud", modes: LOCAL },
+  { path: "cloud datasets upload", description: "Upload a JSONL dataset file", group: "Cloud", modes: LOCAL },
+  { path: "cloud datasets delete", description: "Delete a dataset", group: "Cloud", modes: LOCAL },
+  { path: "cloud label upload", description: "Upload unlabeled inputs (.jsonl or .csv) and start a labeling job", group: "Cloud", modes: LOCAL },
+  { path: "cloud label watch", description: "Watch a labeling job until it is ready for review", group: "Cloud", modes: LOCAL },
+  { path: "cloud label list", description: "List labeling jobs", group: "Cloud", modes: LOCAL },
+  { path: "cloud label status", description: "Show labeling job details and review progress", group: "Cloud", modes: LOCAL },
+  { path: "cloud label rows", description: "List rows in a labeling job", group: "Cloud", modes: LOCAL },
+  { path: "cloud label accept", description: "Accept teacher-labeled rows", group: "Cloud", modes: LOCAL },
+  { path: "cloud label reject", description: "Reject rows so they are excluded from promotion", group: "Cloud", modes: LOCAL },
+  { path: "cloud label edit", description: "Replace a row's output with your own", group: "Cloud", modes: LOCAL },
+  { path: "cloud label promote", description: "Promote reviewed rows into a validated dataset", group: "Cloud", modes: LOCAL },
+  { path: "cloud label cancel", description: "Cancel a labeling job and release unused credits", group: "Cloud", modes: LOCAL },
+  { path: "cloud runs list", description: "List runs", group: "Cloud", modes: LOCAL },
+  { path: "cloud runs get", description: "Show run details and eval results", group: "Cloud", modes: LOCAL },
+  { path: "cloud runs estimate", description: "Estimate run cost and duration before starting", group: "Cloud", modes: LOCAL },
+  { path: "cloud runs start", description: "Start a new run for a behaviour spec", group: "Cloud", modes: LOCAL },
+  { path: "cloud runs cancel", description: "Cancel a running run", group: "Cloud", modes: LOCAL },
+  { path: "cloud runs watch", description: "Watch a run until it completes", group: "Cloud", modes: LOCAL },
+  { path: "cloud runs diagnose", description: "Show live run diagnostics", group: "Cloud", modes: LOCAL },
+  { path: "cloud runs report", description: "Show run metrics and side-by-side eval output insights", group: "Cloud", modes: LOCAL },
+  { path: "cloud models base", description: "List supported base models", group: "Cloud", modes: LOCAL },
+  { path: "cloud models list", description: "List fine-tuned models", group: "Cloud", modes: LOCAL },
+  { path: "cloud models get", description: "Show model details", group: "Cloud", modes: LOCAL },
+  { path: "cloud models download", description: "Download a fine-tuned model artifact", group: "Cloud", modes: LOCAL },
+  { path: "cloud models export", description: "Export a fine-tuned model to GGUF and (optionally) package it for Ollama", group: "Cloud", modes: LOCAL },
+  { path: "cloud models setup-runtime", description: "Install an isolated Python runtime for local model serving", group: "Cloud", modes: LOCAL },
+  { path: "cloud models serve", description: "Serve a downloaded model with an OpenAI-compatible local API", group: "Cloud", modes: LOCAL },
+  { path: "cloud models delete", description: "Delete a model", group: "Cloud", modes: LOCAL },
+  { path: "cloud push", description: "Push a local spec to the cloud.", group: "Cloud", modes: LOCAL },
+  { path: "cloud runs archive", description: "Archive an inactive published local run report.", group: "Cloud", modes: LOCAL },
+  { path: "auth login", description: "Save a TT access token for managed inference and cloud access.", group: "Account", modes: LOCAL },
+  { path: "auth logout", description: "Remove the stored TT access token.", group: "Account", modes: LOCAL },
+  { path: "auth status", description: "Show TT account authentication.", group: "Account", modes: LOCAL },
+  { path: "balance", description: "Show cloud training credits and transactions.", group: "Account", modes: LOCAL },
+  { path: "topup", description: "Add cloud training credits.", group: "Account", modes: LOCAL },
+  { path: "usage", description: "Show managed agent allowance and token usage.", group: "Account", modes: LOCAL },
+  { path: "publish", description: "Publish local run evidence to the dashboard.", group: "Account", modes: LOCAL },
+
   { path: "agent status", description: "Show the laptop-local TT agent selection.", group: "Inspect", modes: LOCAL },
 ] as const;
 
@@ -63,8 +110,8 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { path: "/help", description: "Show commands; add a word to filter." },
   { path: "/status", description: "Show lightweight workflow status." },
   { path: "/context", description: "Show the current project context." },
-  { path: "/model", description: "Show or change the TT agent provider and model." },
-  { path: "/login", description: "Save a provider API key; asks which provider if omitted." },
+  { path: "/model", description: "Show or change managed inference or your own provider/model." },
+  { path: "/login", description: "Save a TT access token (tunedtensor) or a provider API key." },
   { path: "/cd", description: "Change the shell's working directory." },
   { path: "/clear", description: "Clear the terminal." },
   { path: "/exit", description: "Exit the TT shell." },

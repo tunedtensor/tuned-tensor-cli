@@ -31,6 +31,7 @@ import {
   type AgentProviderChoice,
 } from "./agent-control.js";
 import { unknownAgentProviderMessage, type AgentModelRuntime } from "./agent-model.js";
+import { MANAGED_AGENT_PROVIDER } from "./config.js";
 import { promptHiddenInput, promptVisibleInput } from "./secret-prompt.js";
 
 export type { WorkflowMode } from "./command-catalog.js";
@@ -521,7 +522,7 @@ export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
     chalk.dim(
       configured
         ? "Ask TT anything. Known commands run directly."
-        : "Use /model to choose a provider and model. Workflow commands work now.",
+        : "Use /login tunedtensor for managed inference, or /model for your own provider. Workflow commands work now.",
     ),
   ];
   return `${lines.join("\n")}\n\n`;
@@ -690,7 +691,7 @@ export class TunedTensorShellSession {
       }
       lines.push(chalk.dim("  Other providers: /login <id> or /model <id>"));
       if (providers.some((choice) => !choice.authenticated)) {
-        lines.push(chalk.dim("  Use /login <provider> to save a key."));
+        lines.push(chalk.dim("  Use /login tunedtensor for your TT token, or /login <provider> for a BYO key."));
       }
     }
 
@@ -823,11 +824,16 @@ export class TunedTensorShellSession {
           throw new ShellParseError("Provider login needs an interactive tt session.");
         }
         const label = provider.name !== provider.id ? provider.name : provider.id;
-        const apiKey = await this.io.promptSecret(`${label} API key: `);
-        const result = await loginAgentProvider(runtime, provider.id, apiKey);
+        const credentialLabel = provider.id === MANAGED_AGENT_PROVIDER ? "TT access token" : `${label} API key`;
+        const apiKey = await this.io.promptSecret(`${credentialLabel}: `);
+        const result = await loginAgentProvider(runtime, provider.id, apiKey, {
+          baseUrl: this.env.TUNED_TENSOR_URL,
+        });
         await this.refreshContext();
         this.io.write(
-          `${successMark()} Saved ${result.provider} credentials. Chat and /model can use this provider now.\n`,
+          result.provider === MANAGED_AGENT_PROVIDER
+            ? `${successMark()} TT access token saved for managed inference and cloud operations.\n`
+            : `${successMark()} Saved ${result.provider} credentials. Chat and /model can use this provider now.\n`,
         );
         return "continue";
       }

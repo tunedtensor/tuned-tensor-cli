@@ -3,7 +3,7 @@ import { DEFAULT_ARTIFACT_ROOT } from "../paths.js";
 import { canonicalizeTrainingModel } from "./model-registry.js";
 
 /**
- * TT Local deliberately has one training contract today: text supervised
+ * The local adapter training contract uses text supervised
  * fine-tuning with a LoRA adapter. Additional methods should only be added
  * after they have their own end-to-end CUDA acceptance test.
  */

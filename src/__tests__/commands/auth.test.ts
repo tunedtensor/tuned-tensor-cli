@@ -42,6 +42,15 @@ const VALID_KEY = "tt_" + "a".repeat(48);
 
 describe("auth commands", () => {
   describe("auth login", () => {
+    it("stores the selected API origin with the token for later managed requests", async () => {
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      await buildProgram().parseAsync([
+        "node", "tt", "--base-url", "https://staging.example", "auth", "login", VALID_KEY,
+      ]);
+      expect(config.readConfig()).toMatchObject({ api_key: VALID_KEY, base_url: "https://staging.example" });
+      expect(config.getBaseUrl()).toBe("https://staging.example");
+    });
+
     it("stores a valid API key passed as argument", async () => {
       const spy = vi.spyOn(console, "log").mockImplementation(() => {});
       const program = buildProgram();
