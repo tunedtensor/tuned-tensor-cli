@@ -1,5 +1,6 @@
+import { readFileSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LocalRunnerConfig } from "./contracts.js";
 import {
@@ -73,12 +74,19 @@ function buildModelServerLaunch(args: {
   baseModel: string;
   artifactUri?: string;
   config: LocalRunnerConfig;
+  foundation?: { checkpoint: string; tokenizer: string; contextLength: number };
   options?: LocalModelServeOptions;
 }): LocalModelServerLaunch {
   const options = args.options ?? {};
   const device = options.device ?? args.config.evaluation.inference.device;
   if (device !== "cuda") throw new Error("The pinned vLLM serving runtime requires CUDA; CPU serving is not supported.");
-  const contextLength = boundedNumber("contextLength", options.contextLength ?? 16384, 512, 131072, true);
+  const contextLength = boundedNumber(
+    "contextLength", options.contextLength ?? args.foundation?.contextLength ?? 16384,
+    args.foundation ? 1 : 512, 131072, true,
+  );
+  if (args.foundation && contextLength > args.foundation.contextLength) {
+    throw new Error("Context length exceeds the foundation checkpoint sequence_length.");
+  }
   const gpuMemoryUtilization = boundedNumber("gpuMemoryUtilization", options.gpuMemoryUtilization ?? 0.8, 0.05, 0.95);
   const host = options.host ?? "127.0.0.1";
   const remote = !isLoopbackHost(host);
@@ -91,7 +99,7 @@ function buildModelServerLaunch(args: {
     throw new Error("Non-loopback serving requires --api-key-env with a populated environment variable.");
   }
   const port = boundedNumber("port", options.port ?? 8000, 1, 65_535, true);
-  const maxTokens = boundedNumber("maxTokens", options.maxTokens ?? 512, 1, 8192, true);
+  const maxTokens = boundedNumber("maxTokens", options.maxTokens ?? Math.min(512, contextLength), 1, 8192, true);
   const temperature = boundedNumber("temperature", options.temperature ?? 0, 0, 5);
   const topP = boundedNumber("topP", options.topP ?? 1, 0, 1);
   const maxConcurrentRequests = boundedNumber(
@@ -107,7 +115,7 @@ function buildModelServerLaunch(args: {
   const recordedBaseModelPath = options.baseModelArtifactUri
     ? localArtifactPath(options.baseModelArtifactUri)
     : undefined;
-  const configuredBaseModelPath = args.config.paths.baseModel
+  const configuredBaseModelPath = !args.foundation && args.config.paths.baseModel
     ? resolve(args.config.paths.baseModel)
     : undefined;
   if (
@@ -121,7 +129,7 @@ function buildModelServerLaunch(args: {
     );
   }
   const localBaseModelPath = recordedBaseModelPath ?? configuredBaseModelPath;
-  const requestedBaseModelRevision = resolveRequestedBaseModelRevision(
+  const requestedBaseModelRevision = args.foundation ? undefined : resolveRequestedBaseModelRevision(
     args.baseModel,
     options.baseModelRevision,
   );
@@ -141,7 +149,11 @@ function buildModelServerLaunch(args: {
       TT_MODEL_NAME: args.modelName,
       TT_CONTEXT_LENGTH: String(contextLength),
       TT_GPU_MEMORY_UTILIZATION: String(gpuMemoryUtilization),
-      TT_MODEL_LOADER: resolveModelLoader(args.baseModel),
+      TT_MODEL_LOADER: args.foundation ? "foundation" : resolveModelLoader(args.baseModel),
+      ...(args.foundation ? {
+        TT_FOUNDATION_CHECKPOINT: args.foundation.checkpoint,
+        TT_FOUNDATION_TOKENIZER: args.foundation.tokenizer,
+      } : {}),
       TT_HOST: host,
       TT_PORT: String(port),
       TT_DEVICE: device,
@@ -254,5 +266,24 @@ export async function serveLocalModel(launch: LocalModelServerLaunch): Promise<v
         reject(new Error(`Local model server exited with code ${code ?? "unknown"}.`));
       }
     });
+  });
+}
+
+export function buildFoundationModelServerLaunch(args: {
+  checkpoint: string;
+  tokenizer: string;
+  config: LocalRunnerConfig;
+  options?: LocalModelServeOptions;
+}): LocalModelServerLaunch {
+  const checkpoint = resolve(args.checkpoint);
+  const tokenizer = resolve(args.tokenizer);
+  for (const path of [join(checkpoint, "model.safetensors"), tokenizer]) {
+    if (!statSync(path).isFile()) throw new Error(`Expected foundation artifact file: ${path}`);
+  }
+  const metadata = JSON.parse(readFileSync(join(checkpoint, "config.json"), "utf8"));
+  const contextLength = boundedNumber("sequence_length", metadata.sequence_length, 1, 131072, true);
+  return buildModelServerLaunch({
+    modelName: "foundation", baseModel: "foundation", config: args.config, options: args.options,
+    foundation: { checkpoint, tokenizer, contextLength },
   });
 }

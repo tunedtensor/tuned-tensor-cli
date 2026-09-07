@@ -75,7 +75,7 @@ test("top-level help and version are available without loading project state", a
     assert.equal(help.status, 0);
     assert.match(help.stdout, /^Usage: tt <command> \[options\]/);
     assert.match(help.stdout, /-V, --version/);
-    assert.match(help.stdout, /serve <model-id\|active\|base>/);
+    assert.match(help.stdout, /serve <model-id\|active\|base\|foundation>/);
     assert.doesNotMatch(
       help.stdout,
       /\blabel\b|\bspecs\b|dashboard|rebuild-index|\breconcile\b|parent-model|model-artifact|--stage|--run-id|--detach|\bwatch\b|\bcancel\b/i,
@@ -602,5 +602,35 @@ test("stored models are verified before a serving launch plan is produced", asyn
     const changed = runCli(["models", "verify", modelId], root);
     assert.equal(changed.status, 1);
     assert.match(changed.stderr, /Artifact integrity verification failed/);
+  });
+});
+
+test("foundation serving prints a launch plan without starting vLLM", async () => {
+  await withTemporaryProject(async (root) => {
+    const checkpoint = join(root, "foundation");
+    await mkdir(checkpoint);
+    await writeFile(join(checkpoint, "config.json"), JSON.stringify({ sequence_length: 128 }));
+    await writeFile(join(checkpoint, "model.safetensors"), "fixture");
+    const tokenizer = join(root, "tokenizer.json");
+    await writeFile(tokenizer, "{}");
+    const result = runCli(["serve", "foundation", "--checkpoint", checkpoint,
+      "--tokenizer", tokenizer, "--print-command"], root);
+    assert.equal(result.status, 0, result.stderr);
+    const plan = JSON.parse(result.stdout);
+    assert.equal(plan.model_id, "foundation");
+    assert.equal(plan.checkpoint, checkpoint);
+    assert.equal(plan.tokenizer, tokenizer);
+    const client = runCli(["serve", "foundation", "--checkpoint", checkpoint,
+      "--tokenizer", tokenizer, "--print-client-config", "pi"], root);
+    assert.equal(client.status, 0, client.stderr);
+    assert.deepEqual(JSON.parse(client.stdout).providers["tt-local"].models.map((model: { id: string }) => model.id),
+      ["foundation"]);
+    const oversized = runCli(["serve", "foundation", "--checkpoint", checkpoint,
+      "--tokenizer", tokenizer, "--context-length", "129", "--print-command"], root);
+    assert.notEqual(oversized.status, 0);
+    assert.match(oversized.stderr, /exceeds/);
+    const missing = runCli(["serve", "foundation", "--print-command"], root);
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /requires --checkpoint/);
   });
 });

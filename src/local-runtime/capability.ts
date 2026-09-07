@@ -252,10 +252,9 @@ export function evaluateCapabilities(inventory: HostInventory): CapabilityReport
     inference: hasCuda
       ? inference
       : { ...inference, reason: `CPU eval: ${inference.reason}` },
-    serve: {
-      status: "not_possible",
-      reason: "tt serve cannot host foundation checkpoints yet",
-    },
+    serve: hasCuda && inventory.os.platform === "linux"
+      ? inference
+      : { status: "not_possible", reason: "Foundation serving requires Linux and an NVIDIA CUDA GPU" },
   };
 
   return { cuda_available: hasCuda, gpu, adapters, foundation, notes };
@@ -273,7 +272,7 @@ export function formatCapabilitySummary(report: CapabilityReport): string {
   return [
     `GPU ${gpuLabel}, CUDA ${report.cuda_available ? "yes" : "no"}`,
     `Adapter: ${adapterBits.join("; ")}`,
-    `Foundation: train ${report.foundation.train.status}, suggested max depth ${report.foundation.suggested_max_depth}; serve not supported`,
+    `Foundation: train ${report.foundation.train.status}, suggested max depth ${report.foundation.suggested_max_depth}; serve ${report.foundation.serve.status}`,
   ].join(". ");
 }
 

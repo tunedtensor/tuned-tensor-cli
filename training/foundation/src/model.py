@@ -132,6 +132,8 @@ def generate(
 def save_model(model: FoundationGPT, directory: str | Path) -> None:
     destination = ensure_private_directory(directory)
     tensors = {key: value.detach().cpu().contiguous() for key, value in model.state_dict().items()}
+    # CPU tensors can still alias the tied embedding after .cpu().
+    tensors["lm_head.weight"] = tensors["lm_head.weight"].clone()
     model_path = destination / "model.safetensors"
     save_file(tensors, str(model_path))
     make_private_file(model_path)

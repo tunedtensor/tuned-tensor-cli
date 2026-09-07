@@ -443,3 +443,30 @@ the remaining steps toward the full conversational product promise.
 ## License
 
 Apache-2.0
+
+### Serve a foundation checkpoint
+
+Serve a completed pretrain, fine-tune, or RL model directory with its training tokenizer:
+
+```sh
+tt serve foundation --checkpoint /path/to/run/pretrain --tokenizer /path/to/run/tokenize/tokenizer.json
+```
+
+Use the model artifact directory containing `config.json` and `model.safetensors`,
+not a resumable optimizer checkpoint. The API model name is `foundation`.
+`--spec tunedtensor.json` applies a foundation spec's system prompt. Existing
+port, authentication, sampling, streaming, and client configuration options apply.
+The context limit defaults to the checkpoint's `sequence_length`; a smaller
+`--context-length` is allowed. Foundation serving supports text completions and
+chat with system/user/assistant messages, without tool-call parsing.
+
+TT exports the weights and tokenizer to a temporary GPT-2 snapshot and uses the
+existing pinned vLLM server on Linux/CUDA. Training artifacts are unchanged; the
+temporary export is removed when the server exits. Export requires temporary
+disk space for a copy of the model weights.
+
+Export parity tests run on CPU as part of `npm test`. To run them directly:
+
+```sh
+uv run --frozen --project training/foundation --group test python -m unittest discover -s training/foundation/tests -p test_foundation_export.py
+```

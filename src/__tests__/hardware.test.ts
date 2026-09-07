@@ -72,6 +72,7 @@ describe("hardware capability verdicts", () => {
     expect(qwen.train.status).toBe("ready");
     expect(muse.train.status).toBe("not_possible");
     expect(report.foundation.train.status).toBe("ready");
+    expect(report.foundation.serve.status).toBe("ready");
     expect(report.foundation.suggested_max_depth).toBeGreaterThan(2);
   });
 

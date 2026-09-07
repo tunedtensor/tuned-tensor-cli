@@ -407,7 +407,7 @@ function renderHardware(value: Record<string, unknown>): void {
   );
   if (foundation) {
     printDetail([
-      ["Foundation serve", text(record(foundation.serve)?.reason) ?? "cannot host yet"],
+      ["Foundation serve", text(record(foundation.serve)?.reason) ?? "unknown"],
     ]);
   }
   const notes = Array.isArray(capabilities?.notes)
