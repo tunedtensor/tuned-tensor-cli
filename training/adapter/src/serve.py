@@ -90,7 +90,7 @@ def build_vllm_args(model_source: str, adapter_path: str | None, temp_dir: Path)
             raise ValueError("Serving requires an unambiguous string chat template.")
         # Literal data, never prompt text interpolated as Jinja source. Preserve
         # tool calls/results verbatim while merging leading system context.
-        prefix = "{%- set tt = namespace(system=" + json.dumps(prompt) + ", history=[]) -%}"
+        prefix = "{%- set tt = namespace(system=" + json.dumps(prompt, ensure_ascii=False) + ", history=[]) -%}"
         prefix += "{%- for message in messages -%}{%- if message.role == 'system' -%}"
         prefix += "{%- set tt.system = tt.system + '\\n\\n' + message.content -%}"
         prefix += "{%- else -%}{%- set tt.history = tt.history + [message] -%}{%- endif -%}{%- endfor -%}"

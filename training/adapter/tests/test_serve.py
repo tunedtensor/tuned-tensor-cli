@@ -96,17 +96,23 @@ class UpstreamLaunchTests(unittest.TestCase):
             root = Path(tmp)
             source = root / "snapshot"
             source.mkdir()
-            original = "{{ messages | tojson }}"
-            (source / "chat_template.jinja").write_text(original)
-            owner = 'Owner: {{ dangerous }} "quoted"'
+            # Render raw content too: JSON round-tripping hides split surrogates.
+            original = "{{ messages[0].content }}\n{{ messages | tojson }}"
+            (source / "chat_template.jinja").write_text(original, encoding="utf-8")
+            owner = 'Owner: 😀 𝄞 漢字 {{ dangerous }} {% raw %} "quoted" \\path\nNext line'
             with patch.dict(os.environ, {"TT_BASE_MODEL": "Qwen/Qwen3.5-2B", "TT_MODEL_NAME": "base", "TT_SYSTEM_PROMPT": owner}, clear=True):
                 args = serve.build_vllm_args(str(source), None, root)
             template = Path(args[args.index("--chat-template") + 1]).read_text()
             history = [{"role": "system", "content": "Client context"}, {"role": "user", "content": "hi"},
                 {"role": "assistant", "tool_calls": [{"id": "call1", "type": "function", "function": {"name": "read", "arguments": "{}"}}]},
                 {"role": "tool", "tool_call_id": "call1", "content": "result"}]
-            messages = json.loads(Environment().from_string(template).render(messages=history))
-            self.assertEqual(messages[0], {"role": "system", "content": owner + "\n\nClient context"})
+            rendered = Environment().from_string(template).render(messages=history)
+            raw_system, serialized = rendered.rsplit("\n", 1)
+            expected_system = owner + "\n\nClient context"
+            self.assertEqual(raw_system.encode("utf-8"), expected_system.encode("utf-8"))
+            self.assertEqual(raw_system, expected_system)
+            messages = json.loads(serialized)
+            self.assertEqual(messages[0], {"role": "system", "content": expected_system})
             self.assertEqual(messages[1:], history[1:])
             self.assertEqual((source / "chat_template.jinja").read_text(), original)
 
