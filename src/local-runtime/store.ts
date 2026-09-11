@@ -61,7 +61,7 @@ export interface LocalModelRecord {
   run_id: string;
   behavior_spec_id: string;
   name: string;
-  provider: "local-uv";
+  provider: "local-uv" | "aws-ssh";
   base_model: string;
   artifact_uri: string;
   artifact_dir: string;

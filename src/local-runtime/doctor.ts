@@ -1,3 +1,4 @@
+import { checkAwsGpu, runGpuProcess } from "./gpu-executor.js";
 import { constants } from "node:fs";
 import { access, lstat, mkdir, statfs, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -360,7 +361,7 @@ export async function runDoctor(
     checks.push(placeholderSpecCheck(request));
     resolveTrainingModel(request.spec_snapshot.base_model);
   }
-  const pythonPlans = foundationSpec && !config.dryRun
+  const pythonPlans = config.gpu ? [] : foundationSpec && !config.dryRun
     ? [foundationPythonProbePlan(foundationSpec.foundation.bf16 !== false)]
     : buildDoctorPythonPlans(config);
   if (pythonPlans.length > 0) {
@@ -405,7 +406,25 @@ export async function runDoctor(
   }
 
   const device = config.evaluation.inference.device;
-  if (!config.dryRun) {
+  if (config.gpu && !config.dryRun) {
+    try {
+      await checkAwsGpu(config.gpu);
+      const localUv = await runCommand("uv", ["--version"]);
+      checks.push({ name: "uv", ok: localUv.code === 0, message: localUv.code === 0 ? firstLine(localUv.stdout) : "Install uv locally for model preparation and tokenization." });
+      const plans = foundationSpec
+        ? [foundationPythonProbePlan(foundationSpec.foundation.bf16 !== false)]
+        : buildDoctorPythonPlans(config);
+      for (const plan of plans) {
+        const result = await runGpuProcess({ gpu: config.gpu, runtime: foundationSpec ? "foundation" : "adapter",
+          files: [], command: plan.command, commandArgs: plan.args, env: plan.env,
+          stage: "gpu_check", timeoutMs: 1_800_000 });
+        if (result.exitCode !== 0) throw new Error(`Remote Python/CUDA check failed: ${result.stderr}`);
+      }
+      checks.push({ name: "aws-gpu", ok: true, message: `GPU execution on ${config.gpu.instanceId}; orchestration stays local.` });
+    } catch (error) {
+      checks.push({ name: "aws-gpu", ok: false, message: error instanceof Error ? error.message : String(error) });
+    }
+  } else if (!config.dryRun) {
     const queried = await runCommand("nvidia-smi", [
       "--query-gpu=name,driver_version",
       "--format=csv,noheader",

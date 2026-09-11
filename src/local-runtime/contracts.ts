@@ -203,7 +203,7 @@ export const comparisonReportSchema = z.object({
 }).strict();
 
 export const trainingReportSchema = z.object({
-  provider: z.literal("local-uv"),
+  provider: z.enum(["local-uv", "aws-ssh"]),
   training_job_name: z.string(),
   model_artifact_uri: z.string().optional(),
   base_model_artifact_uri: z.string().optional(),
@@ -299,6 +299,16 @@ const evaluationConfigSchema = z.object({
 }).strict();
 
 export const localRunnerConfigSchema = z.object({
+  gpu: z.object({
+    provider: z.literal("aws"),
+    instanceId: z.string().regex(/^i-[a-f0-9]{8,17}$/),
+    profile: z.string().min(1).optional(),
+    region: z.string().min(1).optional(),
+    user: z.string().regex(/^[a-z_][a-z0-9_-]*$/i),
+    identityFile: z.string().min(1).optional(),
+    privateIp: z.boolean().default(false),
+    maxSeconds: z.number().int().min(60).max(604800).default(86400),
+  }).strict().optional(),
   storeRoot: z.string().optional(),
   artifactRoot: z.string().default(DEFAULT_ARTIFACT_ROOT),
   dryRun: z.boolean().default(false),

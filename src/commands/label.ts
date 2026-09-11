@@ -560,7 +560,7 @@ export function registerLabelCommands(parent: Command) {
         `Dataset created: ${data.name} (${shortId(data.id)}) — ${data.row_count} rows.`,
       );
       console.log(
-        `Start a run with \`tt cloud runs start <spec-id> --dataset ${shortId(data.id)}\`.`,
+        "Export the dataset for use with tt pipeline run and optional AWS GPU configuration.",
       );
     });
 

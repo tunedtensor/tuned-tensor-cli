@@ -38,7 +38,7 @@ Do not request or reveal Tuned Tensor or model-provider credentials. You have no
 async function systemPrompt(cloudEnabled: boolean): Promise<string> {
   const host = formatAgentHostBlock(await readHardwareSnapshot());
   const account = cloudEnabled
-    ? "Account tools inspect cloud specs, runs, models, balance, transactions, and managed agent usage. Cloud spec mutations only prepare proposals for /approve; real cloud runs require the user to invoke `tt cloud runs start` directly. Never confuse cloud resources with local resources."
+    ? "Account tools inspect cloud specs, runs, models, balance, transactions, and managed agent usage. Cloud spec mutations only prepare proposals for /approve; training uses `tt pipeline run` with optional user-owned AWS GPU configuration. Hosted training submission is retired. Never confuse cloud resources with local resources."
     : "No TT access token is configured, so account and cloud tools are unavailable. The user can run `tt auth login` or /login tunedtensor to enable them.";
   return `${SYSTEM_PROMPT}\n${account}\nYou have no general filesystem tools. Workspace-scoped capabilities can prepare one new validated spec folder or a sealed local pipeline dry-run; both still require /approve.\n${host}`;
 }

@@ -23,8 +23,9 @@ in the cloud. Cloud account operations always require a TT access token.
 ## Unified commands
 
 Local workflows remain the default: `tt pipeline run`, `tt runs list`,
-`tt models list`, and `tt serve`. Cloud workflows are explicit:
-`tt cloud runs start`, `tt cloud runs list`, and `tt cloud models list`.
+`tt models list`, and `tt serve`. GPU processes can use an existing instance in your AWS account through
+[`gpu` configuration](docs/local-runtime/aws-gpu.md). `tt cloud runs list` and
+`tt cloud models list` access existing account records.
 `tt usage` reports managed agent allowance and usage; `tt balance` reports
 cloud training credits. `tt publish` uploads local run evidence to the dashboard.
 
@@ -283,8 +284,9 @@ When `--config` is omitted, `pipeline run` uses `local-runner.json` beside the
 selected spec when that file exists.
 
 `--only` and `--skip` preserve dependency safety: a selected step cannot refer
-to an omitted predecessor. Cloud-targeted pipeline steps can be inspected with `--dry-run`; actual
-cloud execution uses `tt cloud runs`, described below. Foundation documents are local-only. The TT agent may describe,
+to an omitted predecessor. Keep step targets local and configure `gpu` in
+`local-runner.json` to execute GPU work on your AWS instance. Adapter and
+foundation workflows use the same local pipeline. The TT agent may describe,
 validate, and prepare a sealed pipeline action; only deterministic `/approve`
 handling can execute it.
 
@@ -304,8 +306,6 @@ selection continues to work while you operate cloud runs with that token.
 ```bash
 tt auth login
 tt cloud push --file tunedtensor.json
-tt cloud runs estimate <spec-id>
-tt cloud runs start <spec-id>
 tt cloud runs watch <run-id>
 tt cloud runs report <run-id>
 tt cloud runs list
@@ -316,17 +316,16 @@ tt balance
 
 Use the spec ID returned by `push`. `tt cloud specs`, `tt cloud datasets`,
 `tt cloud label`, and `tt cloud models` expose the corresponding account
-operations; each command's `--help` documents its arguments. Cloud foundation
-training and dispatching cloud-targeted pipeline JSON are not supported;
-`tt cloud runs` uses the hosted adapter workflow.
+operations; each command's `--help` documents its arguments. Hosted training
+submission is retired. Use [your AWS GPU](docs/local-runtime/aws-gpu.md) with
+`tt pipeline run`; historical cloud reports remain accessible.
 
 With a TT token, the local agent can inspect cloud resources, run reports,
 balances, transactions, and managed usage. It can prepare cloud spec edits for
 `/approve`. Those proposals show the API origin and remain bound to the token
 and origin used during preparation. After changing either, return to the
-original account and origin or prepare a new proposal. Starting or cancelling
-cloud training remains an explicit direct
-CLI command. Without a TT token these account tools are unavailable, while
+original account and origin or prepare a new proposal. Cancelling older
+hosted runs remains an explicit CLI command. Without a TT token these account tools are unavailable, while
 local workflow commands and BYO inference continue to work.
 
 `tt usage` reports the server-configured daily managed inference allowance.

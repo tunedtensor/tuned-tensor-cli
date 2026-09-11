@@ -255,6 +255,7 @@ export function parseLocalRunnerConfig(
   };
   return {
     ...config,
+    gpu: config.gpu ? { ...config.gpu, identityFile: configPathValue(config.gpu.identityFile) } : undefined,
     artifactRoot: configPathValue(config.artifactRoot)!,
     storeRoot: configPathValue(config.storeRoot),
     paths: {
@@ -1374,8 +1375,8 @@ async function runTrainStage(args: {
     request: args.prepared.request,
     status: "training",
     stage: "training",
-    message: args.config.dryRun ? "Recording dry-run training result." : "Launching local training process.",
-    details: { training_backend: "local-uv", dry_run: args.config.dryRun },
+    message: args.config.dryRun ? "Recording dry-run training result." : args.config.gpu ? "Launching training on your AWS GPU." : "Launching local training process.",
+    details: { training_backend: args.config.gpu && !args.config.dryRun ? "aws-ssh" : "local-uv", dry_run: args.config.dryRun },
   });
   const training = await launchProcessTraining({
     request: args.prepared.request,
