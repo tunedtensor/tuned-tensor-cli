@@ -4,6 +4,10 @@ The foundation engine can run recoverable, single-GPU pretraining from `.txt`
 files or JSONL shards whose rows contain a string `text` field. Keep training
 and validation data in different files or directories.
 
+The commands below also support an [AWS GPU](aws-gpu.md) configured in the
+adjacent `local-runner.json`. The CLI and tokenizer still run locally; the
+local machine must stay awake and connected throughout the pipeline.
+
 ## Spec
 
 The long-run fields live under `foundation` in `tunedtensor.json`:
@@ -69,11 +73,22 @@ SIGINT or SIGTERM requests a step-boundary checkpoint. The CLI allows up to two
 minutes for that checkpoint before forcibly stopping the process. SIGKILL or a
 power loss falls back to the most recent periodic checkpoint.
 
+With AWS execution, checkpoints remain in remote staging during pretraining
+and are downloaded when the process ends or cancellation succeeds. The
+configured `checkpoint_backup_dir` is mapped into that same remote staging
+tree, then copied back to its local destination; it is not a live backup to
+another disk or to the laptop. Keep the backup directory outside the run
+directory; AWS execution rejects overlapping paths. An interrupted connection
+may need manual recovery from the remote path printed in the error before
+`--resume` can run.
+Set `gpu.maxSeconds` to cover the intended pretrain stage (default 24 hours,
+maximum 7 days); reaching the deadline ends that process.
+
 ## User service
 
-For unattended operation, run the resumable command under a user systemd
-service. Replace every path with an absolute path and use the installed `tt`
-path reported by `command -v tt`:
+For unattended operation on a Linux machine running the CLI, run the resumable
+command under a user systemd service. Replace every path with an absolute path
+and use the installed `tt` path reported by `command -v tt`:
 
 ```ini
 [Unit]
@@ -102,7 +117,8 @@ journalctl --user -fu tt-foundation.service
 ```
 
 Enable user lingering if the job must survive logout. Use a UPS for power-loss
-protection, and put `checkpoint_backup_dir` on a different physical disk or
-remote mounted filesystem. Before a multi-day run, complete a full-load soak,
+protection. With a local GPU, put `checkpoint_backup_dir` on a different
+physical disk or remote mounted filesystem. AWS staging does not provide that
+separate-disk guarantee. Before a multi-day run, complete a full-load soak,
 stop the service during pretraining, and verify the journal reports a resumed
 checkpoint after restart.

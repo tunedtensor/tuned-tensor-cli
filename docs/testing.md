@@ -5,7 +5,7 @@ and serve the intended model with confidence and little wasted work. A change
 is acceptable when those workflows still work, including refusal, failure,
 and recovery paths. A large unit-test count alone does not establish that.
 
-This proposal starts with the existing Vitest, Node, and Python tests, adds a
+The test suite combines Vitest, Node, and Python tests with a
 small set of connected workflow contracts, and separates deterministic
 regressions from real agent and GPU evaluation. There is no new test framework,
 judge model, evaluation service, or coverage-percentage target.
@@ -50,6 +50,15 @@ The controlled outputs establish workflow correctness, **not learned model
 quality**. Serving checks resolve and verify the launch command; they do not
 load these fixture weights into a real inference server. Existing serving
 tests cover the HTTP/process behavior separately.
+
+AWS GPU regressions live in `gpu-executor.test.ts`, `gpu-stages.test.ts`,
+`gpu-doctor.test.ts`, `gpu-transport.test.ts`, and `gpu-review-transport.test.ts`.
+The transport suites run real subprocesses and rsync
+with a local shell standing in for SSH and a fixture AWS lookup. It checks
+artifact return, cancellation and checkpoint path/timestamp preservation.
+Boundary tests cover credential filtering and stage dispatch. These tests
+require local rsync and the Unix process tools, but no AWS account, SSH server
+or GPU. They do not establish real SSH disconnect behavior or CUDA compatibility.
 
 ## Real agent evaluation
 
@@ -125,6 +134,39 @@ This is a **release acceptance procedure**, not an implemented automatic GPU
 lane. A GPU lane can be added when we have a stable host, small pinned fixtures,
 and measured limits. The CPU fixture results must never substitute for this
 evidence or be presented as model-quality scores.
+
+For AWS transport changes, run the same adapter acceptance workflow from a
+machine without a GPU, configured for a user-owned EC2 GPU as described in
+[AWS GPU setup](local-runtime/aws-gpu.md). Check that `--dry-run` works without
+AWS credentials, then run `doctor` and the real pipeline. Confirm that only GPU
+stages execute remotely, returned manifests verify, local reports show the
+result, and successful stages remove their remote staging directories. Serving
+still needs its own local Linux/CUDA host.
+
+Also interrupt foundation pretraining after a periodic checkpoint, confirm
+the available checkpoint returns locally, and resume the same run directory.
+Separately simulate loss of SSH connectivity: verify the remote deadline stops
+work and that a failed retrieval preserves its staging directory with a useful
+recovery location. Recover the outputs before retrying. Record the instance
+type, driver/runtime versions, commands, exit status, cleanup behavior and
+checkpoint step alongside the run evidence. The tests above do not replace
+these checks on a real instance.
+
+During the 2026-09-12 review, actual OpenSSH and rsync on loopback with an
+NVIDIA GB10 completed the adapter pipeline (baseline inference, Qwen3.5-2B
+LoRA training, archived-adapter candidate inference, and local scoring/reporting)
+and all eight foundation stages, including RL. The returned adapter passed
+`tt models verify` and its report was readable through `tt runs report`.
+Resuming a completed foundation run skipped its finished stages. An interrupted
+100-step CUDA pretrain returned checksummed primary and backup checkpoints;
+after removing the synthetic run's primary checkpoints, resume loaded the
+backup at step 3, completed training and held-out evaluation, and retained only
+steps 99 and 100 in both checkpoint directories (`keep_checkpoints: 2`). Separate Python
+process checks over real SSH verified successful artifact return,
+cancellation, timeout, descendant termination, checkpoint recovery and
+staging reservation cleanup. These checks exercised real CUDA and SSH, with
+only `DescribeInstances` replaced by a loopback lookup. They do not validate
+EC2 authentication, quotas, instance availability or AWS networking.
 
 ## Current gaps and extension rule
 

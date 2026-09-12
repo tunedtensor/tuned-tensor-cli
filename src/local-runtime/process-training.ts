@@ -1,3 +1,4 @@
+import { runGpuProcess, gpuBaseModelPath } from "./gpu-executor.js";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { FineTuneRunRequest, LocalRunnerConfig, TrainingReport } from "./contracts.js";
@@ -194,6 +195,11 @@ export async function launchProcessTraining(args: {
     if (value === undefined) delete childEnv[key];
   }
 
+  const remoteBaseModel = config.gpu
+    ? gpuBaseModelPath(config, request.spec_snapshot.base_model, args.baseModelRevision)
+    : undefined;
+  if (remoteBaseModel) childEnv.SM_CHANNEL_BASE_MODEL = remoteBaseModel;
+
   if (config.paths.modelCache) await mkdir(resolve(config.paths.modelCache), { recursive: true });
   if (config.paths.baseModel) {
     await verifyLocalBaseModel(
@@ -216,7 +222,17 @@ export async function launchProcessTraining(args: {
   });
 
   const forwardTrainingProgress = createTrainingProgressForwarder(args.reporter);
-  const { exitCode } = await runLoggedProcess({
+  const execute = config.gpu ? (processArgs: Parameters<typeof runLoggedProcess>[0]) => runGpuProcess({
+    ...processArgs, gpu: config.gpu!, runtime: "adapter",
+    files: [
+      { path: artifacts.trainingInputDir, direction: "input", directory: true },
+      { path: artifacts.trainingConfigDir, direction: "input", directory: true },
+      { path: remoteBaseModel!, direction: "input", directory: true },
+      { path: artifacts.trainingModelDir, direction: "output", directory: true },
+      { path: artifacts.trainingOutputDir, direction: "output", directory: true },
+    ],
+  }) : runLoggedProcess;
+  const { exitCode } = await execute({
     command: entrypoint.command,
     commandArgs: entrypoint.commandArgs,
     env: childEnv,
@@ -253,7 +269,7 @@ export async function launchProcessTraining(args: {
   });
 
   return {
-    provider: "local-uv",
+    provider: config.gpu ? "aws-ssh" : "local-uv",
     training_job_name: jobName,
     model_artifact_uri: modelUri,
     base_model_artifact_uri: config.paths.baseModel ? fileUri(config.paths.baseModel) : undefined,

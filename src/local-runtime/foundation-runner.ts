@@ -1,3 +1,4 @@
+import { runGpuProcess, type AwsGpuConfig, type GpuFile } from "./gpu-executor.js";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, readFile, rename, rm } from "node:fs/promises";
@@ -38,6 +39,7 @@ export interface FoundationStepSpawnArgs {
   configPath: string;
   logPath: string;
   stepId: string;
+  gpu?: AwsGpuConfig;
 }
 
 export type FoundationStepSpawn = (args: FoundationStepSpawnArgs) => Promise<void>;
@@ -236,7 +238,21 @@ function assertFoundationPlanSupported(
 
 export async function defaultFoundationSpawn(args: FoundationStepSpawnArgs): Promise<void> {
   const launched = buildFoundationPythonCommand(args.entrypoint, ["--config", args.configPath]);
-  const result = await runLoggedProcess({
+  const execute = args.gpu && args.entrypoint !== "train_tokenizer.py"
+    ? async (processArgs: Parameters<typeof runLoggedProcess>[0]) => {
+      const document = await readRequiredJsonObject(args.configPath, "Foundation GPU config");
+      const files: GpuFile[] = [{ path: args.configPath, direction: "input" }];
+      const pathKeys = ["tokenizer_dir", "model_dir", "corpus_path", "validation_path", "output_dir", "work_dir", "checkpoint_backup_dir"];
+      for (const key of pathKeys) {
+        if (typeof document[key] !== "string") continue;
+        files.push({ path: document[key],
+          direction: ["output_dir", "work_dir", "checkpoint_backup_dir"].includes(key) ? "both" : "input",
+          directory: key.endsWith("_dir") || (await lstat(document[key])).isDirectory() });
+      }
+      return runGpuProcess({ ...processArgs, gpu: args.gpu!, runtime: "foundation", files,
+        document: { path: args.configPath, value: document, pathKeys } });
+    } : runLoggedProcess;
+  const result = await execute({
     command: launched.command,
     commandArgs: launched.commandArgs,
     env: withFoundationPythonEnvironment(process.env),
@@ -259,11 +275,16 @@ export async function runFoundationPipeline(args: {
   outputDir?: string;
   resume?: boolean;
   spawnStep?: FoundationStepSpawn;
+  gpu?: AwsGpuConfig;
 }): Promise<FoundationPipelineResult> {
   assertFoundationPlanSupported(args.spec, args.plan);
   const outputDir = resolve(
     args.outputDir ?? join(dirname(resolve(args.specPath)), DEFAULT_FOUNDATION_RUNS_DIR, randomUUID()),
   );
+  if (args.gpu && args.spec.foundation.checkpoint_backup_dir
+    && localPathsOverlap(outputDir, args.spec.foundation.checkpoint_backup_dir)) {
+    throw new Error("AWS checkpoint_backup_dir must be separate from the foundation run directory; overlapping backups can overwrite returned checkpoints.");
+  }
   let outputExists = false;
   try {
     const outputInfo = await lstat(outputDir);
@@ -433,7 +454,7 @@ export async function runFoundationPipeline(args: {
     }
     if (!completedStep) {
       await writePrivateTextAtomic(configPath, `${JSON.stringify(config, null, 2)}\n`);
-      await spawnStep({ entrypoint, configPath, logPath, stepId: step.id });
+      await spawnStep({ entrypoint, configPath, logPath, stepId: step.id, ...(args.gpu ? { gpu: args.gpu } : {}) });
       upstreamExecuted = true;
     }
     await makePrivateTree(stepDir);

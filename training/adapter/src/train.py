@@ -282,6 +282,10 @@ def run_training(rows: list[dict[str, Any]], model_source: str) -> tuple[dict[st
         )
         result = trainer.train()
 
+    # Saved adapters must remain loadable after a local or remote staging directory is removed.
+    for adapter_config in model.peft_config.values():
+        adapter_config.base_model_name_or_path = str(hp("base_model", CERTIFIED_BASE_MODEL))
+        adapter_config.revision = hp("base_model_revision")
     model.save_pretrained(MODEL_DIR)
     tokenizer.save_pretrained(MODEL_DIR)
     return result.metrics, dtype

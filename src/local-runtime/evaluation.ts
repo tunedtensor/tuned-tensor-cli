@@ -1,5 +1,6 @@
+import { runGpuProcess, gpuBaseModelPath, type GpuFile } from "./gpu-executor.js";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
   evalReportSchema,
@@ -383,7 +384,22 @@ async function runTransformersInference(args: {
       log_path: logPath,
     },
   });
-  const result = await runLoggedProcess({
+  const gpu = args.config.evaluation.inference.device === "cuda" ? args.config.gpu : undefined;
+  const execute = gpu ? async (processArgs: Parameters<typeof runLoggedProcess>[0]) => {
+    const document = JSON.parse(await readFile(inputPath, "utf8"));
+    document.model_source = gpuBaseModelPath(args.config, args.baseModelId, args.baseModelRevision);
+    delete document.model_cache;
+    const files: GpuFile[] = [
+      { path: inputPath, direction: "input" },
+      { path: outputPath, direction: "output" },
+      { path: document.model_source, direction: "input", directory: true },
+      ...(document.adapter_path ? [{ path: document.adapter_path, direction: "input" as const,
+        directory: (await stat(document.adapter_path)).isDirectory() }] : []),
+    ];
+    return runGpuProcess({ ...processArgs, gpu, runtime: "adapter", files,
+      document: { path: inputPath, value: document, pathKeys: ["model_source", "adapter_path"] } });
+  } : runLoggedProcess;
+  const result = await execute({
     command: entrypoint.command,
     commandArgs: entrypoint.commandArgs,
     env: withBundledPythonEnvironment(

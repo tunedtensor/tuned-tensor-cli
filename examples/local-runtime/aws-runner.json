@@ -1,0 +1,13 @@
+{
+  "artifactRoot": ".tuned-tensor/artifacts",
+  "storeRoot": ".tuned-tensor/store",
+  "gpu": {
+    "provider": "aws",
+    "profile": "research",
+    "region": "eu-west-1",
+    "instanceId": "i-0123456789abcdef0",
+    "user": "ubuntu",
+    "identityFile": "~/.ssh/research-gpu.pem",
+    "maxSeconds": 86400
+  }
+}

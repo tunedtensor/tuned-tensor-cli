@@ -210,24 +210,27 @@ export function registerPipelineCommands(parent: Command): void {
       if (options.output && options.resume) {
         throw new Error("--output and --resume are mutually exclusive.");
       }
+      const config = await loadLocalRunnerConfig(localConfigPath(options.config, options.spec));
       const document = await resolvePipelineDocument(options);
       const plan = createExecutionPlan(document as Pipeline, { only: parseList(options.only), skip: parseList(options.skip) });
-      const hostWarnings = await hostWarningsForPipeline(document, options.spec);
-      if (options.dryRun) {
+      const hostWarnings = config.gpu ? [] : await hostWarningsForPipeline(document, options.spec);
+      if (options.dryRun || config.dryRun) {
         if (isJsonMode()) {
           return printJson({
             dry_run: true,
             ...plan,
+            ...(config.gpu ? { gpu: { provider: config.gpu.provider, instanceId: config.gpu.instanceId, region: config.gpu.region, profile: config.gpu.profile } } : {}),
             ...(hostWarnings.length ? { host_warnings: hostWarnings } : {}),
           });
         }
         console.log("Dry run only — no execution, artifact transfer, or credit reservation will occur.");
+        if (config.gpu) console.log(`GPU processes: AWS instance ${config.gpu.instanceId}. Orchestration stays local.`);
         return outputPlan(plan, hostWarnings);
       }
       for (const warning of hostWarnings) printWarning(warning);
       const remote = plan.steps.find((step) => step.target !== "local");
       if (remote) {
-        throw new Error(`Step "${remote.id}" targets cloud execution. Pipeline execution requires local targets; use tt cloud runs for hosted execution, or --dry-run to inspect this plan.`);
+        throw new Error(`Step "${remote.id}" targets cloud execution. Pipeline execution requires local targets; set targets to local and configure gpu in local-runner.json to use your AWS instance.`);
       }
       const input = await loadLocalRunInput(resolve(options.spec));
       if (isParsedFoundationPipeline(document) || input.kind === "foundation-spec") {
@@ -241,6 +244,7 @@ export function registerPipelineCommands(parent: Command): void {
           specPath: resolve(options.spec),
           ...(options.output || options.resume ? { outputDir: resolve(options.resume ?? options.output!) } : {}),
           resume: Boolean(options.resume),
+          gpu: config.gpu,
         });
         if (isJsonMode()) return printJson(result);
         printSuccess(`Foundation pipeline completed. Report: ${result.report_path}`);
@@ -250,7 +254,6 @@ export function registerPipelineCommands(parent: Command): void {
         throw new Error("--output and --resume are only valid for foundation pipelines.");
       }
       assertLocalRunInputReady(input.request);
-      const config = await loadLocalRunnerConfig(localConfigPath(options.config, options.spec));
       const localPipeline: LocalPipeline = {
         version: 1,
         ...(plan.name ? { name: plan.name } : {}),

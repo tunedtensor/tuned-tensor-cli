@@ -447,7 +447,7 @@ export function createTunedTensorTools(
         return {
           version: 1,
           engine,
-          scope: { execution: "local-only", cloud_supported: false },
+          scope: { execution: "local", gpu_provider: "aws" },
           canonical: canonicalFoundationPipeline(),
           optional_rl: {
             enabled_when: "foundation.rl_steps > 0",
@@ -467,17 +467,13 @@ export function createTunedTensorTools(
         return {
           version: 1,
           engine,
-          scope: { execution: "cloud", cli: "tt cloud", access_token_required: true },
-          canonical: canonicalPipeline("cloud"),
+          scope: { execution: "local", gpu_provider: "aws", access_token_required: false },
+          canonical: canonicalPipeline("local"),
           commands: {
-            login: "tt auth login",
-            push: "tt cloud push --file tunedtensor.json",
-            estimate: "tt cloud runs estimate <spec-id>",
-            run: "tt cloud runs start <spec-id>",
-            watch: "tt cloud runs watch <run-id>",
-            report: "tt cloud runs report <run-id>",
+            run: "tt pipeline run --file tunedtensor.pipeline.json --spec tunedtensor.json --config local-runner.json",
+            doctor: "tt doctor --config local-runner.json",
           },
-          note: "Use the spec ID returned by push. Cloud recipes cannot be dispatched by tt pipeline run; cloud runs use the hosted run API.",
+          note: "Configure gpu in local-runner.json with provider aws, instanceId, SSH user and optional AWS profile/region/identityFile. The instance must already be running and reachable. GPU processes use it automatically; orchestration, scoring and artifacts stay local. Hosted training is retired.",
         };
       }
       return {

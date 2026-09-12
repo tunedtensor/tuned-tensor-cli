@@ -23,6 +23,7 @@ import {
 interface CapturedStream {
   stream: PassThrough;
   value(): string;
+  waitFor(marker: string): Promise<void>;
 }
 
 function capturedStream(): CapturedStream {
@@ -32,7 +33,21 @@ function capturedStream(): CapturedStream {
   stream.on("data", (chunk: string) => {
     output += chunk;
   });
-  return { stream, value: () => output };
+  return {
+    stream,
+    value: () => output,
+    waitFor(marker) {
+      if (output.includes(marker)) return Promise.resolve();
+      return new Promise((resolveReady) => {
+        const onData = () => {
+          if (!output.includes(marker)) return;
+          stream.off("data", onData);
+          resolveReady();
+        };
+        stream.on("data", onData);
+      });
+    },
+  };
 }
 
 async function fakeEntrypoint(root: string): Promise<string> {
@@ -60,6 +75,7 @@ if (args.includes("--fail")) {
   };
   process.on("SIGINT", () => finishSignal("SIGINT"));
   process.on("SIGTERM", () => finishSignal("SIGTERM"));
+  console.error("signal handlers ready");
   setInterval(() => {}, 1_000);
 } else if (args[0] === "wait-two-signals") {
   const signals = [];
@@ -72,6 +88,7 @@ if (args.includes("--fail")) {
   };
   process.on("SIGINT", () => recordSignal("SIGINT"));
   process.on("SIGTERM", () => recordSignal("SIGTERM"));
+  console.error("signal handlers ready");
   setInterval(() => {}, 1_000);
 } else {
   const specPath = args.find((arg) =>
@@ -352,12 +369,13 @@ describe("runLocalCommand", () => {
     const root = await testRoot();
     const entrypoint = await fakeEntrypoint(root);
     const listenersBefore = process.listenerCount("SIGINT");
+    const errors = capturedStream();
     const running = runLocalCommand(["wait-signal"], {
       entrypoint,
       cwd: root,
-      stderr: capturedStream().stream,
+      stderr: errors.stream,
     });
-    await new Promise((resolveWait) => setTimeout(resolveWait, 75));
+    await errors.waitFor("signal handlers ready");
     process.emit("SIGINT");
 
     const result = await running;
@@ -372,12 +390,13 @@ describe("runLocalCommand", () => {
       const root = await testRoot();
       const entrypoint = await fakeEntrypoint(root);
       const listenersBefore = process.listenerCount("SIGHUP");
+      const errors = capturedStream();
       const running = runLocalCommand(["wait-signal"], {
         entrypoint,
         cwd: root,
-        stderr: capturedStream().stream,
+        stderr: errors.stream,
       });
-      await new Promise((resolveWait) => setTimeout(resolveWait, 75));
+      await errors.waitFor("signal handlers ready");
       process.emit("SIGHUP");
 
       const result = await running;
@@ -392,12 +411,13 @@ describe("runLocalCommand", () => {
     const entrypoint = await fakeEntrypoint(root);
     const sigintListeners = process.listenerCount("SIGINT");
     const sigtermListeners = process.listenerCount("SIGTERM");
+    const errors = capturedStream();
     const running = runLocalCommand(["wait-two-signals"], {
       entrypoint,
       cwd: root,
-      stderr: capturedStream().stream,
+      stderr: errors.stream,
     });
-    await new Promise((resolveWait) => setTimeout(resolveWait, 75));
+    await errors.waitFor("signal handlers ready");
     process.emit("SIGINT");
     process.emit("SIGTERM");
 

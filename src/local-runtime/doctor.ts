@@ -1,3 +1,4 @@
+import { checkAwsGpu, runGpuProcess } from "./gpu-executor.js";
 import { constants } from "node:fs";
 import { access, lstat, mkdir, statfs, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -189,6 +190,26 @@ function foundationPythonProbePlan(requireBf16: boolean): PythonProbePlan {
   };
 }
 
+/** Preparation still runs on the laptop when GPU work is remote. */
+function localPreparationProbePlan(foundation: boolean): PythonProbePlan {
+  const source = [
+    "import json",
+    foundation ? "import numpy, safetensors, tokenizers, torch" : "import torch, transformers, peft, huggingface_hub",
+    "assert torch.ones(1, device='cpu').item() == 1",
+    "print(json.dumps({'python_ok': True, 'device': 'cpu', 'purpose': 'local preparation and CPU work'}))",
+  ].join("; ");
+  const entrypoint = foundation
+    ? buildFoundationPythonCommand("-c", [source])
+    : buildBundledPythonCommand("-c", [source]);
+  const env = minimalMachineLearningEnvironment(process.env);
+  return {
+    name: "python-runtime",
+    command: entrypoint.command,
+    args: entrypoint.commandArgs,
+    env: foundation ? withFoundationPythonEnvironment(env) : withBundledPythonEnvironment(env),
+  };
+}
+
 function pythonProbeSource(device: LocalRunnerConfig["evaluation"]["inference"]["device"]): string {
   return [
     "import json",
@@ -360,9 +381,11 @@ export async function runDoctor(
     checks.push(placeholderSpecCheck(request));
     resolveTrainingModel(request.spec_snapshot.base_model);
   }
-  const pythonPlans = foundationSpec && !config.dryRun
-    ? [foundationPythonProbePlan(foundationSpec.foundation.bf16 !== false)]
-    : buildDoctorPythonPlans(config);
+  const pythonPlans = config.dryRun ? [] : config.gpu
+    ? [localPreparationProbePlan(Boolean(foundationSpec))]
+    : foundationSpec
+      ? [foundationPythonProbePlan(foundationSpec.foundation.bf16 !== false)]
+      : buildDoctorPythonPlans(config);
   if (pythonPlans.length > 0) {
     const uvVersion = await runCommand("uv", ["--version"]);
     checks.push({
@@ -405,7 +428,23 @@ export async function runDoctor(
   }
 
   const device = config.evaluation.inference.device;
-  if (!config.dryRun) {
+  if (config.gpu && !config.dryRun) {
+    try {
+      await checkAwsGpu(config.gpu);
+      const plans = foundationSpec
+        ? [foundationPythonProbePlan(foundationSpec.foundation.bf16 !== false)]
+        : buildDoctorPythonPlans(config);
+      for (const plan of plans) {
+        const result = await runGpuProcess({ gpu: config.gpu, runtime: foundationSpec ? "foundation" : "adapter",
+          files: [], command: plan.command, commandArgs: plan.args, env: plan.env,
+          stage: "gpu_check", timeoutMs: 1_800_000 });
+        if (result.exitCode !== 0) throw new Error(`Remote Python/CUDA check failed: ${result.stderr}`);
+      }
+      checks.push({ name: "aws-gpu", ok: true, message: `GPU execution on ${config.gpu.instanceId}; orchestration stays local.` });
+    } catch (error) {
+      checks.push({ name: "aws-gpu", ok: false, message: error instanceof Error ? error.message : String(error) });
+    }
+  } else if (!config.dryRun) {
     const queried = await runCommand("nvidia-smi", [
       "--query-gpu=name,driver_version",
       "--format=csv,noheader",

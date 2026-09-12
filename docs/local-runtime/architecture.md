@@ -127,17 +127,28 @@ hide a valid artifact. Serving verifies the manifest again.
 
 ## Configuration
 
-The runner config controls only:
+The runner config controls:
 
 - state, artifact, and Hugging Face cache paths;
+- optional AWS instance lookup, SSH access, and a remote process deadline;
 - CUDA or CPU evaluation, with local serving through the CUDA vLLM runtime;
 - deterministic generation and scoring limits.
 
-The training project, Python entrypoints, working directory, and child
-environment are internal and fixed. Every stage uses the locked `uv` project
-included in the npm package. The mutable virtual environment lives in
-`~/.tuned-tensor/cache`, keyed by the project and lockfile content, so a
-read-only global npm install remains runnable.
+The training project, Python entrypoints, working directory, and forwarded
+runtime settings are internal and fixed. Every stage uses the locked `uv`
+project included in the npm package. Locally, the mutable virtual environment
+lives in `~/.tuned-tensor/cache`, keyed by the project and lockfile content, so
+a read-only global npm install remains runnable.
+
+With [`gpu` configured](aws-gpu.md), the same orchestrator dispatches adapter
+training and CUDA inference, or foundation stages after tokenization, over SSH
+to an existing EC2 instance. It stages the bundled Python source, lockfile and
+declared inputs in a private remote directory, creates the runtime environment
+there, and retrieves outputs before cleanup. Dataset compilation, adapter
+scoring/comparison, artifact validation and run state remain local. Foundation
+tokenization also stays local. Serving and `tt hardware` inspect/use the local
+host. AWS credentials authorize instance lookup locally; they are not forwarded
+to GPU processes. TT does not provision or manage instance capacity.
 
 Schemas are strict. Misspelled or obsolete fields fail validation instead of
 silently reverting to defaults. Training itself is CUDA-only and fails fast

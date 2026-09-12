@@ -291,6 +291,9 @@ describe("pipeline commands", () => {
       report_path: join(dir, "report.json"),
       steps: [],
     });
+    writeFileSync(join(dir, "local-runner.json"), JSON.stringify({
+      gpu: { provider: "aws", instanceId: "i-1234567890abcdef0", user: "ubuntu" },
+    }));
     const program = createProgram("test");
     program.exitOverride();
     try {
@@ -304,10 +307,23 @@ describe("pipeline commands", () => {
       expect(execute).toHaveBeenCalledWith(expect.objectContaining({
         outputDir: join(dir, "foundation-run"),
         resume: true,
+        gpu: expect.objectContaining({ provider: "aws", instanceId: "i-1234567890abcdef0" }),
       }));
       const output = JSON.parse(log.mock.calls.at(-1)?.[0] as string);
       expect(output.status).toBe("succeeded");
       expect(output.report_path).toBe(join(dir, "report.json"));
+      execute.mockClear();
+      writeFileSync(join(dir, "local-runner.json"), JSON.stringify({
+        dryRun: true,
+        gpu: { provider: "aws", instanceId: "i-1234567890abcdef0", user: "ubuntu" },
+      }));
+      await createProgram("test").parseAsync(["node", "tt", "--json", "pipeline", "run", "--spec", spec]);
+      expect(execute).not.toHaveBeenCalled();
+      expect(JSON.parse(log.mock.calls.at(-1)?.[0] as string)).toMatchObject({
+        dry_run: true,
+        gpu: { provider: "aws", instanceId: "i-1234567890abcdef0" },
+      });
+
     } finally {
       execute.mockRestore();
       rmSync(dir, { recursive: true, force: true });
