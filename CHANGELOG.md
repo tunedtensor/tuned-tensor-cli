@@ -2,8 +2,17 @@
 
 ## Unreleased
 
+## [0.16.0] - 2026-09-12
+
 ### Added
 
+- Use an existing EC2 GPU in your AWS account from the same local pipeline.
+  Configure an AWS profile, instance and SSH access in `local-runner.json`;
+  GPU processes run remotely while preparation, tokenization, adapter scoring,
+  run history and returned artifacts stay local. No TT training credits or
+  separate hosted pipeline are needed.
+- AWS GPU setup, recovery and testing guides, plus an example runner config.
+  Dry-run previews show the selected GPU without connecting to AWS.
 - Serve completed foundation pretrain, fine-tune, and RL model artifacts with
   `tt serve foundation --checkpoint <model-dir> --tokenizer <tokenizer.json>`.
   A temporary GPT-2 export uses the existing pinned vLLM runtime on Linux/CUDA,
@@ -14,8 +23,27 @@
 - CPU export parity tests for foundation logits, cached generation, and chat
   token formatting, included in the default test suite.
 
+### Changed
+
+- Retire `tt cloud runs start` and `estimate` in favor of `tt pipeline run`.
+  Historical account records and local report publishing remain available.
+- AWS execution uses the bundled locked Python runtime, a remote process
+  deadline, cancellation cleanup and artifact retrieval. Users provide running
+  Linux EC2 capacity and pay AWS directly. The local orchestrator must remain
+  running; serving stays local.
+
 ### Fixed
 
+- Transfer adapter archives correctly during remote candidate evaluation and
+  retain canonical base-model metadata after remote staging is removed.
+- Reject overlapping writable GPU transfer paths, including symlink aliases,
+  and preserve checkpoint pruning when returning resumed training artifacts.
+- Protect existing checkpoints during interrupted downloads and release owned
+  staging reservations when cancellation interrupts setup.
+- Check local Python dependencies even with an AWS GPU, and find user-installed
+  `uv` through the remote login shell.
+- Wait for child readiness in signal-forwarding tests instead of relying on a
+  fixed startup delay.
 - Match foundation training's system-prompt normalization during serving,
   including defaults for empty or whitespace-only system messages, without
   changing user or assistant content.
