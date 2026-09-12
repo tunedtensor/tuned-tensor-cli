@@ -1,9 +1,9 @@
 # tt - Tuned Tensor CLI
 
-`tt` is the local agent and CLI for Tuned Tensor. Use it to converse, run
-workflows on your laptop or in the cloud, inspect metrics, and check account
-usage. The web app is the dashboard for reviewing cloud runs and published
-local evidence.
+`tt` is the local agent and CLI for Tuned Tensor. Develop and orchestrate one
+training workflow locally, using a local NVIDIA GPU or an existing GPU instance
+in your AWS account. Inspect the resulting artifacts and metrics locally, and
+optionally publish run evidence to the web dashboard.
 
 Local training, evaluation, inspection, and serving need no TT access token.
 Agent inference is a separate choice:
@@ -17,17 +17,22 @@ Agent inference is a separate choice:
 
 A saved BYO selection stays selected after TT login. Switch back with
 `tt agent configure --provider tunedtensor` or `/model tunedtensor/managed`.
-Inference choice is independent of whether a training workflow runs locally or
-in the cloud. Cloud account operations always require a TT access token.
+Inference choice is independent of where training uses a GPU. Your AWS GPU
+needs AWS credentials and SSH access; TT account operations under `tt cloud`
+require a TT access token.
 
 ## Unified commands
 
 Local workflows remain the default: `tt pipeline run`, `tt runs list`,
-`tt models list`, and `tt serve`. GPU processes can use an existing instance in your AWS account through
-[`gpu` configuration](docs/local-runtime/aws-gpu.md). `tt cloud runs list` and
+`tt models list`, and `tt serve`. GPU processes can use an existing instance in
+your AWS account through [`gpu` configuration](docs/local-runtime/aws-gpu.md).
+`tt cloud runs list` and
 `tt cloud models list` access existing account records.
 `tt usage` reports managed agent allowance and usage; `tt balance` reports
-cloud training credits. `tt publish` uploads local run evidence to the dashboard.
+TT credits for hosted labeling and historical training charges, which do not
+pay for your AWS instance.
+`tt publish` uploads local run evidence to the dashboard. Hosted training
+submission (`tt cloud runs start` and `estimate`) is retired.
 
 TT includes the former TT Local runtime. `tt local …` and `tt run` remain
 hidden compatibility aliases; new scripts should use root commands and
@@ -65,9 +70,11 @@ tt --version
 Uninstall with `npm uninstall -g @tuned-tensor/cli` (add
 `--prefix ~/.local` if the curl installer used that prefix).
 
-Node.js 22.19.0 or newer is required. Local training additionally needs
-[`uv`](https://docs.astral.sh/uv/) and a supported NVIDIA CUDA host; the locked
-Python runner ships with the npm package and is prepared on first use.
+Node.js 22.19.0 or newer is required. Training additionally needs
+[`uv`](https://docs.astral.sh/uv/) locally and a supported NVIDIA CUDA host,
+either local or [in your AWS account](docs/local-runtime/aws-gpu.md). The laptop
+does not need a GPU when `gpu` is configured. The locked Python runner ships
+with the npm package and is prepared on first use.
 
 Run from source:
 
@@ -232,9 +239,10 @@ explicitly.
 
 ## Composable pipelines (v1)
 
-A pipeline is an ordered JSON recipe. This CLI executes local plans only. The
-portable document contract lives in `@tuned-tensor/pipeline-contract`. The CLI
-adds execution planning (step selection) on top of it.
+A pipeline is an ordered JSON recipe. The CLI orchestrates every plan locally;
+optional `gpu` configuration moves its GPU processes to your AWS instance.
+The portable document contract lives in `@tuned-tensor/pipeline-contract`. The
+CLI adds execution planning (step selection) on top of it.
 
 Two local engines share that document version:
 
@@ -314,7 +322,7 @@ tt usage
 tt balance
 ```
 
-Use the spec ID returned by `push`. `tt cloud specs`, `tt cloud datasets`,
+`tt cloud specs`, `tt cloud datasets`,
 `tt cloud label`, and `tt cloud models` expose the corresponding account
 operations; each command's `--help` documents its arguments. Hosted training
 submission is retired. Use [your AWS GPU](docs/local-runtime/aws-gpu.md) with
@@ -333,8 +341,9 @@ Each provider completion, including a tool follow-up, consumes one request;
 failed and cancelled requests also count. Token/cost coverage shows which
 requests have provider usage reports, so incomplete reporting is not mistaken
 for zero consumption. The displayed provider cost is informational, not a
-charge to cloud training credits. BYO provider usage is separate. `tt balance`
-shows cloud training credits and recent transactions; `tt topup` opens checkout.
+charge to TT credits. BYO provider usage is separate. `tt balance` shows TT
+credits for hosted labeling and historical training charges, plus recent
+transactions; `tt topup` opens checkout.
 
 Publish a local report for review in the dashboard:
 
@@ -352,35 +361,60 @@ Use `--json` with reporting commands for scripts. `TUNED_TENSOR_URL` or
 
 ## Quick start
 
-Create a local project on an NVIDIA host:
+Create a project on your development machine:
 
 ```bash
 mkdir support-adapter && cd support-adapter
-tt hardware
 tt init \
   --name "Support Adapter" \
-  --model Qwen/Qwen3.5-2B \
-  --profile spark
+  --model Qwen/Qwen3.5-2B
 ```
 
-`tt hardware` reports which certified models this GPU can train, LoRA
-fine-tune, or serve. The shell agent can run the same inventory via its
-`examine_hardware` tool. Edit the generated `tunedtensor.json`, replacing both
-placeholder examples, then preflight and run:
+Edit the generated `tunedtensor.json`, replacing both placeholder examples.
+For a local GPU, `tt hardware` reports this machine's training and serving
+capacity. For an AWS GPU, save the following as `local-runner.json` beside the
+spec, replacing the instance, region, profile and SSH settings with your own:
+
+```json
+{
+  "gpu": {
+    "provider": "aws",
+    "profile": "research",
+    "region": "eu-west-1",
+    "instanceId": "i-0123456789abcdef0",
+    "user": "ubuntu",
+    "identityFile": "~/.ssh/research-gpu.pem"
+  }
+}
+```
+
+The instance must already be running and reachable over SSH. See
+[AWS GPU setup](docs/local-runtime/aws-gpu.md) for prerequisites, authentication,
+transfer behavior and recovery. `tt hardware` always inspects the machine
+running the CLI; `tt doctor` uses `gpu` to check the remote runtime.
+Then validate, prefetch the base model locally, preview, and run:
 
 ```bash
-tt doctor tunedtensor.json
 tt validate tunedtensor.json
 tt models prefetch tunedtensor.json
+tt doctor tunedtensor.json
+tt pipeline run --spec tunedtensor.json --dry-run
 tt pipeline run --spec tunedtensor.json
 ```
 
-Inspect, verify, and serve a completed adapter:
+These commands discover the adjacent `local-runner.json`. The preview needs
+no GPU or AWS connection. Results return to the local run and model stores:
 
 ```bash
 tt runs report <run-id>
 tt models verify local-<run-id>
-tt serve local-<run-id> --config local-runner.json
+```
+
+Serving still runs on the machine executing `tt serve` and requires a local
+Linux/CUDA GPU, even when training used AWS:
+
+```bash
+tt serve local-<run-id>
 ```
 
 Local currently certifies text SFT with `Qwen/Qwen3.5-2B` (pinned to snapshot
@@ -392,8 +426,9 @@ checkpointing, and adapts bounded shared attention/Mamba projections rather
 than every routed expert matrix. Muse Glimmer is a vision-language checkpoint
 whose text tower is fine-tuned through the image-text-to-text loader with the
 vision tower frozen and unused. Evaluation may use CPU; packaged local
-serving requires Linux and NVIDIA CUDA. Training
-artifacts, datasets, and model weights remain on the execution host.
+serving requires Linux and NVIDIA CUDA. AWS execution transfers the required
+datasets and model files to your instance and returns outputs locally; normal
+cleanup removes the remote staging directory.
 
 Activation is optional and requires the run to pass a configured
 `generalRegression` gate. Without that suite, `tt models activate` fails
@@ -409,6 +444,33 @@ streaming and native tool-call parsing. `tt serve <target> --print-client-config
 exports isolated Pi configuration; tools no longer need to be disabled. See
 [Local serving and coding harnesses](docs/local-runtime/serving.md) for Pi/OpenCode
 setup, resource budgets, hardware limits, and the verified integration scope.
+
+### Serve a foundation checkpoint
+
+Serve a completed pretrain, fine-tune, or RL model directory with its training tokenizer:
+
+```sh
+tt serve foundation --checkpoint /path/to/run/pretrain/output --tokenizer /path/to/run/tokenize/output/tokenizer.json
+```
+
+Use the model artifact directory containing `config.json` and `model.safetensors`,
+not a resumable optimizer checkpoint. The API model name is `foundation`.
+`--spec tunedtensor.json` applies a foundation spec's system prompt. Existing
+port, authentication, sampling, streaming, and client configuration options apply.
+The context limit defaults to the checkpoint's `sequence_length`; a smaller
+`--context-length` is allowed. Foundation serving supports text completions and
+chat with system/user/assistant messages, without tool-call parsing.
+
+TT exports the weights and tokenizer to a temporary GPT-2 snapshot and uses the
+existing pinned vLLM server on Linux/CUDA. Training artifacts are unchanged; the
+temporary export is removed when the server exits. Export requires temporary
+disk space for a copy of the model weights.
+
+Export parity tests run on CPU as part of `npm test`. To run them directly:
+
+```sh
+uv run --frozen --project training/foundation --group test python -m unittest discover -s training/foundation/tests -p test_foundation_export.py
+```
 
 Useful discovery commands:
 
@@ -435,37 +497,10 @@ npm run test:workflows  # Focused product workflow regressions; no model key or 
 npm run check           # Typecheck, all tests, and build (the release gate)
 ```
 
-See [the testing proposal and workflow contracts](docs/testing.md) for what the
+See [testing and workflow contracts](docs/testing.md) for what the
 suite guarantees, how to evaluate a real agent with `npm run eval:agent`, and
 the remaining steps toward the full conversational product promise.
 
 ## License
 
 Apache-2.0
-
-### Serve a foundation checkpoint
-
-Serve a completed pretrain, fine-tune, or RL model directory with its training tokenizer:
-
-```sh
-tt serve foundation --checkpoint /path/to/run/pretrain --tokenizer /path/to/run/tokenize/tokenizer.json
-```
-
-Use the model artifact directory containing `config.json` and `model.safetensors`,
-not a resumable optimizer checkpoint. The API model name is `foundation`.
-`--spec tunedtensor.json` applies a foundation spec's system prompt. Existing
-port, authentication, sampling, streaming, and client configuration options apply.
-The context limit defaults to the checkpoint's `sequence_length`; a smaller
-`--context-length` is allowed. Foundation serving supports text completions and
-chat with system/user/assistant messages, without tool-call parsing.
-
-TT exports the weights and tokenizer to a temporary GPT-2 snapshot and uses the
-existing pinned vLLM server on Linux/CUDA. Training artifacts are unchanged; the
-temporary export is removed when the server exits. Export requires temporary
-disk space for a copy of the model weights.
-
-Export parity tests run on CPU as part of `npm test`. To run them directly:
-
-```sh
-uv run --frozen --project training/foundation --group test python -m unittest discover -s training/foundation/tests -p test_foundation_export.py
-```

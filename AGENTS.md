@@ -38,6 +38,8 @@ After `npm run build`, run `npm link` to make the `tt` command available globall
   `~/.tuned-tensor/agent/` (`auth.json`, `models.json`, threads).
 - Standard tests need no API key or GPU. Workflow tests use temporary workspaces
   and controlled model/process responses while exercising production code.
+  AWS transport tests also execute local rsync 3.2+, bash, setsid and GNU
+  timeout; they substitute a local shell for SSH and do not contact AWS.
   `uv` may fetch locked Python dependencies on the first run. Real provider
   evaluation is separate and opt-in; never add it to the default test gate.
 

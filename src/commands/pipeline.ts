@@ -219,10 +219,12 @@ export function registerPipelineCommands(parent: Command): void {
           return printJson({
             dry_run: true,
             ...plan,
+            ...(config.gpu ? { gpu: { provider: config.gpu.provider, instanceId: config.gpu.instanceId, region: config.gpu.region, profile: config.gpu.profile } } : {}),
             ...(hostWarnings.length ? { host_warnings: hostWarnings } : {}),
           });
         }
         console.log("Dry run only — no execution, artifact transfer, or credit reservation will occur.");
+        if (config.gpu) console.log(`GPU processes: AWS instance ${config.gpu.instanceId}. Orchestration stays local.`);
         return outputPlan(plan, hostWarnings);
       }
       for (const warning of hostWarnings) printWarning(warning);

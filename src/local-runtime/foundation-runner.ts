@@ -281,6 +281,10 @@ export async function runFoundationPipeline(args: {
   const outputDir = resolve(
     args.outputDir ?? join(dirname(resolve(args.specPath)), DEFAULT_FOUNDATION_RUNS_DIR, randomUUID()),
   );
+  if (args.gpu && args.spec.foundation.checkpoint_backup_dir
+    && localPathsOverlap(outputDir, args.spec.foundation.checkpoint_backup_dir)) {
+    throw new Error("AWS checkpoint_backup_dir must be separate from the foundation run directory; overlapping backups can overwrite returned checkpoints.");
+  }
   let outputExists = false;
   try {
     const outputInfo = await lstat(outputDir);

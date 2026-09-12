@@ -13,6 +13,9 @@ not mutate the training runtime.
   serving is not supported by this runtime; CLI/package commands still work
   there. Unsupported hardware or model/adapter combinations fail rather than
   silently falling back to the old server.
+- `gpu` in `local-runner.json` applies to training and evaluation. It does not
+  move `tt serve` to AWS; returned artifacts still need a Linux/CUDA machine
+  running the serving command.
 - Install `uv` and prefetch the certified model with `tt models prefetch`.
   First launch installs the locked serving dependencies and may compile kernels;
   it needs substantially more time and disk than a warm request. CUDA JIT may

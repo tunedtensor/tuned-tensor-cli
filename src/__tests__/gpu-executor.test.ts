@@ -78,7 +78,7 @@ describe("AWS GPU process boundary", () => {
     expect(launched.commandArgs.at(-1)).toContain("setsid timeout -k 120 86400s");
     expect(launched.commandArgs.at(-1)).not.toContain("never-forward");
     expect(launched.commandArgs.at(-1)).not.toContain("/laptop/home");
-    expect(calls.at(-1)?.commandArgs.at(-1)).toMatch(/^rm -rf -- \/tmp\/tt-gpu-/);
+    expect(calls.at(-1)?.commandArgs.at(-1)).toMatch(/then rm -rf -- \/tmp\/tt-gpu-/);
   });
 
   it("stops remote work and returns checkpoints on cancellation", async () => {
@@ -91,7 +91,7 @@ describe("AWS GPU process boundary", () => {
   it("keeps remote artifacts and reports their location when download fails", async () => {
     retrievalFailure = true;
     await expect(execute()).rejects.toThrow(/Remote files remain at ubuntu@203.0.113.5:\/tmp\/tt-gpu-/);
-    expect(vi.mocked(runLoggedProcess).mock.calls.some(([call]) => call.commandArgs.at(-1)?.startsWith("rm -rf"))).toBe(false);
+    expect(vi.mocked(runLoggedProcess).mock.calls.some(([call]) => call.commandArgs.at(-1)?.includes("then rm -rf"))).toBe(false);
   });
 
   it("does not contact AWS when already cancelled", async () => {

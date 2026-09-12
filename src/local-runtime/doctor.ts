@@ -190,6 +190,26 @@ function foundationPythonProbePlan(requireBf16: boolean): PythonProbePlan {
   };
 }
 
+/** Preparation still runs on the laptop when GPU work is remote. */
+function localPreparationProbePlan(foundation: boolean): PythonProbePlan {
+  const source = [
+    "import json",
+    foundation ? "import numpy, safetensors, tokenizers, torch" : "import torch, transformers, peft, huggingface_hub",
+    "assert torch.ones(1, device='cpu').item() == 1",
+    "print(json.dumps({'python_ok': True, 'device': 'cpu', 'purpose': 'local preparation and CPU work'}))",
+  ].join("; ");
+  const entrypoint = foundation
+    ? buildFoundationPythonCommand("-c", [source])
+    : buildBundledPythonCommand("-c", [source]);
+  const env = minimalMachineLearningEnvironment(process.env);
+  return {
+    name: "python-runtime",
+    command: entrypoint.command,
+    args: entrypoint.commandArgs,
+    env: foundation ? withFoundationPythonEnvironment(env) : withBundledPythonEnvironment(env),
+  };
+}
+
 function pythonProbeSource(device: LocalRunnerConfig["evaluation"]["inference"]["device"]): string {
   return [
     "import json",
@@ -361,9 +381,11 @@ export async function runDoctor(
     checks.push(placeholderSpecCheck(request));
     resolveTrainingModel(request.spec_snapshot.base_model);
   }
-  const pythonPlans = config.gpu ? [] : foundationSpec && !config.dryRun
-    ? [foundationPythonProbePlan(foundationSpec.foundation.bf16 !== false)]
-    : buildDoctorPythonPlans(config);
+  const pythonPlans = config.dryRun ? [] : config.gpu
+    ? [localPreparationProbePlan(Boolean(foundationSpec))]
+    : foundationSpec
+      ? [foundationPythonProbePlan(foundationSpec.foundation.bf16 !== false)]
+      : buildDoctorPythonPlans(config);
   if (pythonPlans.length > 0) {
     const uvVersion = await runCommand("uv", ["--version"]);
     checks.push({
@@ -409,8 +431,6 @@ export async function runDoctor(
   if (config.gpu && !config.dryRun) {
     try {
       await checkAwsGpu(config.gpu);
-      const localUv = await runCommand("uv", ["--version"]);
-      checks.push({ name: "uv", ok: localUv.code === 0, message: localUv.code === 0 ? firstLine(localUv.stdout) : "Install uv locally for model preparation and tokenization." });
       const plans = foundationSpec
         ? [foundationPythonProbePlan(foundationSpec.foundation.bf16 !== false)]
         : buildDoctorPythonPlans(config);

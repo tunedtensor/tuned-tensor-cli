@@ -1,6 +1,6 @@
 import { runGpuProcess, gpuBaseModelPath, type GpuFile } from "./gpu-executor.js";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
   evalReportSchema,
@@ -393,7 +393,8 @@ async function runTransformersInference(args: {
       { path: inputPath, direction: "input" },
       { path: outputPath, direction: "output" },
       { path: document.model_source, direction: "input", directory: true },
-      ...(document.adapter_path ? [{ path: document.adapter_path, direction: "input" as const, directory: true }] : []),
+      ...(document.adapter_path ? [{ path: document.adapter_path, direction: "input" as const,
+        directory: (await stat(document.adapter_path)).isDirectory() }] : []),
     ];
     return runGpuProcess({ ...processArgs, gpu, runtime: "adapter", files,
       document: { path: inputPath, value: document, pathKeys: ["model_source", "adapter_path"] } });

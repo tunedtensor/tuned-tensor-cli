@@ -63,3 +63,22 @@ it("foundation transfers corpus directories and checkpoints with the existing sh
   expect(runGpuProcess).toHaveBeenCalledWith(expect.objectContaining({ shutdownGraceMs: 120_000,
     files: expect.arrayContaining([{ path: corpus, direction: "input", directory: true }, { path: join(root, "recovery"), direction: "both", directory: true }]) }));
 });
+
+it.each([false, true])("transfers candidate adapters correctly when directory=%s", async (directory) => {
+  const adapter = join(root, directory ? "adapter" : "model.tar.gz");
+  if (directory) await mkdir(adapter);
+  else await writeFile(adapter, "archive fixture");
+  const config = localRunnerConfigSchema.parse({ artifactRoot: root, gpu, evaluation: { baselineCache: false } });
+  vi.mocked(runGpuProcess).mockImplementation(async (args) => {
+    const output = args.files.find((file) => file.direction === "output")!;
+    await writeFile(output.path, JSON.stringify({ protocol_version: INFERENCE_PROTOCOL_VERSION, results: [{ id: "0", actual: "greeting", latency_ms: 10 }] }));
+    return { exitCode: 0, stderr: "" };
+  });
+  const report = await evaluateExamples({ kind: "candidate", modelId: "local-adapter", baseModelId: "Qwen/Qwen3.5-2B",
+    baseModelRevision: QWEN_3_5_2B_REVISION, adapterPath: `file://${adapter}`,
+    examples: [{ input: "hello", output: "greeting" }], system: "Classify", config, outputPath: join(root, "eval.json") });
+  expect(report.avg_score).toBe(1);
+  expect(runGpuProcess).toHaveBeenCalledWith(expect.objectContaining({
+    files: expect.arrayContaining([{ path: adapter, direction: "input", directory }]),
+  }));
+});

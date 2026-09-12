@@ -319,7 +319,10 @@ describe("pipeline commands", () => {
       }));
       await createProgram("test").parseAsync(["node", "tt", "--json", "pipeline", "run", "--spec", spec]);
       expect(execute).not.toHaveBeenCalled();
-      expect(JSON.parse(log.mock.calls.at(-1)?.[0] as string).dry_run).toBe(true);
+      expect(JSON.parse(log.mock.calls.at(-1)?.[0] as string)).toMatchObject({
+        dry_run: true,
+        gpu: { provider: "aws", instanceId: "i-1234567890abcdef0" },
+      });
 
     } finally {
       execute.mockRestore();

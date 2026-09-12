@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import type { LocalRunnerConfig } from "./contracts.js";
@@ -51,7 +51,7 @@ function sshOptions(gpu: AwsGpuConfig): string[] {
 export async function checkAwsGpu(gpu: AwsGpuConfig): Promise<void> {
   const host = await resolveGpuHost(gpu);
   const result = await runLoggedProcess({ command: "ssh", commandArgs: [...sshOptions(gpu), host,
-    "command -v uv && command -v rsync && command -v timeout && command -v setsid && nvidia-smi"],
+    `bash -lc ${shellQuote("command -v uv && command -v rsync && command -v timeout && command -v setsid && nvidia-smi")}`],
     stage: "gpu_check", timeoutMs: 30_000 });
   if (result.exitCode !== 0) throw new Error(`AWS GPU preflight failed: ${result.stderr}`);
 }
@@ -66,6 +66,30 @@ export function gpuBaseModelPath(config: LocalRunnerConfig, model: string, revis
   return join(env.HF_HUB_CACHE!, `models--${model.replaceAll("/", "--")}`, "snapshots", revision);
 }
 
+/** Resolve existing parents too, so a symlink cannot disguise overlapping output trees. */
+async function physicalTransferPath(path: string): Promise<string> {
+  try { return await realpath(path); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(path) === path) throw error;
+    return join(await physicalTransferPath(dirname(path)), basename(path));
+  }
+}
+
+async function assertSeparateTransferPaths(files: GpuFile[]): Promise<void> {
+  const paths = await Promise.all(files.map((file) => physicalTransferPath(resolve(file.path))));
+  for (let i = 0; i < files.length; i += 1) {
+    for (let j = 0; j < i; j += 1) {
+      if (files[i]!.direction === "input" && files[j]!.direction === "input") continue;
+      const left = paths[i]!;
+      const right = paths[j]!;
+      if (left === right || (files[i]!.directory && right.startsWith(`${left}/`))
+        || (files[j]!.directory && left.startsWith(`${right}/`))) {
+        throw new Error(`GPU transfer paths overlap: ${files[i]!.path} and ${files[j]!.path}. Use separate input, output, recovery, and backup directories.`);
+      }
+    }
+  }
+}
+
 /** One process boundary: the orchestrator and all output validation remain local. */
 export async function runGpuProcess(args: ProcessArgs & {
   gpu: AwsGpuConfig;
@@ -74,6 +98,7 @@ export async function runGpuProcess(args: ProcessArgs & {
   document?: { path: string; value: Record<string, unknown>; pathKeys: string[] };
 }): Promise<Awaited<ReturnType<typeof runLoggedProcess>>> {
   if (await args.shouldCancel?.()) throw new ProcessCancelledError();
+  await assertSeparateTransferPaths(args.files);
   const host = await resolveGpuHost(args.gpu);
   const options = sshOptions(args.gpu);
   // Stable paths preserve foundation checkpoint corpus identities across resume.
@@ -98,22 +123,25 @@ export async function runGpuProcess(args: ProcessArgs & {
     if (result.exitCode !== 0) throw new Error(`${command} failed for ${host}: ${result.stderr}`);
   };
   const ssh = async (script: string, cancellable = true) => transport("ssh", [...options, host, script], cancellable);
-  const sync = async (source: string, destination: string, upload: boolean, cancellable = true) => {
+  const sync = async (source: string, destination: string, upload: boolean, cancellable = true, mirror = false) => {
     await transport("rsync", ["-rlt", "--copy-links", "--protect-args", "--modify-window=-1", "--chmod=Du=rwx,Dgo=,Fu=rw,Fgo=",
+      ...(!upload ? ["--delay-updates", ...(mirror ? ["--delete-delay"] : [])] : []),
       "--exclude=.venv", "--exclude=__pycache__", "--exclude=.git",
       "-e", ["ssh", ...options].map(shellQuote).join(" "), "--",
       upload ? source : `${host}:${source}`, upload ? `${host}:${destination}` : destination], cancellable);
   };
   const grace = Math.ceil((args.shutdownGraceMs ?? 5_000) / 1000);
   const stop = `kill -TERM -- -"$pid" 2>/dev/null || true; remaining=${grace}; while kill -0 -- -"$pid" 2>/dev/null && [ "$remaining" -gt 0 ]; do sleep 1; remaining=$((remaining - 1)); done; kill -KILL -- -"$pid" 2>/dev/null || true`;
-  let created = false;
+  const owner = randomUUID();
+  let reservationAttempted = false;
   let started = false;
   let completed = false;
   try {
-    await ssh(`umask 077; mkdir ${root} && mkdir ${root}/runtime ${root}/files`).catch((error) => {
+    reservationAttempted = true;
+    await ssh(`umask 077; mkdir ${root} && printf '%s' ${shellQuote(owner)} > ${root}/.owner && mkdir ${root}/runtime ${root}/files`).catch((error) => {
+      if (error instanceof ProcessCancelledError) throw error;
       throw new Error(`Cannot reserve GPU staging directory ${host}:${root}. Another process or unrecovered artifacts may be present. ${error instanceof Error ? error.message : error}`);
     });
-    created = true;
     for (const name of ["pyproject.toml", "uv.lock", "src"]) {
       await sync(join(runtime, name), `${root}/runtime/`, true);
     }
@@ -149,7 +177,7 @@ export async function runGpuProcess(args: ProcessArgs & {
     await args.reporter?.onEvent?.({ stage: args.stage, status: "running", message: `Running GPU process on ${args.gpu.instanceId}.`, details: { remote_directory: root } });
     started = true;
     const result = await runLoggedProcess({ ...args, env: process.env, command: "ssh",
-      commandArgs: [...options, "-tt", host, `bash -c ${shellQuote(script)}`] });
+      commandArgs: [...options, "-tt", host, `bash -lc ${shellQuote(script)}`] });
     completed = result.exitCode === 0;
     return result;
   } finally {
@@ -163,10 +191,12 @@ export async function runGpuProcess(args: ProcessArgs & {
             if (exists.exitCode === 1) continue;
             if (exists.exitCode !== 0) throw new Error("Cannot inspect remote outputs.");
           }
-          await sync(file.remote + (file.directory ? "/" : ""), file.path + (file.directory ? "/" : ""), false, false);
+          await sync(file.remote + (file.directory ? "/" : ""), file.path + (file.directory ? "/" : ""), false, false, file.directory === true && file.direction === "both");
         }
       }
-      if (created) await ssh(`rm -rf -- ${root}`, false);
+      // SSH may have been interrupted after reserving the directory but before replying.
+      // Only remove a reservation made by this invocation, never another run's files.
+      if (reservationAttempted) await ssh(`if [ "$(cat ${root}/.owner 2>/dev/null)" = ${shellQuote(owner)} ]; then rm -rf -- ${root}; fi`, false);
     } catch (error) {
       throw new Error(`GPU cleanup or artifact retrieval failed. Remote files remain at ${host}:${root}. ${error instanceof Error ? error.message : error}`);
     } finally {
