@@ -21,6 +21,11 @@ Inference choice is independent of where training uses a GPU. Your AWS GPU
 needs AWS credentials and SSH access; TT account operations under `tt cloud`
 require a TT access token.
 
+New to cloud GPU training? Follow [your first AWS run](docs/local-runtime/aws-gpu.md)
+for project creation, AWS quota and SSH setup, a preview, training, result
+verification, and shutdown. You still run `tt pipeline run` on your laptop;
+`tt cloud` is for TT account records, not user-owned GPU execution.
+
 ## Unified commands
 
 Local workflows remain the default: `tt pipeline run`, `tt runs list`,
@@ -370,7 +375,7 @@ tt init \
   --model Qwen/Qwen3.5-2B
 ```
 
-Edit the generated `tunedtensor.json`, replacing both placeholder examples.
+Edit the generated `tunedtensor.json`, replacing the placeholder system prompt and both placeholder examples.
 For a local GPU, `tt hardware` reports this machine's training and serving
 capacity. For an AWS GPU, save the following as `local-runner.json` beside the
 spec, replacing the instance, region, profile and SSH settings with your own:

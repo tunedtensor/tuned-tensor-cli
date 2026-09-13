@@ -168,6 +168,16 @@ staging reservation cleanup. These checks exercised real CUDA and SSH, with
 only `DescribeInstances` replaced by a loopback lookup. They do not validate
 EC2 authentication, quotas, instance availability or AWS networking.
 
+On 2026-09-13, published CLI 0.16.0 also passed real EC2 tests with an AWS
+profile, on `g5.xlarge` / NVIDIA A10G in `eu-west-1` (Ubuntu 24.04, driver
+595.91.07). The full adapter and eight-stage foundation workflows passed,
+including held-out evaluation, returned artifact verification and local reports.
+Interrupted foundation training resumed from backup step 10 through step 100.
+Supplemental real-SSH process tests covered cancellation, deadline termination
+and interrupted-download recovery. All temporary instance resources were
+removed. These were small synthetic functional tests, not model-quality or
+large-workload benchmarks; repeated model staging dominated elapsed time.
+
 ## Current gaps and extension rule
 
 The local agent currently has no local report-reading, activation, or serving tools.

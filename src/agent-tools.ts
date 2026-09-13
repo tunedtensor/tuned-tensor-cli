@@ -443,11 +443,21 @@ export function createTunedTensorTools(
           warnings: warningsFromSnapshot(snapshot.capabilities, { engine }),
         }
         : undefined;
+      const awsSetup = p.target === "cloud" ? {
+        scope: { execution: "local", gpu_provider: "aws", access_token_required: false },
+        commands: {
+          ...(engine === "adapter" ? { prefetch: "tt models prefetch tunedtensor.json --config local-runner.json" } : {}),
+          doctor: "tt doctor tunedtensor.json --config local-runner.json",
+          dry_run: "tt pipeline run --spec tunedtensor.json --config local-runner.json --dry-run",
+          run: "tt pipeline run --spec tunedtensor.json --config local-runner.json",
+        },
+        note: "Configure gpu in local-runner.json with provider aws, instanceId, SSH user and optional AWS profile/region/identityFile. The instance must already be running and reachable with a verified SSH host key. AWS profile lookup and SSH access are separate; no TT token is required. GPU processes use it automatically; orchestration, scoring and artifacts stay local. Hardware tools inspect only the laptop; doctor checks the configured instance. The user manages AWS quota, costs and shutdown. Keep the laptop running until outputs return. Hosted training is retired.",
+      } : undefined;
       if (engine === "foundation") {
-        return {
+        const foundation = {
           version: 1,
           engine,
-          scope: { execution: "local", gpu_provider: "aws" },
+          scope: { execution: "local" },
           canonical: canonicalFoundationPipeline(),
           optional_rl: {
             enabled_when: "foundation.rl_steps > 0",
@@ -460,20 +470,16 @@ export function createTunedTensorTools(
             dry_run: "tt pipeline run --dry-run --file tunedtensor.pipeline.json --spec tunedtensor.json",
             run: "tt pipeline run --file tunedtensor.pipeline.json --spec tunedtensor.json",
           },
-          ...(host ? { host } : {}),
+          ...(!awsSetup && host ? { host } : {}),
         };
+        return awsSetup ? { ...foundation, ...awsSetup } : foundation;
       }
-      if (p.target === "cloud") {
+      if (awsSetup) {
         return {
           version: 1,
           engine,
-          scope: { execution: "local", gpu_provider: "aws", access_token_required: false },
           canonical: canonicalPipeline("local"),
-          commands: {
-            run: "tt pipeline run --file tunedtensor.pipeline.json --spec tunedtensor.json --config local-runner.json",
-            doctor: "tt doctor --config local-runner.json",
-          },
-          note: "Configure gpu in local-runner.json with provider aws, instanceId, SSH user and optional AWS profile/region/identityFile. The instance must already be running and reachable. GPU processes use it automatically; orchestration, scoring and artifacts stay local. Hosted training is retired.",
+          ...awsSetup,
         };
       }
       return {
