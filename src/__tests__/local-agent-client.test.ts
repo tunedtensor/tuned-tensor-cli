@@ -186,6 +186,9 @@ describe("local agent conversation client", () => {
     expect(created[0]?.systemPrompt).toContain("inspect_training_source");
     expect(created[0]?.systemPrompt).toMatch(/observed behavior.*inferred rationale/is);
     expect(created[0]?.systemPrompt).toContain("examine_hardware");
+    expect(created[0]?.systemPrompt).toContain("User-owned AWS GPU training uses");
+    expect(created[0]?.systemPrompt).not.toContain("Cloud execution is explicit through");
+    expect(created[0]?.systemPrompt).toContain("do not use a missing local GPU to reject AWS training");
     expect(created[0]?.systemPrompt).toMatch(/examine this host.*GPU/is);
     expect(JSON.stringify(created[0])).not.toContain(TT_SECRET);
 

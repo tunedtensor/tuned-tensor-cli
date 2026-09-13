@@ -7,7 +7,52 @@ tokenization, dataset preparation, adapter scoring/comparisons, run history,
 and artifact validation stay local. Results return to the usual local
 directories. The laptop does not need an NVIDIA GPU.
 
-Keep the existing spec and pipeline. Save this config beside `tunedtensor.json`,
+## 1. Install TT and create a project
+
+Use CLI 0.16.0 or newer with Node.js 22.19+ on Linux or macOS:
+
+```bash
+npm install -g --ignore-scripts @tuned-tensor/cli
+tt --version
+mkdir my-aws-training && cd my-aws-training
+tt init --name "My AWS Adapter" --model Qwen/Qwen3.5-2B
+```
+
+Edit the generated `tunedtensor.json`: replace the placeholder system prompt and both placeholder examples with
+your desired instructions and real input/output pairs. For a small functional
+trial, use the [four-example smoke spec](../../examples/local-runtime/smoke-spec.json)
+instead. It checks the workflow, not model quality. An existing project can keep
+its spec and pipeline unchanged.
+
+## 2. Prepare your AWS instance
+
+You need two separate kinds of access: an **AWS profile** to find the instance,
+and an **SSH key or agent** to execute commands on it. A TT login is unnecessary.
+If you do not already have an instance, launch one in your AWS account or ask
+your administrator to provide one with the prerequisites below.
+
+Our CLI 0.16.0 smoke test used a `g5.xlarge` (A10G), an AWS Deep Learning Base
+GPU AMI with Ubuntu 24.04, and a 120 GiB root disk in `eu-west-1`. This is a
+tested small-workload configuration, not a sizing guarantee for other models.
+Use a driver compatible with the bundled CUDA runtime; `tt doctor` checks it.
+
+Before launching, check the EC2 GPU quota in your chosen region. For the tested
+G-family On-Demand instance, the quota is **Running On-Demand G and VT instances**
+(`L-DB2E81BA`), measured in vCPUs; one `g5.xlarge` needs 4 available vCPUs.
+If it is too low, follow [AWS's quota increase procedure](https://docs.aws.amazon.com/servicequotas/latest/userguide/request-quota-increase.html).
+Approval does not guarantee instance availability. TT does not request capacity
+or choose a different region for you.
+
+During launch, select your [EC2 SSH key pair](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html),
+allow inbound TCP 22 from your laptop's IP (or use your private network), and
+record the instance ID, region, SSH username and IP. Follow
+[AWS's SSH connection prerequisites](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/connect-to-linux-instance.html).
+Instance creation and quota management need separate AWS permissions; TT itself
+only needs `ec2:DescribeInstances` for lookup.
+
+## 3. Configure the connection
+
+Save this as `local-runner.json` beside `tunedtensor.json`,
 replacing the example values with your own. You can also copy
 [`examples/local-runtime/aws-runner.json`](../../examples/local-runtime/aws-runner.json).
 All runner paths refer to the laptop; TT translates the paths needed remotely.
@@ -57,18 +102,55 @@ TT addresses the instance by IP, so any `Host` rules in your SSH configuration
 must match that IP. Remote Python commands run through `bash -lc`, which loads
 the login profile so a normal uv installation can be found.
 
+After configuring your AWS profile (for SSO, use `aws configure sso` once),
+check access from the same terminal that will run TT:
+
 ```bash
-# Adapter workflow: fetch the base model locally first.
+# SSO profiles only; skip this line for other credential methods.
+aws sso login --profile research
+aws sts get-caller-identity --profile research
+aws ec2 describe-instances --profile research --region eu-west-1 \
+  --instance-ids i-0123456789abcdef0 \
+  --query 'Reservations[0].Instances[0].[State.Name,PublicIpAddress]' --output text
+```
+
+Use the returned IP below. First verify its host fingerprint through your AWS
+console or administrator and connect interactively to record the verified key.
+Then confirm that unattended SSH works:
+
+```bash
+chmod 400 ~/.ssh/research-gpu.pem
+ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
+  -i ~/.ssh/research-gpu.pem ubuntu@YOUR_INSTANCE_IP \
+  'bash -lc "command -v uv rsync setsid timeout; nvidia-smi"'
+```
+
+If `uv` is missing, install it on that machine using the
+[uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/)
+and make it available in the login shell. Install the other listed prerequisites
+with that machine's package manager. Run the SSH check again before training.
+
+## 4. Preview and run
+
+Run these commands on your laptop in the project directory. Adapter workflow:
+
+```bash
+# Fetch the base model locally first.
 tt validate tunedtensor.json
 tt models prefetch tunedtensor.json --config local-runner.json
 tt doctor tunedtensor.json --config local-runner.json
 tt pipeline run --spec tunedtensor.json --config local-runner.json --dry-run
 tt pipeline run --spec tunedtensor.json --config local-runner.json
+```
 
-# Foundation workflow: no base-model prefetch is needed.
+For a foundation spec, no base-model prefetch is needed. Start a new run with:
+
+```bash
+tt validate tunedtensor.json
 tt doctor tunedtensor.json --config local-runner.json
 tt pipeline run --spec tunedtensor.json --config local-runner.json \
-  --resume /absolute/path/to/foundation-run
+  --dry-run
+tt pipeline run --spec tunedtensor.json --config local-runner.json
 ```
 
 Choose the command block for your spec's engine. `tt doctor` connects to the
@@ -83,6 +165,28 @@ orchestrator, and `gpu` selects where its GPU processes execute. CPU adapter
 evaluation (`evaluation.inference.device: "cpu"`) stays on the laptop.
 Remove `gpu` to execute everything locally. `--dry-run` or `dryRun: true`
 does not connect to AWS or copy files.
+
+## 5. Inspect results and finish
+
+Wait for a successful completion message. Adapter runs return a run ID and a
+local model ID; use the actual IDs from the output:
+
+```bash
+tt runs list --config local-runner.json
+tt runs report RUN_ID --config local-runner.json
+tt models list --config local-runner.json
+tt models verify MODEL_ID --config local-runner.json
+```
+
+For foundation runs, inspect `report.json` in the run directory printed by the
+command. To resume it, pass `--resume /absolute/path/to/foundation-run` to the
+same `tt pipeline run` command. Keep the laptop awake and connected until the
+command finishes and outputs have returned. Review the report before another run.
+
+Stop or terminate your instance in AWS when finished, according to your own
+retention needs. TT does not do this for you, even after cancellation or timeout.
+
+## Transfers and recovery
 
 TT copies only each process's declared data, model snapshot, and runtime files,
 not the workspace or laptop credentials. Adapter runs use an immutable local
@@ -129,3 +233,16 @@ The instance remains running after the job; its lifecycle is yours to manage.
 Hosted training submission (`tt cloud runs start` and `estimate`) is retired.
 Existing cloud reports and cancellation of older hosted jobs remain available.
 This CLI change does not delete deployed AWS infrastructure or historical data.
+
+## Troubleshooting a first run
+
+| Symptom | What to check |
+| --- | --- |
+| AWS credentials expired or access denied | Renew your SSO login, check the selected profile/account, and ask for `ec2:DescribeInstances` permission. |
+| Instance not found or not running | Confirm the instance ID and region, and start the instance through AWS. |
+| GPU quota or capacity error during launch | Check the regional quota and AWS capacity; a TT token or credit top-up will not fix it. |
+| SSH timeout or permission denied | Check IP routing, security group TCP 22 access, SSH username, key and agent using the manual SSH command above. |
+| Host key verification failed | Verify the host fingerprint through AWS or your administrator; do not disable strict host checking. |
+| `uv` missing or CUDA probe fails | Check the remote login-shell PATH and GPU driver; rerun `tt doctor` after correcting the host. |
+| Long pause before the GPU process starts | Model inputs are uploaded for every process. Check network speed and free space on both machines, especially remote `/tmp`. |
+| Download fails or staging directory already exists | Preserve the remote directory shown in the error and recover its outputs before retrying. Do not remove the only checkpoint copy. |

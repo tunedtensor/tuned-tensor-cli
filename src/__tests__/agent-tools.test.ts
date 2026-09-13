@@ -159,7 +159,7 @@ describe("Tuned Tensor agent tools", () => {
 
     expect(described.details).toMatchObject({
       engine: "foundation",
-      scope: { execution: "local", gpu_provider: "aws" },
+      scope: { execution: "local" },
       canonical: {
         runtime: { engine: "foundation" },
         steps: [
@@ -185,12 +185,14 @@ describe("Tuned Tensor agent tools", () => {
     });
   });
 
-  it("describes AWS GPU execution through the same local pipeline", async () => {
-    const described = await tool("describe_pipeline", fakeApi()).execute("describe-cloud", { target: "cloud" });
+  it.each(["adapter", "foundation"])("describes %s AWS execution without requiring a separate pipeline file", async (engine) => {
+    const described = await tool("describe_pipeline", fakeApi()).execute("describe-cloud", { engine, target: "cloud" });
     expect(described.details).toMatchObject({
       scope: { execution: "local", gpu_provider: "aws", access_token_required: false },
       commands: {
-        run: "tt pipeline run --file tunedtensor.pipeline.json --spec tunedtensor.json --config local-runner.json",
+        run: "tt pipeline run --spec tunedtensor.json --config local-runner.json",
+        doctor: "tt doctor tunedtensor.json --config local-runner.json",
+        dry_run: "tt pipeline run --spec tunedtensor.json --config local-runner.json --dry-run",
       },
     });
   });

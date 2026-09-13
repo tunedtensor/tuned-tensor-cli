@@ -43,6 +43,22 @@ After `npm run build`, run `npm link` to make the `tt` command available globall
   `uv` may fetch locked Python dependencies on the first run. Real provider
   evaluation is separate and opt-in; never add it to the default test gate.
 
+## Explaining user-owned AWS training
+
+- Start new users at `docs/local-runtime/aws-gpu.md`; include spec creation,
+  separate AWS/SSH access, `doctor`, dry-run, real run, results and shutdown.
+- Use `tt pipeline run` with `gpu` in the runner config for both engines.
+  `tt cloud` operates TT account records; never recommend retired hosted
+  start/estimate commands or require TT credits for user-owned EC2 training.
+- `tt hardware` and `examine_hardware` inspect the laptop only. A missing local
+  GPU does not rule out AWS training; use the configured `tt doctor` for that.
+- An AWS profile does not provision a GPU. Explain quota, capacity, networking,
+  SSH host verification and user-managed instance lifecycle. GPU timeout does
+  not stop the instance. Keep the laptop running until outputs return.
+- Keep README, AWS guide, agent prompt/tool descriptions and Codex plugin
+  guidance consistent when changing the workflow. Follow `docs/testing.md`;
+  simulated transport tests are not evidence of a real EC2 run.
+
 ## Releasing
 
 Publishing is triggered by GitHub Releases (`published`) and runs the full test
