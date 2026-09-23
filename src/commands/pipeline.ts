@@ -53,10 +53,12 @@ function pipelineFromSpec(input: Extract<LocalRunInput, { kind: "foundation-spec
   return pipelineFromFoundationHyperparameters(input.spec.name, input.spec.foundation);
 }
 
-function resolvePipelineDocument(options: { file?: string; spec: string }) {
+function resolvePipelineDocument(options: { file?: string; spec: string }, specRequired: boolean) {
   const specPath = resolve(options.spec);
   const requested = options.file ? loadPipelineFile(options.file) : undefined;
   if (!existsSync(specPath)) {
+    // Recipe-only inspection is allowed only when the default spec was omitted.
+    if (specRequired) throw new Error(`Behavior spec not found: ${options.spec}.`);
     if (requested !== undefined) return { document: parsePipeline(requested) };
     throw new Error(`Behavior spec not found: ${options.spec}. Create tunedtensor.json or pass an explicit --file for a recipe-only preview.`);
   }
@@ -138,9 +140,9 @@ export function registerPipelineCommands(parent: Command): void {
     .description("Validate a pipeline without any execution or transfer")
     .option("-f, --file <path>", "Explicit pipeline recipe (default: derive from behavior spec)")
     .option("--spec <path>", "Local behavior spec to validate and plan against", DEFAULT_SPEC_FILE)
-    .action(async (options: { file?: string; spec: string }) => {
+    .action(async (options: { file?: string; spec: string }, command: Command) => {
       try {
-        const { document, input, spec } = resolvePipelineDocument(options);
+        const { document, input, spec } = resolvePipelineDocument(options, command.getOptionValueSource("spec") !== "default");
         const host_warnings = await hostWarningsForPipeline(document, input);
         if (isJsonMode()) {
           return printJson({ valid: true, errors: [], spec, host_warnings });
@@ -160,8 +162,8 @@ export function registerPipelineCommands(parent: Command): void {
     .option("--spec <path>", "Local behavior spec to validate and plan against", DEFAULT_SPEC_FILE)
     .option("--only <ids>", "Comma-separated step IDs to include")
     .option("--skip <ids>", "Comma-separated step IDs to omit")
-    .action(async (options: { file?: string; spec: string; only?: string; skip?: string }) => {
-      const { document, input, spec } = resolvePipelineDocument(options);
+    .action(async (options: { file?: string; spec: string; only?: string; skip?: string }, command: Command) => {
+      const { document, input, spec } = resolvePipelineDocument(options, command.getOptionValueSource("spec") !== "default");
       const plan = createExecutionPlan(document, { only: parseList(options.only), skip: parseList(options.skip) });
       outputPlan({ ...plan, ...(spec ? { spec } : {}) }, await hostWarningsForPipeline(document, input));
     });
@@ -176,12 +178,12 @@ export function registerPipelineCommands(parent: Command): void {
     .option("--resume <path>", "Resume a foundation run directory")
     .option("--only <ids>", "Comma-separated step IDs to include")
     .option("--skip <ids>", "Comma-separated step IDs to omit")
-    .action(async (options: { file?: string; spec: string; config?: string; output?: string; resume?: string; dryRun?: boolean; only?: string; skip?: string }) => {
+    .action(async (options: { file?: string; spec: string; config?: string; output?: string; resume?: string; dryRun?: boolean; only?: string; skip?: string }, command: Command) => {
       if (options.output && options.resume) {
         throw new Error("--output and --resume are mutually exclusive.");
       }
       const config = await loadLocalRunnerConfig(localConfigPath(options.config, options.spec));
-      const { document, input, spec } = resolvePipelineDocument(options);
+      const { document, input, spec } = resolvePipelineDocument(options, command.getOptionValueSource("spec") !== "default");
       const plan = createExecutionPlan(document, { only: parseList(options.only), skip: parseList(options.skip) });
       const hostWarnings = config.gpu ? [] : await hostWarningsForPipeline(document, input);
       if (options.dryRun || config.dryRun) {

@@ -84,7 +84,7 @@ tt pipeline run --spec tunedtensor.json
 
 The default pipeline derives from the current spec. An adjacent
 `tunedtensor.pipeline.json` is no longer loaded implicitly. To select an advanced
-recipe explicitly, pass `--file`; a missing explicit file fails. Foundation
+recipe explicitly, pass `--file`; a missing explicit recipe or `--spec` file fails. Foundation
 training parameters in an explicit recipe must agree with the spec, including
 in previews and the runtime's own execution guard. Change the spec and regenerate
 the recipe when they disagree. Explicit recipes may still select supported

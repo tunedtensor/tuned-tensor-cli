@@ -87,6 +87,16 @@ describe("spec is the source of execution settings", () => {
     await expect(prepareLocalPipelineAction({ workspaceRoot: root, pipeline: null })).rejects.toThrow();
   });
 
+  it.each(["plan", "validate", "run"])("%s refuses a missing explicit spec even with an existing recipe", async operation => {
+    const spec = await foundation();
+    const recipe = join(root, "pipeline.json");
+    await writeFile(recipe, JSON.stringify(pipelineFromFoundationHyperparameters(spec.name, spec.foundation)));
+    await expect(createProgram("test").parseAsync([
+      "pipeline", operation, ...(operation === "run" ? ["--dry-run"] : []),
+      "--spec", join(root, "typo.json"), "--file", recipe,
+    ], { from: "user" })).rejects.toThrow(/Behavior spec not found/);
+  });
+
   it("the runtime itself rejects conflicting settings before creating artifacts or launching Python", async () => {
     const spec = await foundation();
     const plan = createExecutionPlan(pipelineFromFoundationHyperparameters(spec.name, { ...spec.foundation, depth: 3 }));
