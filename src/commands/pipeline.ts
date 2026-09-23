@@ -8,14 +8,14 @@ import {
   isFoundationPipeline,
   parsePipeline,
   pipelineFromFoundationHyperparameters,
-  validatePipeline,
+  pipelineForRunInput,
   type Pipeline,
 } from "../pipeline.js";
 import { isJsonMode, printJson, printSuccess, printWarning } from "../output.js";
 import {
-  assertFoundationSpecReady,
-  assertLocalRunInputReady,
   loadLocalRunInput,
+  parseLocalRunInput,
+  specHash,
   type LocalRunInput,
 } from "../local-runtime/local-project.js";
 import { loadLocalRunnerConfig, runLocalPipeline, type LocalPipeline } from "../local-runtime/orchestrator.js";
@@ -53,51 +53,34 @@ function pipelineFromSpec(input: Extract<LocalRunInput, { kind: "foundation-spec
   return pipelineFromFoundationHyperparameters(input.spec.name, input.spec.foundation);
 }
 
-function isParsedFoundationPipeline(document: unknown): boolean {
-  try {
-    return isFoundationPipeline(parsePipeline(document));
-  } catch {
-    return false;
-  }
-}
-
-async function resolvePipelineDocument(options: { file: string; spec?: string }): Promise<unknown> {
-  const filePath = resolve(options.file);
-  const fileExists = existsSync(filePath);
-  const specPath = options.spec ? resolve(options.spec) : undefined;
-  const specInput = specPath && existsSync(specPath) ? await loadLocalRunInput(specPath) : undefined;
-
-  if (specInput?.kind === "foundation-spec") {
-    if (fileExists) {
-      const document = loadPipelineFile(options.file);
-      if (isParsedFoundationPipeline(document)) return document;
-      throw new Error(
-        `Pipeline file ${options.file} is an adapter recipe, but ${options.spec} is a foundation spec. Use a foundation pipeline, omit --file, or pass an adapter spec.`,
-      );
-    }
-    return pipelineFromSpec(specInput);
+function resolvePipelineDocument(options: { file?: string; spec: string }, specRequired: boolean) {
+  const specPath = resolve(options.spec);
+  const requested = options.file ? loadPipelineFile(options.file) : undefined;
+  if (!existsSync(specPath)) {
+    // Recipe-only inspection is allowed only when the default spec was omitted.
+    if (specRequired) throw new Error(`Behavior spec not found: ${options.spec}.`);
+    if (requested !== undefined) return { document: parsePipeline(requested) };
+    throw new Error(`Behavior spec not found: ${options.spec}. Create tunedtensor.json or pass an explicit --file for a recipe-only preview.`);
   }
 
-  if (fileExists) {
-    const document = loadPipelineFile(options.file);
-    if (specInput && isParsedFoundationPipeline(document)) {
-      throw new Error(
-        `Pipeline file ${options.file} is a foundation recipe, but ${options.spec} is an adapter spec. Use a foundation spec, omit --file, or pass an adapter pipeline.`,
-      );
-    }
-    return document;
-  }
-  if (specInput) return canonicalPipeline("local");
-  if (specPath && !existsSync(specPath)) await loadLocalRunInput(specPath);
-  throw new Error(
-    `Pipeline file not found: ${options.file}. Run \`tt pipeline init\` or pass --spec to derive the canonical pipeline.`,
-  );
+  // All downstream consumers use this snapshot, including hardware warnings.
+  const source = readFileSync(specPath, "utf8");
+  const input = parseLocalRunInput(JSON.parse(source), specPath);
+  const document = pipelineForRunInput(input, requested);
+  const spec = {
+    path: specPath,
+    sha256: specHash(source),
+    engine: input.kind === "foundation-spec" ? "foundation" : "adapter",
+  };
+  return { document, input, spec };
 }
 
 function outputPlan(plan: unknown, hostWarnings: string[] = []): void {
   if (isJsonMode()) {
     return printJson(hostWarnings.length ? { ...plan as object, host_warnings: hostWarnings } : plan);
   }
+  const identity = (plan as { spec?: { path: string; sha256: string } }).spec;
+  if (identity) console.log(`Behavior spec: ${identity.path} (sha256 ${identity.sha256})`);
   const typed = plan as { steps: Array<{ id: string; uses: string; target: string; transfers: Array<{ from: string; from_target: string; to_target: string }> }> };
   for (const step of typed.steps) {
     console.log(`${step.id.padEnd(16)} ${step.uses.padEnd(10)} ${step.target}`);
@@ -106,29 +89,13 @@ function outputPlan(plan: unknown, hostWarnings: string[] = []): void {
   for (const warning of hostWarnings) printWarning(warning);
 }
 
-async function hostWarningsForPipeline(document: unknown, specPath?: string): Promise<string[]> {
+async function hostWarningsForPipeline(document: Pipeline, input?: LocalRunInput): Promise<string[]> {
   const snapshot = await readHardwareSnapshot();
   if (!snapshot) return [];
-  let engine: "adapter" | "foundation" = "adapter";
-  let baseModel: string | undefined;
-  try {
-    if (isFoundationPipeline(parsePipeline(document))) engine = "foundation";
-  } catch {
-    // Use the spec below when the document is not a portable pipeline yet.
-  }
-  if (specPath && existsSync(specPath)) {
-    try {
-      const input = await loadLocalRunInput(specPath);
-      if (input.kind === "foundation-spec") {
-        engine = "foundation";
-      } else if (input.kind === "spec") {
-        engine = "adapter";
-        baseModel = input.request.spec_snapshot.base_model;
-      }
-    } catch {
-      // Spec parse errors are reported by the existing validate/run paths.
-    }
-  }
+  const engine = isFoundationPipeline(parsePipeline(document)) ? "foundation" : "adapter";
+  const baseModel = input && input.kind !== "foundation-spec"
+    ? input.request.spec_snapshot.base_model
+    : undefined;
   return warningsFromSnapshot(snapshot.capabilities, { engine, baseModel });
 }
 
@@ -171,53 +138,59 @@ export function registerPipelineCommands(parent: Command): void {
 
   pipeline.command("validate")
     .description("Validate a pipeline without any execution or transfer")
-    .option("-f, --file <path>", "Pipeline file", DEFAULT_PIPELINE_FILE)
-    .option("--spec <path>", "Local behavior spec used to detect leftover engine mismatches", DEFAULT_SPEC_FILE)
-    .action(async (options: { file: string; spec?: string }) => {
-      const document = await resolvePipelineDocument(options);
-      const errors = validatePipeline(document);
-      const host_warnings = await hostWarningsForPipeline(document, options.spec);
-      const result = { valid: errors.length === 0, errors, ...(host_warnings.length ? { host_warnings } : {}) };
-      if (isJsonMode()) return printJson(result);
-      if (errors.length) throw new Error(`Invalid pipeline:\n- ${errors.join("\n- ")}`);
-      printSuccess("Pipeline is valid.");
-      for (const warning of host_warnings) printWarning(warning);
+    .option("-f, --file <path>", "Explicit pipeline recipe (default: derive from behavior spec)")
+    .option("--spec <path>", "Local behavior spec to validate and plan against", DEFAULT_SPEC_FILE)
+    .action(async (options: { file?: string; spec: string }, command: Command) => {
+      try {
+        const { document, input, spec } = resolvePipelineDocument(options, command.getOptionValueSource("spec") !== "default");
+        const host_warnings = await hostWarningsForPipeline(document, input);
+        if (isJsonMode()) {
+          return printJson({ valid: true, errors: [], spec, host_warnings });
+        }
+        printSuccess("Pipeline is valid.");
+        for (const warning of host_warnings) printWarning(warning);
+      } catch (error) {
+        if (!isJsonMode()) throw error;
+        process.exitCode = 1;
+        printJson({ valid: false, errors: [(error as Error).message] });
+      }
     });
 
   pipeline.command("plan")
     .description("Resolve step targets and required artifact transfers")
-    .option("-f, --file <path>", "Pipeline file", DEFAULT_PIPELINE_FILE)
-    .option("--spec <path>", "Local behavior spec used to detect leftover engine mismatches", DEFAULT_SPEC_FILE)
+    .option("-f, --file <path>", "Explicit pipeline recipe (default: derive from behavior spec)")
+    .option("--spec <path>", "Local behavior spec to validate and plan against", DEFAULT_SPEC_FILE)
     .option("--only <ids>", "Comma-separated step IDs to include")
     .option("--skip <ids>", "Comma-separated step IDs to omit")
-    .action(async (options: { file: string; spec?: string; only?: string; skip?: string }) => {
-      const document = await resolvePipelineDocument(options);
-      const plan = createExecutionPlan(document as Pipeline, { only: parseList(options.only), skip: parseList(options.skip) });
-      outputPlan(plan, await hostWarningsForPipeline(document, options.spec));
+    .action(async (options: { file?: string; spec: string; only?: string; skip?: string }, command: Command) => {
+      const { document, input, spec } = resolvePipelineDocument(options, command.getOptionValueSource("spec") !== "default");
+      const plan = createExecutionPlan(document, { only: parseList(options.only), skip: parseList(options.skip) });
+      outputPlan({ ...plan, ...(spec ? { spec } : {}) }, await hostWarningsForPipeline(document, input));
     });
 
   pipeline.command("run")
     .description("Run an ordered local pipeline, or safely preview any pipeline")
     .option("--dry-run", "Resolve and display only; never execute, transfer, or reserve credits")
-    .option("-f, --file <path>", "Pipeline file", DEFAULT_PIPELINE_FILE)
+    .option("-f, --file <path>", "Explicit pipeline recipe (default: derive from behavior spec)")
     .option("--spec <path>", "Local behavior spec", DEFAULT_SPEC_FILE)
     .option("--config <path>", "Local runtime config")
     .option("--output <path>", "Foundation run directory (must not already exist)")
     .option("--resume <path>", "Resume a foundation run directory")
     .option("--only <ids>", "Comma-separated step IDs to include")
     .option("--skip <ids>", "Comma-separated step IDs to omit")
-    .action(async (options: { file: string; spec: string; config?: string; output?: string; resume?: string; dryRun?: boolean; only?: string; skip?: string }) => {
+    .action(async (options: { file?: string; spec: string; config?: string; output?: string; resume?: string; dryRun?: boolean; only?: string; skip?: string }, command: Command) => {
       if (options.output && options.resume) {
         throw new Error("--output and --resume are mutually exclusive.");
       }
       const config = await loadLocalRunnerConfig(localConfigPath(options.config, options.spec));
-      const document = await resolvePipelineDocument(options);
-      const plan = createExecutionPlan(document as Pipeline, { only: parseList(options.only), skip: parseList(options.skip) });
-      const hostWarnings = config.gpu ? [] : await hostWarningsForPipeline(document, options.spec);
+      const { document, input, spec } = resolvePipelineDocument(options, command.getOptionValueSource("spec") !== "default");
+      const plan = createExecutionPlan(document, { only: parseList(options.only), skip: parseList(options.skip) });
+      const hostWarnings = config.gpu ? [] : await hostWarningsForPipeline(document, input);
       if (options.dryRun || config.dryRun) {
         if (isJsonMode()) {
           return printJson({
             dry_run: true,
+            ...(spec ? { spec } : {}),
             ...plan,
             ...(config.gpu ? { gpu: { provider: config.gpu.provider, instanceId: config.gpu.instanceId, region: config.gpu.region, profile: config.gpu.profile } } : {}),
             ...(hostWarnings.length ? { host_warnings: hostWarnings } : {}),
@@ -225,19 +198,16 @@ export function registerPipelineCommands(parent: Command): void {
         }
         console.log("Dry run only — no execution, artifact transfer, or credit reservation will occur.");
         if (config.gpu) console.log(`GPU processes: AWS instance ${config.gpu.instanceId}. Orchestration stays local.`);
-        return outputPlan(plan, hostWarnings);
+        return outputPlan({ ...plan, ...(spec ? { spec } : {}) }, hostWarnings);
       }
+      if (spec && !isJsonMode()) console.log(`Behavior spec: ${spec.path} (sha256 ${spec.sha256})`);
       for (const warning of hostWarnings) printWarning(warning);
       const remote = plan.steps.find((step) => step.target !== "local");
       if (remote) {
         throw new Error(`Step "${remote.id}" targets cloud execution. Pipeline execution requires local targets; set targets to local and configure gpu in local-runner.json to use your AWS instance.`);
       }
-      const input = await loadLocalRunInput(resolve(options.spec));
-      if (isParsedFoundationPipeline(document) || input.kind === "foundation-spec") {
-        if (input.kind !== "foundation-spec") {
-          throw new Error("Foundation pipelines require a foundation tunedtensor.json --spec.");
-        }
-        assertFoundationSpecReady(input.spec);
+      if (!input) throw new Error("Pipeline execution requires a behavior spec. Pass --spec tunedtensor.json.");
+      if (input.kind === "foundation-spec") {
         const result = await runFoundationPipeline({
           spec: input.spec,
           plan,
@@ -246,21 +216,20 @@ export function registerPipelineCommands(parent: Command): void {
           resume: Boolean(options.resume),
           gpu: config.gpu,
         });
-        if (isJsonMode()) return printJson(result);
+        if (isJsonMode()) return printJson({ ...result, spec });
         printSuccess(`Foundation pipeline completed. Report: ${result.report_path}`);
         return;
       }
       if (options.output || options.resume) {
         throw new Error("--output and --resume are only valid for foundation pipelines.");
       }
-      assertLocalRunInputReady(input.request);
       const localPipeline: LocalPipeline = {
         version: 1,
         ...(plan.name ? { name: plan.name } : {}),
         steps: plan.steps.map(({ transfers: _transfers, ...step }) => step) as LocalPipeline["steps"],
       };
       const result = await runLocalPipeline({ request: input.request, config, pipeline: localPipeline });
-      if (isJsonMode()) return printJson(result);
+      if (isJsonMode()) return printJson({ ...result, spec });
       printSuccess(`Pipeline completed with status ${result.status}.`);
     });
 }

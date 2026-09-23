@@ -58,9 +58,7 @@ async function realPreparedEvidence(
       const step = prepared.pipeline.steps.find((entry) => entry.id === change.step)!;
       if (!("with" in step)) throw new Error(`Step ${change.step} has no parameters`);
       Object.assign(step.with!, change.parameters);
-      // These altered pipelines still satisfy the production tool's contract;
-      // the eval must reject their wrong workflow semantics independently.
-      prepared = await prepareLocalPipelineAction({ ...input, pipeline: prepared.pipeline });
+      // Grade tampered persisted evidence independently of production guards.
     }
     const evidence = preparedEvidence();
     evidence.specSha256 = prepared.specSha256;
@@ -80,6 +78,12 @@ async function realPreparedEvidence(
 describe("live agent workflow grading", () => {
   it("accepts a sealed canonical dry-run proposal without requiring exact prose", () => {
     expect(failedChecks("adapter-dry-run", preparedEvidence())).toEqual([]);
+  });
+
+  it("rejects a positional spec path in pipeline command guidance", () => {
+    const evidence = preparedEvidence();
+    evidence.turn!.response = "Run tt pipeline run ./tunedtensor.json";
+    expect(failedChecks("adapter-dry-run", evidence)).toContain("pipeline commands use --spec for spec paths");
   });
 
   it.each(["adapter-dry-run", "foundation-dry-run"] as const)(
@@ -203,6 +207,16 @@ describe("live agent workflow grading", () => {
     expect(scenario("serving-handoff").humanReview).toMatch(/no invented results/);
   });
 
+  it.each(["tt runs show <run-id>", "tt serve --model <model-id>"])("rejects observed invalid handoff syntax: %s", (command) => {
+    const evidence = preparedEvidence();
+    evidence.turn!.status = "completed";
+    evidence.turn!.actions = [];
+    evidence.turn!.response = `Use ${command}`;
+    evidence.events = [];
+    evidence.persistedActions = [];
+    expect(failedChecks("serving-handoff", evidence)).toContain("handoff avoids unsupported command syntax");
+  });
+
   it.each([
     { name: "search_hugging_face", args: { kind: "model", query: "Qwen" } },
     { name: "examine_hardware", args: { full: true } },
@@ -266,4 +280,28 @@ describe("live agent workflow grading", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+});
+
+
+it("grades read-only spec review and sealed edits, and detects unrelated changes or a missing read", () => {
+  const evidence = preparedEvidence();
+  evidence.turn!.status = "completed";
+  evidence.turn!.actions = []; evidence.persistedActions = [];
+  evidence.events = [
+    { type: "tool_call", payload: { name: "get_local_spec", toolUseId: "read" } },
+    { type: "tool_result", payload: { toolUseId: "read", status: "success" } },
+  ];
+  expect(failedChecks("spec-review", evidence)).toEqual([]);
+  const action: AgentAction = { id: "edit", title: "Edit", summary: "", risk: "medium", status: "proposed", operation: "update_local_spec",
+    arguments: { spec_path: "./tunedtensor.json", expected_sha256: evidence.specSha256, workspace_fingerprint: evidence.workspaceFingerprint, changes: { constraints: ["Return only the sentiment label, with no explanation."] } },
+    preview: { diff: "@@ constraints @@\n+ requested constraint" } };
+  evidence.turn!.status = "waiting_for_approval";
+  evidence.turn!.actions = [action]; evidence.persistedActions = [action];
+  evidence.events.push({ type: "tool_call", payload: { name: "prepare_update_local_spec", toolUseId: "edit" } });
+  expect(failedChecks("spec-edit", evidence)).toEqual([]);
+  ((action.arguments as { changes: Record<string, unknown> }).changes).system_prompt = "Unrelated rewrite";
+  expect(failedChecks("spec-edit", evidence)).toContain("only the requested constraint changes");
+  evidence.events = evidence.events.slice(2);
+  expect(failedChecks("spec-edit", evidence)).toContain("current spec inspected");
+  expect(failedChecks("spec-edit", evidence)).toContain("inspection precedes edit");
 });

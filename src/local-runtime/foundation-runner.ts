@@ -7,7 +7,7 @@ import { DEFAULT_FOUNDATION_RUNS_DIR } from "../paths.js";
 import type { LocalFoundationSpecFile } from "./contracts.js";
 import { buildSystemMessage } from "./dataset.js";
 import { localPathsOverlap } from "./local-project.js";
-import type { ExecutionPlan } from "../pipeline.js";
+import { assertFoundationSettingsMatch, type ExecutionPlan } from "../pipeline.js";
 import {
   buildFoundationPythonCommand,
   runLoggedProcess,
@@ -278,6 +278,7 @@ export async function runFoundationPipeline(args: {
   gpu?: AwsGpuConfig;
 }): Promise<FoundationPipelineResult> {
   assertFoundationPlanSupported(args.spec, args.plan);
+  assertFoundationSettingsMatch(args.spec.foundation, args.plan);
   const outputDir = resolve(
     args.outputDir ?? join(dirname(resolve(args.specPath)), DEFAULT_FOUNDATION_RUNS_DIR, randomUUID()),
   );

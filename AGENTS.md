@@ -10,6 +10,15 @@ reporting. Training uses one local orchestrator; optional `gpu` configuration
 sends GPU processes to a user-owned EC2 instance over SSH. Hosted training
 start/estimate are retired. See `docs/local-runtime/aws-gpu.md`. No Docker or database is required for CLI development.
 
+### Behavior spec workflow
+
+Treat `tunedtensor.json` as the source of truth for behavior and training settings.
+Read with `get_local_spec` before proposing `prepare_update_local_spec`; preserve
+unrelated fields and review the diff before `/approve`. Direct `/spec` review,
+validation, diff and history require no model or credentials. Pipelines derive
+from the saved spec by default; only explicit `--file` loads a separate recipe,
+and foundation settings must match the spec. See `docs/spec-workflow.md`.
+
 ### Key commands
 
 All standard dev commands are in `package.json` scripts and documented in `README.md` § Development:

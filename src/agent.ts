@@ -1,5 +1,4 @@
 import chalk from "chalk";
-import { stripVTControlCharacters } from "node:util";
 import {
   type AgentAction,
   type AgentConversationClient,
@@ -10,7 +9,7 @@ import {
   type AgentTurnResult,
 } from "./agent-client.js";
 import { tokenizeShellInput } from "./shell.js";
-import { StreamingTerminalMarkdown } from "./terminal-markdown.js";
+import { sanitizeTerminalText, StreamingTerminalMarkdown } from "./terminal-markdown.js";
 
 const accent = chalk.hex("#8B5CF6");
 const successMark = (): string => chalk.green("✓");
@@ -36,11 +35,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function sanitizeTerminalText(text: string): string {
-  return stripVTControlCharacters(text)
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "");
 }
 
 function helpText(): string {
@@ -177,6 +171,13 @@ export class TunedTensorAgentSession {
     );
     this.options.io.write(`${chalk.bold(sanitizeTerminalText(action.title))}  ${chalk.yellow(`[${sanitizeTerminalText(action.risk)} risk]`)}\n`);
     if (action.summary) this.options.io.write(`${sanitizeTerminalText(action.summary)}\n`);
+    if (action.operation === "update_local_spec") {
+      const preview = action.preview as { diff?: string; validation?: { warnings?: string[] } } | undefined;
+      this.options.io.write(`${sanitizeTerminalText(preview?.diff ?? "No diff available.")}\n`);
+      for (const warning of preview?.validation?.warnings ?? []) this.options.io.write(`${sanitizeTerminalText(warning)}\n`);
+      this.options.io.write("Use /spec diff to review again; /approve saves the edit, /reject leaves the spec unchanged.\n");
+      return;
+    }
     const request = [action.method, action.path].filter(Boolean).join(" ");
     const technical = {
       operation: action.operation,

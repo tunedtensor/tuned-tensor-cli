@@ -6,7 +6,7 @@ const accent = chalk.hex("#8B5CF6");
 const code = chalk.hex("#A78BFA");
 
 /** Remove terminal control characters while preserving normal whitespace. */
-function sanitizeTerminalText(text: string): string {
+export function sanitizeTerminalText(text: string): string {
   return stripVTControlCharacters(text)
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "");
 }

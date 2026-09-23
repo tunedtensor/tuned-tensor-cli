@@ -27,6 +27,7 @@ import {
   formatShellStatus,
 } from "./shell-context.js";
 import { isJsonMode, setJsonMode } from "./output.js";
+import { registerSpecCommands } from "./commands/spec.js";
 import { registerLocalCommands } from "./commands/local.js";
 import { registerAgentCommands } from "./commands/agent.js";
 import { registerPipelineCommands } from "./commands/pipeline.js";
@@ -359,6 +360,7 @@ export function createProgram(
     stdout: runtime.stdout ?? process.stdout,
     stderr: runtime.stderr ?? process.stderr,
   });
+  registerSpecCommands(program, cwd);
   registerPipelineCommands(program);
   registerAuthCommands(program);
   registerBalanceCommands(program);

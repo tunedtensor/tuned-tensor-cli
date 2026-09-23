@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+## [0.17.0] - 2026-09-23
+
+### Added
+
+- Review the saved behavior spec from the terminal with `/spec` and `tt spec`
+  show, diff, validate and history commands, without a model call or credentials.
+- Let the agent read the current spec and propose validated field edits. Approval
+  checks the reviewed snapshot, saves atomically and records before/after history.
+  Secure agent spec edits require Linux; read-only review works on other supported
+  platforms.
+- Add spec workflow and execution regression tests, a workflow guide, and an
+  interactive HTML architecture diagram with code excerpts and repository structure.
+
+### Changed
+
+- Make `tunedtensor.json` the saved recipe for behavior and training settings.
+  CLI commands and agent previews share validation and pipeline derivation, using
+  one parsed snapshot and reporting its SHA-256.
+- Derive pipelines from the spec by default. An adjacent
+  `tunedtensor.pipeline.json` is no longer loaded automatically; pass `--file`
+  explicitly to select an advanced recipe. Foundation training settings in that
+  recipe must match the spec. Runner configuration still controls GPU placement,
+  paths and evaluation policy; agent pipeline approval remains a dry-run.
+
+### Fixed
+
+- Reject stale spec edit approvals and conflicting foundation pipeline settings
+  before writing the spec or starting execution.
+- Fail plan, validate and dry-run when an explicitly named spec is missing,
+  including when an explicit pipeline recipe exists.
+
 ## [0.16.0] - 2026-09-12
 
 ### Added

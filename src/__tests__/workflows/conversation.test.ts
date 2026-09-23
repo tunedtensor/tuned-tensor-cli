@@ -6,6 +6,8 @@ import { promisify } from "node:util";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TunedTensorAgentSession } from "../../agent.js";
+import { createHash } from "node:crypto";
+import { inspectLocalSpec, readSpecHistory } from "../../spec-workspace.js";
 import { LocalAgentStore } from "../../agent-store.js";
 import { createLocalAgentClient } from "../../local-agent-client.js";
 import type { LocalPipelineCommandRunner } from "../../local-pipeline-action.js";
@@ -240,5 +242,59 @@ describe("conversation workflow contracts (scripted provider, real agent and too
     expect(statuses.at(-1)).toBe("error");
     expect(c.streamSimple).toHaveBeenCalledTimes(13);
     expect((await c.store.load(thread.id)).actions).toEqual([]);
+  });
+});
+
+
+describe("spec-centered conversation", () => {
+  it("reads, proposes, reviews, approves, resumes and previews the edited spec through the real tools", async () => {
+    const source = JSON.stringify({ ...spec, hyperparameters: { n_epochs: 3 } });
+    writeFileSync(join(root, "tunedtensor.json"), source);
+    const sha256 = createHash("sha256").update(source).digest("hex");
+    const command = vi.fn<LocalPipelineCommandRunner>(async (args) => {
+      const sealedSpec = JSON.parse(readFileSync(args[args.indexOf("--spec") + 1], "utf8"));
+      expect(sealedSpec.system_prompt).toBe("Classify feedback. Do not add commentary.");
+      expect(sealedSpec.hyperparameters.n_epochs).toBe(3);
+      expect(sealedSpec.examples).toEqual(spec.examples);
+      expect(args).toContain("--dry-run");
+      return { exitCode: 0 };
+    });
+    const c = conversation([
+      { tool: "get_local_spec", args: {} },
+      { tool: "prepare_update_local_spec", args: { expected_sha256: sha256, changes: { system_prompt: "Classify feedback. Do not add commentary." } } },
+      "Review the proposed spec change before approving.",
+      { tool: "prepare_pipeline_run", args: {} },
+      "The pipeline preview uses the approved spec.",
+    ], command);
+    await c.session.handleLine("Make the model avoid commentary while keeping my training settings.");
+    expect(c.errors).toEqual([]);
+    expect(readFileSync(join(root, "tunedtensor.json"), "utf8")).toBe(source);
+    expect(c.output.join("\n")).toContain("@@ system_prompt @@");
+    expect(c.session.snapshot().pendingActions[0].operation).toBe("update_local_spec");
+    await c.session.handleLine("/approve");
+    expect((await readSpecHistory(root))[0].status).toBe("applied");
+    const resumed = c.newSession();
+    await resumed.handleLine(`/resume ${c.session.snapshot().thread!.id}`);
+    await resumed.handleLine("Preview the pipeline for my current spec.");
+    expect(resumed.snapshot().pendingActions[0].arguments).toMatchObject({ spec_sha256: (await inspectLocalSpec(root)).sha256 });
+    await resumed.handleLine("/approve");
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(c.forbidden).not.toHaveBeenCalled();
+    expect(c.errors).toEqual([]);
+  });
+
+  it.each(["reject", "stale"])("does not save an edit after %s", async reason => {
+    const source = JSON.stringify(spec); writeFileSync(join(root, "tunedtensor.json"), source);
+    const c = conversation([
+      { tool: "prepare_update_local_spec", args: { expected_sha256: createHash("sha256").update(source).digest("hex"), changes: { name: "Proposed name" } } },
+      "Ready for review.",
+    ]);
+    await c.session.handleLine("Rename my behavior spec.");
+    if (reason === "stale") writeFileSync(join(root, "tunedtensor.json"), JSON.stringify({ ...spec, name: "External edit" }));
+    await c.session.handleLine(reason === "reject" ? "/reject" : "/approve");
+    expect((await inspectLocalSpec(root)).document).toMatchObject({ name: reason === "reject" ? spec.name : "External edit" });
+    expect(await readSpecHistory(root)).toEqual([]);
+    const state = await c.store.load(c.session.snapshot().thread!.id);
+    expect(state.actions[0].status).toBe(reason === "reject" ? "rejected" : "failed");
   });
 });

@@ -91,6 +91,14 @@ npm run build
 npm link
 ```
 
+## Behavior spec workflow
+
+`tunedtensor.json` is the source of truth for behavior and training settings.
+Use `/spec`, `/spec diff`, `/spec validate`, and `/spec history` in the shell to
+review it without a model call. Ask the agent for changes, inspect its proposed
+diff, then `/approve` to save a validated edit with revision history. Pipeline
+runs use the saved spec. See [the spec workflow](docs/spec-workflow.md).
+
 ## Conversational terminal
 
 The interactive agent harness and conversation state run on your laptop.
@@ -162,11 +170,11 @@ Ask TT anything. Known commands run directly.
 ```
 
 Ordinary sentences go through the locally orchestrated model session. The
-model has no shell or general filesystem tool. It can prepare one new folder
-directly beneath the shell's current working directory with a validated
+model has no shell or general filesystem tool. It can read and propose reviewed
+edits to an existing spec, or prepare one new folder directly beneath the shell's current working directory with a validated
 `tunedtensor.json`, or prepare a local pipeline dry-run sealed to the reviewed
-workspace and spec contents. Neither action starts until `/approve`. The tools refuse path
-traversal, symlinked workspace roots, existing spec targets, unsupported spec
+workspace and spec contents. Writes and pipeline previews wait for `/approve`. The tools refuse path
+traversal, symlinked workspace roots, overwriting a new-project target, unsupported spec
 fields, cloud pipeline targets, and spec changes after review. Known CLI
 commands such as `runs list`, `doctor`, and `models list` still execute directly.
 Prefix a command with `:` when you want to make that intent explicit.
@@ -279,6 +287,10 @@ per step with a sparse last-number exact reward and therefore requires a numeric
 expected output for every example. Treat those metrics as an end-to-end
 execution and overfit check—not held-out capability or multi-GPU evidence when
 no validation corpus is configured.
+
+Without `--file`, pipeline plan/run/validate derive the recipe from the behavior
+spec. Adjacent recipe files are no longer loaded implicitly. Explicit foundation
+recipes must agree with the spec’s training settings.
 
 ```bash
 tt pipeline init --file pipeline.json
