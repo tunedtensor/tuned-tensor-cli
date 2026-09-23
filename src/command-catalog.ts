@@ -22,6 +22,8 @@ const LOCAL = ["local"] as const;
  * for discovery, help, and completion without executing either backend.
  */
 export const COMMAND_CATALOG: readonly CatalogCommand[] = [
+  { path: "spec", description: "Review the current behavior spec.", group: "Workflow", modes: LOCAL },
+  ...["show", "diff", "validate", "history"].map(operation => ({ path: `spec ${operation}`, description: `Review behavior spec ${operation}.`, group: "Workflow" as const, modes: LOCAL })),
   { path: "init", description: "Create a local behaviour-spec project.", group: "Workflow", modes: LOCAL },
   { path: "validate", description: "Validate a local fine-tuning project.", group: "Workflow", modes: LOCAL },
   { path: "doctor", description: "Check the local host and run prerequisites.", group: "Workflow", modes: LOCAL },
@@ -107,6 +109,7 @@ export interface SlashCommand {
 }
 
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
+  { path: "/spec", description: "Review the behavior spec; add diff, validate or history." },
   { path: "/help", description: "Show commands; add a word to filter." },
   { path: "/status", description: "Show lightweight workflow status." },
   { path: "/context", description: "Show the current project context." },

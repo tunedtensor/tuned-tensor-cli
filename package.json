@@ -34,6 +34,8 @@
     "training/foundation/uv.lock",
     "training/foundation/src/*.py",
     "docs/local-runtime",
+    "docs/spec-workflow.md",
+    "docs/spec-architecture.html",
     "examples/local-runtime/*.json",
     "examples/local-runtime/*.jsonl"
   ],

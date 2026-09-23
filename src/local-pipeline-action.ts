@@ -3,17 +3,12 @@ import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
-  canonicalPipeline,
   createExecutionPlan,
-  isFoundationPipeline,
-  parsePipeline,
-  pipelineFromFoundationHyperparameters,
+  pipelineForRunInput,
   type ExecutionPlan,
   type Pipeline,
 } from "./pipeline.js";
 import {
-  assertFoundationSpecReady,
-  assertLocalRunInputReady,
   parseLocalRunInput,
   type LocalRunInput,
 } from "./local-runtime/local-project.js";
@@ -171,16 +166,6 @@ async function resolveAdjacentConfig(args: {
   };
 }
 
-function pipelineForInput(
-  input: Exclude<LocalRunInput, { kind: "request" }>,
-  requested?: unknown,
-): Pipeline {
-  if (requested !== undefined) return requested as Pipeline;
-  return input.kind === "foundation-spec"
-    ? pipelineFromFoundationHyperparameters(input.spec.name, input.spec.foundation)
-    : canonicalPipeline("local");
-}
-
 export async function prepareLocalPipelineAction(args: {
   workspaceRoot: string;
   pipeline?: unknown;
@@ -198,8 +183,6 @@ export async function prepareLocalPipelineAction(args: {
   if (input.kind === "request") {
     throw new Error("Agent pipeline execution requires a tunedtensor.json spec, not a full run request.");
   }
-  if (input.kind === "foundation-spec") assertFoundationSpecReady(input.spec);
-  else assertLocalRunInputReady(input.request);
   const config = await resolveAdjacentConfig({
     workspaceRoot: spec.workspaceRoot,
     specPath: spec.path,
@@ -211,16 +194,7 @@ export async function prepareLocalPipelineAction(args: {
       )
     : undefined;
 
-  const pipeline = pipelineForInput(input, args.pipeline);
-  const normalized = parsePipeline(pipeline);
-  const foundationPipeline = isFoundationPipeline(normalized);
-  if (foundationPipeline !== (input.kind === "foundation-spec")) {
-    throw new Error(
-      foundationPipeline
-        ? "A foundation pipeline requires a foundation tunedtensor.json spec."
-        : "A foundation tunedtensor.json spec requires a foundation pipeline.",
-    );
-  }
+  const pipeline = pipelineForRunInput(input, args.pipeline);
   const plan = createExecutionPlan(pipeline);
   const remote = plan.steps.find((step) => step.target !== "local");
   if (remote) {

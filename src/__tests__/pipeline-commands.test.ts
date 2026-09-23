@@ -66,7 +66,7 @@ describe("pipeline commands", () => {
       program.exitOverride();
       await program.parseAsync([
         "node", "tt", "--json", "pipeline", "run", "--dry-run",
-        "--file", join(dir, "missing.pipeline.json"), "--spec", spec,
+        "--spec", spec,
       ]);
       expect(JSON.parse(log.mock.calls.at(-1)?.[0] as string)).toMatchObject({
         dry_run: true,
@@ -122,7 +122,6 @@ describe("pipeline commands", () => {
 
       await program.parseAsync([
         "node", "tt", "--json", "pipeline", "run", "--dry-run",
-        "--file", join(dir, "generated.pipeline.json"),
         "--spec", spec,
       ]);
       const output = JSON.parse(log.mock.calls.at(-1)?.[0] as string);
@@ -253,7 +252,7 @@ describe("pipeline commands", () => {
     program.exitOverride();
     try {
       process.chdir(dir);
-      await expect(program.parseAsync(["node", "tt", "pipeline", "validate"])).rejects.toThrow(/is an adapter recipe/);
+      await expect(program.parseAsync(["node", "tt", "pipeline", "validate", "--file", "tunedtensor.pipeline.json"])).rejects.toThrow(/is an adapter recipe/);
     } finally {
       process.chdir(cwd);
       rmSync(dir, { recursive: true, force: true });
@@ -299,7 +298,6 @@ describe("pipeline commands", () => {
     try {
       await program.parseAsync([
         "node", "tt", "--json", "pipeline", "run",
-        "--file", join(dir, "missing.pipeline.json"),
         "--spec", spec,
         "--resume", join(dir, "foundation-run"),
       ]);
@@ -366,7 +364,7 @@ describe("pipeline commands", () => {
       name: "Support",
       base_model: "Qwen/Qwen3.5-2B",
       system_prompt: "Classify.",
-      examples: [{ input: "a", output: "b" }],
+      examples: [{ input: "a", output: "b" }, { input: "c", output: "d" }],
     }));
     const previousHome = process.env.TUNED_TENSOR_HOME;
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);

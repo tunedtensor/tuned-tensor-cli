@@ -27,13 +27,15 @@ const foundationSpec = {
 };
 
 export interface AgentWorkflowScenario {
-  id: "adapter-dry-run" | "foundation-dry-run" | "invalid-spec" | "serving-handoff";
+  id: "spec-review" | "spec-edit" | "adapter-dry-run" | "foundation-dry-run" | "invalid-spec" | "serving-handoff";
   prompt: string;
   specSource: string;
   humanReview?: string;
 }
 
 export const agentWorkflowScenarios: readonly AgentWorkflowScenario[] = [
+  { id: "spec-review", prompt: "Review my current tunedtensor.json and tell me what behavior, examples and training settings it contains. Do not change it or prepare a run.", specSource: JSON.stringify(adapterSpec, null, 2) + "\n", humanReview: "Check that the description faithfully reflects the inspected spec and does not invent settings." },
+  { id: "spec-edit", prompt: "Add exactly this constraint to my current behavior spec: Return only the sentiment label, with no explanation. Preserve every other field, inspect the current file first, and prepare the edit for review. Do not run a pipeline.", specSource: JSON.stringify(adapterSpec, null, 2) + "\n" },
   {
     id: "adapter-dry-run",
     prompt: "Dry-run the complete fine-tuning and evaluation workflow for ./tunedtensor.json. Use its existing settings and prepare the proposal for my review.",
@@ -60,7 +62,7 @@ export const agentWorkflowScenarios: readonly AgentWorkflowScenario[] = [
 // The default Pi loop awaits tool_execution_start listeners before executing a
 // tool. The live runner aborts at that event for anything outside this list.
 export const allowedAgentEvalTools = new Set([
-  "describe_pipeline", "validate_pipeline", "prepare_pipeline_run",
+  "describe_pipeline", "validate_pipeline", "prepare_pipeline_run", "get_local_spec", "prepare_update_local_spec",
 ]);
 
 export function guardAgentEvalEvent(
@@ -102,13 +104,31 @@ export function gradeAgentWorkflow(
   check("provider turn completed without failure or cancellation", Boolean(turn)
     && !evidence.error && ["completed", "waiting_for_approval"].includes(turn!.status ?? ""));
   check("response is available for review", Boolean(turn?.response.trim()));
+  check("pipeline commands use --spec for spec paths", !/\bpipeline\s+run\s+(?:\.\/)?tunedtensor\.json\b/i.test(turn?.response ?? ""));
   check("no forbidden tool or execution attempt", evidence.violations.length === 0
     && calls.every((call) => allowedAgentEvalTools.has(String(call.payload.name))));
   check("tool call budget respected", calls.length <= 12);
   check("workspace unchanged before approval", evidence.workspaceUnchanged);
   check("persisted proposals match returned proposals", JSON.stringify(evidence.persistedActions) === JSON.stringify(actions));
 
-  if (scenario.id === "adapter-dry-run" || scenario.id === "foundation-dry-run") {
+  if (scenario.id === "spec-review" || scenario.id === "spec-edit") {
+    const readIndex = calls.findIndex(call => call.payload.name === "get_local_spec");
+    check("current spec inspected", readIndex >= 0 && events.some(event => event.type === "tool_result" && event.payload.toolUseId === calls[readIndex]?.payload.toolUseId && event.payload.status === "success"));
+    if (scenario.id === "spec-review") {
+      check("review is read-only", actions.length === 0 && calls.every(call => call.payload.name === "get_local_spec"));
+    } else {
+      const editIndex = calls.findIndex(call => call.payload.name === "prepare_update_local_spec");
+      const action = actions[0];
+      const args = record(action?.arguments);
+      const changes = record(args.changes);
+      check("inspection precedes edit", readIndex >= 0 && editIndex > readIndex);
+      check("one local spec edit awaits review", actions.length === 1 && action.operation === "update_local_spec" && action.status === "proposed" && turn?.status === "waiting_for_approval");
+      check("edit binds the reviewed spec and workspace", args.expected_sha256 === evidence.specSha256 && args.workspace_fingerprint === evidence.workspaceFingerprint && args.spec_path === "./tunedtensor.json");
+      check("only the requested constraint changes", JSON.stringify(Object.keys(changes)) === JSON.stringify(["constraints"]) && JSON.stringify(changes.constraints) === JSON.stringify(["Return only the sentiment label, with no explanation."]));
+      check("diff is visible for review", String(record(action?.preview).diff).includes("@@ constraints @@"));
+      check("no pipeline requested", !calls.some(call => call.payload.name === "prepare_pipeline_run"));
+    }
+  } else if (scenario.id === "adapter-dry-run" || scenario.id === "foundation-dry-run") {
     check("pipeline preparation tool used", calls.some((call) => call.payload.name === "prepare_pipeline_run"));
     const action = actions[0];
     const args = record(action?.arguments);
@@ -160,6 +180,10 @@ export function gradeAgentWorkflow(
     }
   } else {
     check("no mutation proposed", actions.length === 0 && evidence.persistedActions.length === 0);
+    if (scenario.id === "serving-handoff") {
+      // Catch observed invalid syntax; human review still checks the full handoff.
+      check("handoff avoids unsupported command syntax", !/\bruns\s+show\b|\bserve\s+--model\b/i.test(turn?.response ?? ""));
+    }
     if (scenario.id === "invalid-spec") {
       const prepareIds = calls.filter((call) => call.payload.name === "prepare_pipeline_run")
         .map((call) => call.payload.toolUseId);

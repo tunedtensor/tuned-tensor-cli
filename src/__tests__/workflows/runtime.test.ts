@@ -1,3 +1,6 @@
+import { createProgram } from "../../cli.js";
+import { setJsonMode } from "../../output.js";
+import { applySpecUpdate, inspectLocalSpec, prepareSpecUpdate } from "../../spec-workspace.js";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -265,4 +268,46 @@ describe("local adapter workflow contract", () => {
       expect(rejected.stderr).toMatch(/model not found|no adapter is active/i);
     }
   }, 20_000);
+});
+
+
+it("executes the approved adapter spec through CLI, dataset compiler, trainer protocol and both evaluations", async () => {
+  const { config } = await setup();
+  const specPath = join(root, "tunedtensor.json");
+  await writeFile(specPath, JSON.stringify({ ...request().spec_snapshot, hyperparameters: { n_epochs: 1 } }));
+  const prepared = await prepareSpecUpdate(root, "tunedtensor.json", (await inspectLocalSpec(root)).sha256, {
+    system_prompt: "Classify feedback precisely.", guidelines: ["Use lowercase labels."], constraints: ["No commentary."], hyperparameters: { n_epochs: 3 },
+  });
+  await applySpecUpdate(root, prepared.update);
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  try {
+    await createProgram("test").parseAsync(["--json", "pipeline", "run", "--spec", specPath, "--config", join(root, "local-runner.json")], { from: "user" });
+    const result = JSON.parse(String(log.mock.calls.at(-1)![0]));
+    expect(result.spec.sha256).toBe((await inspectLocalSpec(root)).sha256);
+    const calls = vi.mocked(runLoggedProcess).mock.calls.map(([args]) => args);
+    const training = calls.find(args => args.stage === "training")!;
+    const hp = await json(training.env!.TT_HYPERPARAMETERS_PATH!);
+    expect(hp.n_epochs).toBe("3");
+    const rows = (await readFile(join(training.env!.SM_CHANNEL_TRAINING!, "training.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    for (const row of rows) {
+      expect(row.messages[0].content).toContain("Classify feedback precisely.");
+      expect(row.messages[0].content).toContain("Use lowercase labels.");
+      expect(row.messages[0].content).toContain("No commentary.");
+    }
+    const modelEvaluations = calls.filter(args => /^evaluating_/.test(args.stage ?? ""));
+    expect(modelEvaluations.length).toBeGreaterThanOrEqual(2);
+    for (const args of modelEvaluations) {
+      const input = await json(args.commandArgs[args.commandArgs.indexOf("--input") + 1]!);
+      if (input.examples.some((example: { input: string }) => behaviorExamples.some(row => row.input === example.input))) {
+        expect(input.system).toContain("Classify feedback precisely.");
+        expect(input.system).toContain("Use lowercase labels.");
+        expect(input.system).toContain("No commentary.");
+      } else {
+        // The general-regression suite deliberately uses its own independent prompt.
+        expect(input.system).toBe("You are a helpful assistant.");
+      }
+      expect(input.examples.every((example: object) => !("output" in example))).toBe(true);
+    }
+    expect(config.storeRoot).toBeDefined();
+  } finally { log.mockRestore(); setJsonMode(false); }
 });

@@ -308,3 +308,65 @@ export async function loadLocalRunInput(
     options,
   );
 }
+
+export function specHash(source: string): string {
+  return createHash("sha256").update(source).digest("hex");
+}
+
+export interface SpecValidation {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+/** Business rules shared by spec review, edits, planning and execution. */
+export function validateBehaviorSpec(input: LocalRunInput): SpecValidation {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (input.kind === "request") {
+    return { valid: false, errors: ["Use a behavior spec, not a run request."], warnings };
+  }
+
+  const { spec } = input;
+  const placeholders = input.kind === "foundation-spec"
+    ? foundationPlaceholderIssues(input.spec)
+    : generatedPlaceholderIssues(input.request);
+  if (placeholders.length) {
+    errors.push(`Edit the generated behavior spec before training: ${placeholders.join("; ")}.`);
+  }
+  if (input.kind === "foundation-spec") {
+    if (input.spec.foundation.nproc_per_node !== 1) {
+      errors.push("Foundation nproc_per_node must be 1 for this runtime.");
+    }
+    const nonNumericOutput = spec.examples.some(example =>
+      !/-?\d+(?:\.\d+)?/.test(example.output.replaceAll(",", "")),
+    );
+    if (input.spec.foundation.rl_steps > 0 && nonNumericOutput) {
+      errors.push("Foundation RL requires numeric expected outputs in every example.");
+    }
+  }
+  for (const key of ["name", "system_prompt"] as const) {
+    if (!spec[key].trim()) errors.push(`${key} must not be blank.`);
+  }
+  if (spec.examples.length < 2 && !(input.kind === "spec" && input.spec.dataset_prebuilt)) {
+    errors.push("Add at least two examples for training and evaluation.");
+  }
+  const seen = new Set<string>();
+  for (const [index, example] of spec.examples.entries()) {
+    if (!example.input.trim() || !example.output.trim()) {
+      errors.push(`examples[${index}] input and output must not be blank.`);
+    }
+    const key = example.input.trim();
+    if (seen.has(key)) {
+      errors.push(`examples[${index}] repeats an input; use distinct examples to avoid conflicting labels or train/eval overlap.`);
+    }
+    seen.add(key);
+  }
+  if (!spec.guidelines.length) {
+    warnings.push("Add guidelines to make expected behavior explicit.");
+  }
+  if (spec.examples.length < 10) {
+    warnings.push("This is a small example set; passing validation does not establish model quality.");
+  }
+  return { valid: errors.length === 0, errors, warnings };
+}

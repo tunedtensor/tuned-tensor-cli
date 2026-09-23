@@ -1,3 +1,4 @@
+import { applySpecUpdate, validateSpecUpdate, SpecWorkspaceMismatchError, type SpecUpdate } from "./spec-workspace.js";
 import { createHash } from "node:crypto";
 import type { AgentAction, CloudActionContext } from "./agent-client.js";
 import {
@@ -166,7 +167,14 @@ export async function preflightPreparedAction(
   if (action.status !== "proposed") {
     throw new Error(`Action ${action.id} is not proposed and cannot be approved.`);
   }
-  if (action.operation === "create_local_spec") {
+  if (action.operation === "update_local_spec") {
+    if (!options.workspaceRoot) throw new Error("A local workspace is required to edit a spec.");
+    try { await validateSpecUpdate(options.workspaceRoot, args(action) as unknown as SpecUpdate); }
+    catch (error) {
+      if (error instanceof SpecWorkspaceMismatchError) throw new PreparedActionWorkspaceMismatchError(error.message, error);
+      throw error;
+    }
+  } else if (action.operation === "create_local_spec") {
     const input = args(action);
     const workspaceRoot = options.workspaceRoot;
     if (!workspaceRoot) {
@@ -216,6 +224,13 @@ export async function approvePreparedAction(
     const input = args(action);
 
     switch (action.operation) {
+      case "update_local_spec": {
+        if (!options.workspaceRoot) throw new Error("A local workspace is required to edit a spec.");
+        const update = input as unknown as SpecUpdate;
+        await validateSpecUpdate(options.workspaceRoot, update);
+        execute = () => applySpecUpdate(options.workspaceRoot!, update);
+        break;
+      }
       case "create_local_spec": {
         const workspaceRoot = options.workspaceRoot;
         if (!workspaceRoot) {
@@ -278,7 +293,7 @@ export async function approvePreparedAction(
 
   } catch (error) {
     if (
-      error instanceof LocalPipelineWorkspaceMismatchError
+      (error instanceof LocalPipelineWorkspaceMismatchError || error instanceof SpecWorkspaceMismatchError)
       && options.durableClaimed !== true
     ) {
       throw error;
@@ -303,7 +318,7 @@ export async function approvePreparedAction(
     return output;
   } catch (error) {
     if (
-      (action.operation === "create_local_spec" && isKnownLocalSpecFailure(error))
+      (["create_local_spec", "update_local_spec"].includes(action.operation ?? "") && isKnownLocalSpecFailure(error))
       || (action.operation === "run_local_pipeline" && isKnownLocalPipelineFailure(error))
     ) {
       action.status = "failed";
@@ -326,7 +341,7 @@ export async function approvePreparedAction(
       // The already-persisted executing record remains fail-closed.
     }
     const detail = error instanceof Error ? error.message : String(error);
-    const inspectionTarget = action.operation === "create_local_spec"
+    const inspectionTarget = ["create_local_spec", "update_local_spec"].includes(action.operation ?? "")
       ? "local workspace"
       : action.operation === "run_local_pipeline"
         ? "local run store"

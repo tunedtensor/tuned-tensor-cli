@@ -1,5 +1,6 @@
 import {
   canonicalFoundationPipeline,
+  isFoundationPipeline,
   canonicalPipeline as canonicalPortablePipeline,
   parsePipeline,
   pipelineDocumentSchema,
@@ -9,6 +10,11 @@ import {
   type PipelineTarget,
   type Pipeline as NormalizedPortablePipeline,
 } from "@tuned-tensor/pipeline-contract";
+import {
+  assertLocalRunInputReady,
+  validateBehaviorSpec,
+  type LocalRunInput,
+} from "./local-runtime/local-project.js";
 
 // The portable Pipeline v1 contract lives in `@tuned-tensor/pipeline-contract`.
 // This module re-exports it and adds CLI-only execution planning (step
@@ -186,6 +192,32 @@ export function canonicalPipeline(target: PipelineTarget = "local"): NormalizedP
   return canonicalPortablePipeline(target);
 }
 
+/** One spec-to-recipe path for CLI commands and agent proposals. */
+export function pipelineForRunInput(input: LocalRunInput, requested?: unknown): NormalizedPipeline {
+  if (input.kind === "request") {
+    // Preserve the direct CLI's full run-request compatibility.
+    assertLocalRunInputReady(input.request);
+  } else {
+    const validation = validateBehaviorSpec(input);
+    if (!validation.valid) {
+      throw new Error(`Invalid behavior spec:\n${validation.errors.join("\n")}`);
+    }
+  }
+
+  const foundation = input.kind === "foundation-spec";
+  const recipe = requested !== undefined ? requested : (foundation
+    ? pipelineFromFoundationHyperparameters(input.spec.name, input.spec.foundation)
+    : canonicalPipeline("local"));
+  const pipeline = parsePipeline(recipe);
+  if (isFoundationPipeline(pipeline) !== foundation) {
+    const recipeEngine = isFoundationPipeline(pipeline) ? "a foundation" : "an adapter";
+    const specEngine = foundation ? "a foundation" : "an adapter";
+    throw new Error(`Pipeline is ${recipeEngine} recipe, but the behavior spec is ${specEngine} spec. Use a matching recipe or omit --file.`);
+  }
+  if (foundation) assertFoundationSettingsMatch(input.spec.foundation, pipeline);
+  return pipeline;
+}
+
 /** Resolve a valid pipeline into an ordered plan with explicit cross-target transfers. */
 export function createExecutionPlan(pipeline: unknown, selection: { only?: string[]; skip?: string[] } = {}): ExecutionPlan {
   const errors = validatePipeline(pipeline);
@@ -210,4 +242,26 @@ export function createExecutionPlan(pipeline: unknown, selection: { only?: strin
     return { ...step, transfers };
   });
   return { version: 1, ...(normalized.name ? { name: normalized.name } : {}), steps: resolved };
+}
+
+/** Pipeline recipes may select stages, but cannot override the behavior spec's training settings. */
+export function assertFoundationSettingsMatch(
+  hp: FoundationPipelineHyperparameters,
+  plan: Pick<NormalizedPipeline, "steps">,
+): void {
+  const settings: Record<string, Record<string, number>> = {
+    tokenize: { vocabSize: hp.vocab_size, maxChars: hp.max_chars },
+    pretrain: { depth: hp.depth, steps: hp.pretrain_steps, batchSize: hp.batch_size, sequenceLength: hp.sequence_length, nprocPerNode: hp.nproc_per_node },
+    finetune: { steps: hp.finetune_steps, batchSize: hp.batch_size },
+    rl: { steps: hp.rl_steps },
+  };
+  for (const step of plan.steps) {
+    const fields = "with" in step ? step.with as Record<string, unknown> : undefined;
+    for (const [key, expected] of Object.entries(settings[step.uses] ?? {})) {
+      if (fields?.[key] !== undefined && fields[key] !== expected) {
+        throw new Error(`Pipeline step ${step.id}.${key} conflicts with the behavior spec. Edit tunedtensor.json and regenerate the recipe, or omit --file.`);
+      }
+    }
+    if (step.uses === "rl" && hp.rl_steps === 0) throw new Error("The behavior spec disables RL; update foundation.rl_steps before adding an RL stage.");
+  }
 }

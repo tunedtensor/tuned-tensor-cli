@@ -27,6 +27,7 @@ Python run may need network access to install its locked `uv` dependencies.
 | User expectation | Executable contract | Real boundary exercised |
 | --- | --- | --- |
 | “Create my project, then preview fine-tuning.” | `conversation.test.ts`: prepare, approve, resume, prepare pipeline, approve | Real Pi loop, tools, file creation, durable thread/actions, session controls, and CLI subprocess plan |
+| “Review and revise my spec, then run those settings.” | Spec conversation, workspace and execution tests | Read-only shell commands, actual edit approval and history, stale-edit refusal, and approved instructions/settings reaching adapter and foundation process inputs |
 | “Only run what I reviewed.” | Reject and changed spec/config cases | Real proposal fingerprints, approval checks, zero command dispatch |
 | “Preview approval must not start training.” | Persisted proposal changed to real execution | Approval rejects it before command dispatch |
 | “Tell me when work fails; don't run it twice.” | Execution/provider failure and duplicate approval cases | Persisted terminal action, visible failure, no model call during approval, no repeated dispatch |
@@ -83,14 +84,14 @@ Managed inference consumes TT usage allowance; BYO calls use the selected
 provider's billing. The runner uses the normal model-runtime initialization,
 including its saved configuration normalization and any provider credential refresh.
 
-Four synthetic cases cover an adapter preview, a foundation preview,
+Six synthetic cases cover spec review, a reviewed spec edit, an adapter preview, a foundation preview,
 an invalid spec, and an honest handoff for report inspection and serving.
 Assertions check tool use, sealed proposal contents, requested execution mode,
 pipeline stages and settings, persisted state, and lack of workspace changes.
 They do not compare exact prose or ask a judge model to approve another model.
 
 Every case creates a fresh temporary project and conversation. Nothing is
-approved. The runner blocks tools outside pipeline description, validation,
+approved. The runner permits spec inspection and edit proposals as well as pipeline description, validation,
 and preparation, so it cannot initiate training, model downloads, or Hub
 searches. It limits each case to 8 model requests, 12 tool calls, a 90-second
 deadline, and 2,048 output tokens per model response by default. Use the

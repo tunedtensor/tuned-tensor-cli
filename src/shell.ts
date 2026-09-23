@@ -1,4 +1,8 @@
 import chalk from "chalk";
+import { sanitizeTerminalText } from "./terminal-markdown.js";
+import { reviewSpec } from "./commands/spec.js";
+import { inspectLocalSpec } from "./spec-workspace.js";
+import type { AgentAction } from "./agent-client.js";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
@@ -37,6 +41,7 @@ import { promptHiddenInput, promptVisibleInput } from "./secret-prompt.js";
 export type { WorkflowMode } from "./command-catalog.js";
 
 export interface ShellAgent {
+  snapshot?(): { pendingActions: AgentAction[] };
   busy: boolean;
   handleLine(
     input: string,
@@ -235,6 +240,7 @@ function hasCatalogIntent(input: string): boolean {
 }
 
 export type SlashCommandName =
+  | "spec"
   | "palette"
   | "help"
   | "status"
@@ -251,6 +257,7 @@ export interface ParsedSlashCommand {
 }
 
 const SLASH_NAMES = new Set([
+  "spec",
   "help",
   "status",
   "context",
@@ -517,7 +524,7 @@ export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
     chalk.dim(
       `agent ${agentModelLabel(snapshot.context)} · workflow model ${activeModelLabel(snapshot)}`,
     ),
-    chalk.dim("ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete"),
+    chalk.dim("/spec review · ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete"),
     "",
     chalk.dim(
       configured
@@ -741,6 +748,28 @@ export class TunedTensorShellSession {
 
   private async handleSlash(command: ParsedSlashCommand): Promise<ShellLineAction> {
     switch (command.name) {
+      case "spec": {
+        if (command.args.length > 2) throw new ShellParseError("Usage: /spec [show|diff|validate|history] [path/to/tunedtensor.json]");
+        const [operation = "show", path = "tunedtensor.json"] = command.args;
+        if (operation === "diff") {
+          const current = await inspectLocalSpec(this.cwd, path);
+          const pending = this.agent?.snapshot?.().pendingActions.filter(action => {
+            const input = action.arguments as Record<string, unknown> | undefined;
+            return action.operation === "update_local_spec" && input?.spec_path === current.displayPath && input.workspace_fingerprint === current.workspaceFingerprint;
+          }) ?? [];
+          if (pending.length) {
+            for (const action of pending) {
+              const preview = action.preview as { diff?: string };
+              const input = action.arguments as { expected_sha256?: string };
+              const text = `Pending edit ${action.id.slice(0, 8)}${input.expected_sha256 !== current.sha256 ? " (stale; prepare again)" : ""}\n${preview.diff}\n`;
+              this.io.write(sanitizeTerminalText(text));
+            }
+            return "continue";
+          }
+        }
+        this.io.write(`${sanitizeTerminalText((await reviewSpec(this.cwd, operation, path)).text)}\n`);
+        return "continue";
+      }
       case "palette":
         this.io.write(helpText(this.mode, undefined, true));
         return "continue";
