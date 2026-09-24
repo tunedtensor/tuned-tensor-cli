@@ -58,7 +58,7 @@ export function resolvePublishStoreRoot(options?: {
   if (existsSync(projectPath)) {
     const spec = localBehaviorSpecFileSchema.parse(JSON.parse(readFileSync(projectPath, "utf8")));
     if (existsSync(localConfigPath) && (spec.runtime || spec.evaluation)) throw new Error("Conflicting configuration sources; migrate local-runner.json first.");
-    if (!existsSync(localConfigPath)) return expandPath(spec.runtime?.storeRoot ?? env.TT_LOCAL_HOME ?? DEFAULT_PROJECT_STORE_ROOT, cwd, homeDirectory);
+    if (!existsSync(localConfigPath)) return expandPath(spec.runtime?.storeRoot ?? (env.TT_LOCAL_HOME?.trim() || DEFAULT_PROJECT_STORE_ROOT), cwd, homeDirectory);
   }
   if (existsSync(localConfigPath)) {
     try {

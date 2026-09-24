@@ -135,6 +135,15 @@ describe("single spec workflows", () => {
 
 
 describe("single-spec review regressions", () => {
+  it("uses the project store consistently when TT_LOCAL_HOME is blank", async () => {
+    vi.stubEnv("TT_LOCAL_HOME", "   ");
+    try {
+      expect((await resolveProjectConfig(file)).config.storeRoot).toBe(join(root, ".tuned-tensor/store"));
+      expect(resolvePublishStoreRoot({ cwd: root })).toBe(join(root, ".tuned-tensor/store"));
+      expect((await discoverShellContext({ cwd: root })).local.storeRoot).toBe(join(root, ".tuned-tensor/store"));
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it("requires conversation recipe changes to be saved in the spec first", async () => {
     const pipeline = canonicalPipeline("local"); pipeline.steps = pipeline.steps.slice(0, 1);
     await expect(prepareLocalPipelineAction({ workspaceRoot: root, pipeline })).rejects.toThrow(/saved spec drives execution/);
