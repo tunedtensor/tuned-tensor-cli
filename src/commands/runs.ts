@@ -618,7 +618,7 @@ export function registerRunsCommands(parent: Command) {
       .description("Retired: use the local pipeline with your own AWS GPU")
       .argument("[spec-id]")
       .action(() => {
-        throw new Error("Hosted training is retired. Configure gpu in local-runner.json and use tt run or tt pipeline run. See docs/local-runtime/aws-gpu.md.");
+        throw new Error("Hosted training is retired. Configure runtime.gpu in tunedtensor.json and use tt run or tt pipeline run. See docs/local-runtime/aws-gpu.md.");
       });
   }
 

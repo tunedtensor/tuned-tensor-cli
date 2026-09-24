@@ -3,6 +3,7 @@ import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
+  canonicalJson,
   createExecutionPlan,
   pipelineForRunInput,
   type ExecutionPlan,
@@ -13,6 +14,7 @@ import {
   type LocalRunInput,
 } from "./local-runtime/local-project.js";
 import { parseLocalRunnerConfig } from "./local-runtime/orchestrator.js";
+import { configForSpec } from "./local-runtime/project-workflow.js";
 import type { LocalRunnerConfig } from "./local-runtime/contracts.js";
 import { canonicalWorkspace, fingerprintWorkspace } from "./local-spec-workspace.js";
 
@@ -187,12 +189,13 @@ export async function prepareLocalPipelineAction(args: {
     workspaceRoot: spec.workspaceRoot,
     specPath: spec.path,
   });
+  if (config && (input.spec.runtime || input.spec.evaluation)) throw new Error("Conflicting configuration sources: migrate local-runner.json into tunedtensor.json.");
   const resolvedConfig = config
     ? parseLocalRunnerConfig(
         JSON.parse(config.source.toString("utf8")) as unknown,
         config.path,
       )
-    : undefined;
+    : configForSpec(input.spec, spec.path);
 
   const pipeline = pipelineForRunInput(input, args.pipeline);
   const plan = createExecutionPlan(pipeline);
@@ -201,6 +204,9 @@ export async function prepareLocalPipelineAction(args: {
     throw new Error(
       `Step "${remote.id}" targets cloud execution. The laptop-local agent can only approve local pipelines.`,
     );
+  }
+  if (canonicalJson(pipeline) !== canonicalJson(pipelineForRunInput(input))) {
+    throw new Error("The saved spec drives execution. Update tunedtensor.json.pipeline and review the edit before previewing a different recipe.");
   }
   const dryRun = args.dryRun ?? true;
   if (!dryRun) {
@@ -217,10 +223,10 @@ export async function prepareLocalPipelineAction(args: {
     dryRun,
     engine: input.kind === "foundation-spec" ? "foundation" : "adapter",
     resolvedSpec: input.spec,
+    resolvedConfig,
     ...(config ? {
       configPath: config.displayPath,
       configSha256: createHash("sha256").update(config.source).digest("hex"),
-      resolvedConfig,
     } : {}),
     workspaceRoot: spec.workspaceRoot,
     workspaceFingerprint: spec.workspaceFingerprint,
@@ -280,41 +286,19 @@ export async function executeLocalPipelineAction(args: ValidatePreparedLocalPipe
 
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "tt-agent-pipeline-"));
   const temporaryId = randomUUID();
-  const pipelinePath = join(temporaryDirectory, `${temporaryId}.pipeline.json`);
   const specPath = join(temporaryDirectory, `${temporaryId}.spec.json`);
-  const configPath = prepared.resolvedConfig
-    ? join(temporaryDirectory, `${temporaryId}.config.json`)
-    : undefined;
-  const command = [
-    "pipeline",
-    "run",
-    "--file",
-    pipelinePath,
-    "--spec",
-    specPath,
-    ...(configPath ? ["--config", configPath] : []),
-    ...(prepared.dryRun ? ["--dry-run"] : []),
-  ];
+  const config = prepared.resolvedConfig!;
+  const { evaluation, dryRun: _dryRun, ...runtime } = config;
+  const sealedSpec = {
+    ...prepared.resolvedSpec,
+    pipeline: prepared.pipeline,
+    ...(prepared.engine === "adapter" ? { runtime, evaluation } : {
+      runtime: { ...prepared.resolvedSpec.runtime, ...(config.gpu ? { gpu: config.gpu } : {}) },
+    }),
+  };
+  const command = ["pipeline", "run", "--spec", specPath, "--dry-run"];
   try {
-    await Promise.all([
-      writeFile(pipelinePath, `${JSON.stringify(prepared.pipeline, null, 2)}\n`, {
-        encoding: "utf8",
-        mode: 0o600,
-        flag: "wx",
-      }),
-      ...(configPath && prepared.resolvedConfig ? [
-        writeFile(configPath, `${JSON.stringify(prepared.resolvedConfig, null, 2)}\n`, {
-          encoding: "utf8",
-          mode: 0o600,
-          flag: "wx",
-        }),
-      ] : []),
-      writeFile(specPath, `${JSON.stringify(prepared.resolvedSpec, null, 2)}\n`, {
-        encoding: "utf8",
-        mode: 0o600,
-        flag: "wx",
-      }),
-    ]);
+    await writeFile(specPath, `${JSON.stringify(sealedSpec, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
     const result = await args.runCommand(command, {
       cwd: prepared.workspaceRoot,
       signal: args.signal,

@@ -1,4 +1,5 @@
 import {
+  canonicalJson,
   canonicalFoundationPipeline,
   isFoundationPipeline,
   canonicalPipeline as canonicalPortablePipeline,
@@ -205,7 +206,11 @@ export function pipelineForRunInput(input: LocalRunInput, requested?: unknown): 
   }
 
   const foundation = input.kind === "foundation-spec";
-  const recipe = requested !== undefined ? requested : (foundation
+  const embedded = input.kind === "request" ? undefined : input.spec.pipeline;
+  if (embedded && requested !== undefined && canonicalJson(parsePipeline(embedded)) !== canonicalJson(parsePipeline(requested))) {
+    throw new Error("Conflicting pipeline settings: update tunedtensor.json.pipeline before running a different recipe.");
+  }
+  const recipe = requested !== undefined ? requested : embedded ?? (foundation
     ? pipelineFromFoundationHyperparameters(input.spec.name, input.spec.foundation)
     : canonicalPipeline("local"));
   const pipeline = parsePipeline(recipe);

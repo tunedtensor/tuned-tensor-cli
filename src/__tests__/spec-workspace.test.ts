@@ -39,6 +39,22 @@ describe("behavior spec review and editing", () => {
     expect((await reviewSpec(root, "diff")).text).toContain('@@ name @@');
   });
 
+  it("merges reviewed runtime/evaluation changes without losing nested settings", async () => {
+    await writeFile(join(root, "tunedtensor.json"), JSON.stringify({ ...spec,
+      runtime: { artifactRoot: "artifacts", paths: { baseModel: "model", modelCache: "cache" } },
+      evaluation: { inference: { maxNewTokens: 8, device: "cuda" }, scoring: { mode: "exact_match" } },
+    }));
+    const prepared = await proposal({ runtime: { paths: { modelCache: null } }, evaluation: { inference: { maxNewTokens: 16 } } });
+    await applySpecUpdate(root, prepared.update);
+    expect((await inspectLocalSpec(root)).document).toMatchObject({
+      runtime: { artifactRoot: "artifacts", paths: { baseModel: "model" } },
+      evaluation: { inference: { maxNewTokens: 16, device: "cuda" }, scoring: { mode: "exact_match" } },
+    });
+    expect(((await inspectLocalSpec(root)).document as Record<string, unknown>).runtime).not.toHaveProperty("paths.modelCache");
+    await applySpecUpdate(root, (await proposal({ runtime: null, evaluation: null })).update);
+    expect((await inspectLocalSpec(root)).document).toEqual(spec);
+  });
+
   it.each([
     { system_prompt: "   " }, { examples: [{ input: "a", output: "b" }] },
     { examples: [{ input: "a", output: "b" }, { input: "a", output: "c" }] },

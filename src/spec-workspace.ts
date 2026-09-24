@@ -5,10 +5,12 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import { canonicalWorkspace, fingerprintWorkspace, LocalSpecMutationError } from "./local-spec-workspace.js";
 import { parseLocalRunInput, specHash, validateBehaviorSpec, type SpecValidation } from "./local-runtime/local-project.js";
 
+import { pipelineForRunInput } from "./pipeline.js";
+
 const MAX_BYTES = 200_000;
 const EDIT_KEYS = new Set([
   "name", "description", "system_prompt", "guidelines", "constraints", "examples",
-  "base_model", "hyperparameters", "foundation", "dataset_prebuilt",
+  "base_model", "hyperparameters", "foundation", "dataset_prebuilt", "runtime", "evaluation", "pipeline",
 ]);
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -17,7 +19,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
 /** Parse once for review; retain the original document so edits preserve its fields. */
 function validateDocument(document: unknown, path: string): SpecValidation {
   try {
-    return validateBehaviorSpec(parseLocalRunInput(document, path));
+    const input = parseLocalRunInput(document, path);
+    const result = validateBehaviorSpec(input);
+    if (result.valid) pipelineForRunInput(input);
+    return result;
   } catch (error) {
     return { valid: false, errors: [(error as Error).message], warnings: [] };
   }
@@ -138,6 +143,18 @@ export async function prepareSpecUpdate(workspaceRoot: string, specPath: string,
     throw new Error("Provide supported spec field changes; identity and engine cannot be changed by an edit.");
   }
   const next = { ...current.document, ...changes };
+  function mergeSettings(before: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+    const result = { ...before };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) delete result[key];
+      else result[key] = isObject(value) && isObject(result[key]) ? mergeSettings(result[key], value) : value;
+    }
+    return result;
+  }
+  for (const key of ["runtime", "evaluation", "pipeline"]) {
+    if (changes[key] === null) delete next[key];
+    else if (key !== "pipeline" && isObject(changes[key])) next[key] = mergeSettings(isObject(current.document[key]) ? current.document[key] : {}, changes[key]);
+  }
   for (const key of ["hyperparameters", "foundation"] as const) {
     if (isObject(changes[key])) {
       const previous = isObject(current.document[key]) ? current.document[key] : {};

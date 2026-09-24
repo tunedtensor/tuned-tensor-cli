@@ -76,6 +76,16 @@ export function resolveLocalRunInputPaths(raw: unknown, inputPath: string): unkn
       if (fields[key] !== undefined) fields[key] = resolveLocalReference(fields[key], baseDirectory);
     }
   }
+  const runtime = value.runtime as Record<string, unknown> | undefined;
+  if (runtime && typeof runtime === "object") {
+    for (const key of ["artifactRoot", "storeRoot"]) if (runtime[key] !== undefined) runtime[key] = resolveLocalReference(runtime[key], baseDirectory);
+    const gpu = runtime.gpu as Record<string, unknown> | undefined;
+    if (gpu?.identityFile !== undefined) gpu.identityFile = resolveLocalReference(gpu.identityFile, baseDirectory);
+    const paths = runtime.paths as Record<string, unknown> | undefined;
+    if (paths && typeof paths === "object") for (const key of ["baseModel", "modelCache"]) if (paths[key] !== undefined) paths[key] = resolveLocalReference(paths[key], baseDirectory);
+  }
+  const regression = (value.evaluation as { generalRegression?: Record<string, unknown> } | undefined)?.generalRegression;
+  if (regression?.dataset !== undefined) regression.dataset = resolveLocalReference(regression.dataset, baseDirectory);
   const foundation = value.foundation;
   if (foundation && typeof foundation === "object" && !Array.isArray(foundation)) {
     const fields = foundation as Record<string, unknown>;
@@ -241,6 +251,9 @@ export function runRequestFromLocalSpec(
   const {
     id,
     engine: _engine,
+    evaluation: _evaluation,
+    runtime: _runtime,
+    pipeline: _pipeline,
     hyperparameters,
     dataset_prebuilt: datasetPrebuilt,
     ...specSnapshot

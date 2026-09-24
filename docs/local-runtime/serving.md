@@ -38,7 +38,7 @@ not mutate the training runtime.
 ```bash
 tt models prefetch tunedtensor.json
 
-tt serve local-<run-id> --config local-runner.json \
+tt serve local-<run-id> \
   --context-length 8192 --max-tokens 512
 ```
 
@@ -81,7 +81,7 @@ Export a new isolated configuration rather than replacing global settings:
 
 ```bash
 export PI_CODING_AGENT_DIR="$(mktemp -d)"
-tt serve local-<run-id> --config local-runner.json \
+tt serve local-<run-id> \
   --context-length 8192 --max-tokens 512 \
   --print-client-config pi > "$PI_CODING_AGENT_DIR/models.json"
 ```

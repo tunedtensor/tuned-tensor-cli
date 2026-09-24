@@ -248,7 +248,7 @@ describe("conversation workflow contracts (scripted provider, real agent and too
 
 describe("spec-centered conversation", () => {
   it("reads, proposes, reviews, approves, resumes and previews the edited spec through the real tools", async () => {
-    const source = JSON.stringify({ ...spec, hyperparameters: { n_epochs: 3 } });
+    const source = JSON.stringify({ ...spec, hyperparameters: { n_epochs: 3 }, evaluation: { inference: { maxNewTokens: 8, device: "cuda" } }, runtime: { artifactRoot: "artifacts" } });
     writeFileSync(join(root, "tunedtensor.json"), source);
     const sha256 = createHash("sha256").update(source).digest("hex");
     const command = vi.fn<LocalPipelineCommandRunner>(async (args) => {
@@ -256,17 +256,19 @@ describe("spec-centered conversation", () => {
       expect(sealedSpec.system_prompt).toBe("Classify feedback. Do not add commentary.");
       expect(sealedSpec.hyperparameters.n_epochs).toBe(3);
       expect(sealedSpec.examples).toEqual(spec.examples);
+      expect(sealedSpec.evaluation.inference).toMatchObject({ maxNewTokens: 16, device: "cuda" });
+      expect(sealedSpec.runtime.artifactRoot).toBe(join(root, "artifacts"));
       expect(args).toContain("--dry-run");
       return { exitCode: 0 };
     });
     const c = conversation([
       { tool: "get_local_spec", args: {} },
-      { tool: "prepare_update_local_spec", args: { expected_sha256: sha256, changes: { system_prompt: "Classify feedback. Do not add commentary." } } },
+      { tool: "prepare_update_local_spec", args: { expected_sha256: sha256, changes: { system_prompt: "Classify feedback. Do not add commentary.", evaluation: { inference: { maxNewTokens: 16 } } } } },
       "Review the proposed spec change before approving.",
       { tool: "prepare_pipeline_run", args: {} },
       "The pipeline preview uses the approved spec.",
     ], command);
-    await c.session.handleLine("Make the model avoid commentary while keeping my training settings.");
+    await c.session.handleLine("Make the model avoid commentary and increase evaluation generation to 16 tokens while keeping my training settings.");
     expect(c.errors).toEqual([]);
     expect(readFileSync(join(root, "tunedtensor.json"), "utf8")).toBe(source);
     expect(c.output.join("\n")).toContain("@@ system_prompt @@");

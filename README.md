@@ -288,29 +288,32 @@ expected output for every example. Treat those metrics as an end-to-end
 execution and overfit check—not held-out capability or multi-GPU evidence when
 no validation corpus is configured.
 
-Without `--file`, pipeline plan/run/validate derive the recipe from the behavior
-spec. Adjacent recipe files are no longer loaded implicitly. Explicit foundation
-recipes must agree with the spec’s training settings.
+`tunedtensor.json` contains behavior, training settings, optional `evaluation`,
+`runtime`, and advanced `pipeline` sections. Pipelines use the embedded recipe
+or derive it from the saved spec. Only explicit `--file` loads a separate recipe;
+it cannot override a conflicting embedded recipe. Foundation recipes must match
+the spec's training settings.
 
 ```bash
-tt pipeline init --file pipeline.json
-tt pipeline init --engine foundation --file foundation.pipeline.json
-tt pipeline validate --file pipeline.json
-tt --json pipeline plan --file pipeline.json
-tt --json pipeline run --dry-run --file pipeline.json --only baseline
-tt --json pipeline run --file pipeline.json \
-  --spec tunedtensor.json --config local-runner.json
-tt init --engine foundation --name "Tiny GPT"
-tt --json pipeline run --spec tunedtensor.json --dry-run
-tt pipeline run --spec tunedtensor.json --resume /absolute/path/to/foundation-run
+tt pipeline validate --spec tunedtensor.json
+tt --json pipeline plan --spec tunedtensor.json
+tt pipeline run --spec tunedtensor.json --dry-run
+tt pipeline run --spec tunedtensor.json
+# Optional: embed the current derived recipe for customization
+tt pipeline init --spec tunedtensor.json
+# Existing projects: consolidate sidecars, retaining .bak copies
+tt pipeline migrate --spec tunedtensor.json
 ```
 
-When `--config` is omitted, `pipeline run` uses `local-runner.json` beside the
-selected spec when that file exists.
+Relative runtime paths resolve beside the spec. New project state uses
+`.tuned-tensor/store` and `.tuned-tensor/artifacts`. Legacy `local-runner.json`
+remains readable with a warning; migrate it before adding inline runtime or
+evaluation settings. See [single-file examples](examples/single-spec) and the
+[spec workflow](docs/spec-workflow.md).
 
 `--only` and `--skip` preserve dependency safety: a selected step cannot refer
-to an omitted predecessor. Keep step targets local and configure `gpu` in
-`local-runner.json` to execute GPU work on your AWS instance. Adapter and
+to an omitted predecessor. Keep step targets local and configure `runtime.gpu` in
+`tunedtensor.json` to execute GPU work on your AWS instance. Adapter and
 foundation workflows use the same local pipeline. The TT agent may describe,
 validate, and prepare a sealed pipeline action; only deterministic `/approve`
 handling can execute it.
@@ -389,18 +392,20 @@ tt init \
 
 Edit the generated `tunedtensor.json`, replacing the placeholder system prompt and both placeholder examples.
 For a local GPU, `tt hardware` reports this machine's training and serving
-capacity. For an AWS GPU, save the following as `local-runner.json` beside the
-spec, replacing the instance, region, profile and SSH settings with your own:
+capacity. For an AWS GPU, add the following `runtime` section to your
+`tunedtensor.json`, replacing the instance, region, profile and SSH settings with your own:
 
 ```json
 {
-  "gpu": {
-    "provider": "aws",
-    "profile": "research",
-    "region": "eu-west-1",
-    "instanceId": "i-0123456789abcdef0",
-    "user": "ubuntu",
-    "identityFile": "~/.ssh/research-gpu.pem"
+  "runtime": {
+    "gpu": {
+      "provider": "aws",
+      "profile": "research",
+      "region": "eu-west-1",
+      "instanceId": "i-0123456789abcdef0",
+      "user": "ubuntu",
+      "identityFile": "~/.ssh/research-gpu.pem"
+    }
   }
 }
 ```
@@ -419,7 +424,7 @@ tt pipeline run --spec tunedtensor.json --dry-run
 tt pipeline run --spec tunedtensor.json
 ```
 
-These commands discover the adjacent `local-runner.json`. The preview needs
+These commands read runtime and evaluation settings from the core spec. The preview needs
 no GPU or AWS connection. Results return to the local run and model stores:
 
 ```bash
@@ -451,7 +456,7 @@ Activation is optional and requires the run to pass a configured
 `generalRegression` gate. Without that suite, `tt models activate` fails
 closed. `tt serve active` also fails closed if nothing is activated — it does
 not silently serve the protected base model. Once activated, use
-`tt serve active --config local-runner.json`.
+`tt serve active`.
 
 `tt serve base` does not automatically inject the adjacent project spec.
 Pass `--spec tunedtensor.json` when the server should enforce its instructions.

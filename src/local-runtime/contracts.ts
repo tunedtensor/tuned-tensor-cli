@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { pipelineDocumentSchema, isFoundationPipeline, parsePipeline } from "@tuned-tensor/pipeline-contract";
 import { DEFAULT_ARTIFACT_ROOT } from "../paths.js";
 import { canonicalizeTrainingModel } from "./model-registry.js";
 
@@ -62,13 +63,6 @@ export const foundationHyperparametersSchema = z.object({
   log_interval_steps: z.number().int().min(1).max(1_000_000).optional(),
 }).strict();
 
-export const localFoundationSpecFileSchema = behaviorSpecSchema.extend({
-  engine: z.literal("foundation"),
-  id: z.string().uuid().optional(),
-  examples: z.array(behaviorSpecExampleSchema).min(2),
-  foundation: foundationHyperparametersSchema,
-});
-
 export const datasetPrebuiltSchema = z.object({
   training: z.string().min(1),
   validation: z.string().min(1).optional(),
@@ -115,18 +109,6 @@ export const fineTuneRunRequestSchema = z.object({
     });
   }
 });
-
-export const localAdapterSpecFileSchema = specSnapshotSchema.extend({
-  engine: z.literal("adapter").optional(),
-  id: z.string().uuid().optional(),
-  hyperparameters: fineTuneHyperparametersSchema.optional(),
-  dataset_prebuilt: datasetPrebuiltSchema.optional(),
-}).strict();
-
-export const localBehaviorSpecFileSchema = z.union([
-  localFoundationSpecFileSchema,
-  localAdapterSpecFileSchema,
-]);
 
 export const evalExampleResultSchema = z.object({
   prompt: z.string(),
@@ -328,6 +310,47 @@ export const localRunnerConfigSchema = z.object({
     baselineCache: true,
   }),
 }).strict();
+
+// User-authored project configuration. Runtime defaults are applied only by the resolver.
+export const projectRuntimeSchema = z.object({
+  gpu: localRunnerConfigSchema.shape.gpu,
+  artifactRoot: z.string().min(1).optional(),
+  storeRoot: z.string().min(1).optional(),
+  paths: z.object({ baseModel: z.string().min(1).optional(), modelCache: z.string().min(1).optional() }).strict().optional(),
+}).strict();
+const projectWorkflowFields = {
+  evaluation: evaluationConfigSchema.optional(),
+  runtime: projectRuntimeSchema.optional(),
+  pipeline: pipelineDocumentSchema.optional(),
+};
+
+export const localFoundationSpecFileSchema = behaviorSpecSchema.extend({
+  ...projectWorkflowFields,
+  engine: z.literal("foundation"),
+  id: z.string().uuid().optional(),
+  examples: z.array(behaviorSpecExampleSchema).min(2),
+  foundation: foundationHyperparametersSchema,
+});
+
+export const localAdapterSpecFileSchema = specSnapshotSchema.extend({
+  ...projectWorkflowFields,
+  engine: z.literal("adapter").optional(),
+  id: z.string().uuid().optional(),
+  hyperparameters: fineTuneHyperparametersSchema.optional(),
+  dataset_prebuilt: datasetPrebuiltSchema.optional(),
+}).strict();
+
+export const localBehaviorSpecFileSchema = z.union([
+  localFoundationSpecFileSchema,
+  localAdapterSpecFileSchema,
+]).superRefine((spec, ctx) => {
+  if (spec.pipeline && isFoundationPipeline(parsePipeline(spec.pipeline)) !== (spec.engine === "foundation")) {
+    ctx.addIssue({ code: "custom", path: ["pipeline"], message: "Pipeline engine must match the spec engine." });
+  }
+  if (spec.engine === "foundation" && (spec.evaluation || spec.runtime?.storeRoot || spec.runtime?.paths)) {
+    ctx.addIssue({ code: "custom", path: ["runtime"], message: "Foundation uses foundation settings for evaluation and checkpoints; runtime.artifactRoot and runtime.gpu are supported." });
+  }
+});
 
 export type BehaviorSpecExample = z.infer<typeof behaviorSpecExampleSchema>;
 export type BehaviorSpec = z.infer<typeof behaviorSpecSchema>;

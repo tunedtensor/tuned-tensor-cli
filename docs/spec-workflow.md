@@ -47,7 +47,8 @@ for an invalid spec.
 `get_local_spec` returns the document, validation diagnostics and content hash.
 `prepare_update_local_spec` requires that hash and a patch of supported fields.
 Arrays replace their whole field; `hyperparameters` and `foundation` merge by
-key. Unmentioned fields remain unchanged. Identity and engine cannot change
+key. `runtime` and `evaluation` merge recursively; null removes optional settings.
+`pipeline` replaces the entire recipe (null restores the derived default). Unmentioned fields remain unchanged. Identity and engine cannot change
 through this edit tool. The full resulting document must pass the runtime's
 strict schema, readiness checks, nonblank content checks and distinct-example
 checks. Small example sets produce a warning; validation is not a claim of model
@@ -82,7 +83,7 @@ tt pipeline run --spec tunedtensor.json --dry-run
 tt pipeline run --spec tunedtensor.json
 ```
 
-The default pipeline derives from the current spec. An adjacent
+The pipeline uses the optional `pipeline` section or derives from the current spec. An adjacent
 `tunedtensor.pipeline.json` is no longer loaded implicitly. To select an advanced
 recipe explicitly, pass `--file`; a missing explicit recipe or `--spec` file fails. Foundation
 training parameters in an explicit recipe must agree with the spec, including
@@ -100,10 +101,30 @@ The command reads one spec snapshot for planning, hardware warnings and executio
 JSON and final result JSON identify its path and SHA-256. The spec's compiled
 instructions and examples feed training and task evaluation; the independently
 configured general-regression suite keeps its own prompt. Provider choice and
-GPU placement remain separate runtime choices in agent configuration and
-`local-runner.json`. Evaluation policy (inference/scoring settings and the
-general-regression suite) also remains in the runner config. Moving that policy
-into the spec would be a separate schema change.
+GPU placement is configured in `runtime.gpu` in the spec. Model-provider choice
+remains in agent configuration. Evaluation policy belongs in `evaluation`;
+artifact/store locations and model paths belong in `runtime`. All relative paths
+resolve beside the spec. New projects default to `.tuned-tensor/artifacts` and
+`.tuned-tensor/store` beside it (unless `TT_LOCAL_HOME` overrides the store).
+Foundation supports `runtime.artifactRoot` and `runtime.gpu`; its evaluation
+and training settings remain under `foundation`.
+
+Only `tunedtensor.json` is required. `tt pipeline init --spec tunedtensor.json`
+embeds an advanced recipe when needed; omit this step to keep automatic derivation.
+An explicit `--file` cannot override a conflicting embedded recipe.
+
+For existing projects, run `tt pipeline migrate --spec tunedtensor.json` to
+consolidate adjacent pipeline and runner files. It validates the result first,
+keeps exclusive `.bak` copies, and preserves resolved paths and the old store
+location. Conflicting sources, enabled legacy `dryRun`, or unsupported foundation
+runner settings require reconciliation first. Existing `.bak` files are never
+overwritten. Avoid concurrent edits during migration. Legacy runner files remain
+readable with a warning, but cannot coexist with inline runtime/evaluation settings.
+A legacy adjacent pipeline is used only with explicit `--file` or after migration.
+
+Runs write generated `resolved-workflow.json` snapshots for diagnosis and
+reproducibility; these are outputs, not additional user-authored configuration.
+
 
 Agent `/approve` for a pipeline still runs a preview only. Real training uses
 the direct command above. The spec is the behavior recipe; approval of a spec

@@ -97,12 +97,10 @@ describe("deterministic local approvals", () => {
       expect(command.slice(0, 2)).toEqual(["pipeline", "run"]);
       expect(command).toContain("--dry-run");
       expect(options.cwd).toBe(workspace);
-      expect(JSON.parse(readFileSync(command[command.indexOf("--file") + 1]!, "utf8")))
-        .toEqual(prepared.pipeline);
+      expect(command).not.toContain("--file");
+      expect(command).not.toContain("--config");
       expect(JSON.parse(readFileSync(command[command.indexOf("--spec") + 1]!, "utf8")))
-        .toMatchObject({ name: "Sentiment" });
-      expect(JSON.parse(readFileSync(command[command.indexOf("--config") + 1]!, "utf8")))
-        .toMatchObject({ artifactRoot: join(workspace, "artifacts") });
+        .toMatchObject({ name: "Sentiment", pipeline: prepared.pipeline, runtime: { artifactRoot: join(workspace, "artifacts") } });
       return { exitCode: 0, signal: null };
     });
 

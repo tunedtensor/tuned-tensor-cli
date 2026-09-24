@@ -37,7 +37,8 @@
     "docs/spec-workflow.md",
     "docs/spec-architecture.html",
     "examples/local-runtime/*.json",
-    "examples/local-runtime/*.jsonl"
+    "examples/local-runtime/*.jsonl",
+    "examples/single-spec/**/*.json"
   ],
   "engines": {
     "node": ">=22.19.0"

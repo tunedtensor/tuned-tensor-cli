@@ -270,7 +270,7 @@ test("adjacent config is discovered for init, doctor, validate, and dry-run", as
 
     const initialized = runCli(["init", "--output", specPath], root);
     assert.equal(initialized.status, 0, initialized.stderr);
-    assert.equal(JSON.parse(initialized.stdout).config_path, configPath);
+    assert.equal(JSON.parse(initialized.stdout).config_path, null);
 
     await writeFile(specPath, `${JSON.stringify({
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -632,5 +632,18 @@ test("foundation serving prints a launch plan without starting vLLM", async () =
     const missing = runCli(["serve", "foundation", "--print-command"], root);
     assert.notEqual(missing.status, 0);
     assert.match(missing.stderr, /requires --checkpoint/);
+  });
+});
+
+
+test("Spark initialization creates just the core spec and no runner sidecar", async () => {
+  await withTemporaryProject(async (root) => {
+    const specPath = join(root, "tunedtensor.json");
+    const result = runCli(["init", "--profile", "spark", "--output", specPath], root);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).config_path, null);
+    assert.ok(existsSync(specPath));
+    assert.equal(existsSync(join(root, "local-runner.json")), false);
+    assert.equal(existsSync(join(root, "tunedtensor.pipeline.json")), false);
   });
 });
