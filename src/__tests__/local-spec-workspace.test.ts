@@ -41,6 +41,14 @@ afterEach(() => {
 });
 
 describe("local spec workspace", () => {
+  it("validates foundation execution settings before proposing a new project", async () => {
+    const { base_model: _model, ...behavior } = spec;
+    await expect(prepareLocalSpecProject(workspace, "invalid-foundation", {
+      ...behavior, engine: "foundation", foundation: { nproc_per_node: 2 },
+    })).rejects.toThrow(/nproc_per_node must be 1/);
+    expect(existsSync(join(workspace, "invalid-foundation"))).toBe(false);
+  });
+
   it("accepts the certified Nemotron Lightning model in local specs", async () => {
     const spec = {
       name: "Nemotron Worker",

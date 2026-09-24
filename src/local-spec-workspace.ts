@@ -8,7 +8,8 @@ import { TRAINING_MODELS } from "./local-runtime/model-registry.js";
 import { validateSpec } from "./eval/rules.js";
 import type { LocalSpec } from "./eval/types.js";
 
-import { localBehaviorSpecFileSchema } from "./local-runtime/contracts.js";
+import { parseLocalRunInput } from "./local-runtime/local-project.js";
+import { pipelineForRunInput } from "./pipeline.js";
 
 const FolderName = Type.String({
   minLength: 1,
@@ -103,7 +104,7 @@ function validateInputs(directory: string, spec: unknown): asserts spec is Local
   if (!Value.Check(LocalProjectSpecSchema, spec)) {
     throw new Error("Local spec content does not match the canonical tunedtensor.json schema.");
   }
-  localBehaviorSpecFileSchema.parse(spec);
+  pipelineForRunInput(parseLocalRunInput(spec, join(directory, "tunedtensor.json")));
   if (spec.engine === "foundation") return;
   const validation = validateSpec({
     ...spec,
