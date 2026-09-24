@@ -93,7 +93,13 @@ def build_vllm_args(model_source: str, adapter_path: str | None, temp_dir: Path)
         # tool calls/results verbatim while merging leading system context.
         prefix = "{%- set tt = namespace(system=" + json.dumps(prompt) + ", history=[]) -%}"
         prefix += "{%- for message in messages -%}{%- if message.role == 'system' -%}"
+        # vLLM may normalize text into OpenAI content parts for the model's
+        # native template. Merge those parts without stringifying the list.
+        prefix += "{%- if message.content is string -%}"
         prefix += "{%- set tt.system = tt.system + '\\n\\n' + message.content -%}"
+        prefix += "{%- else -%}{%- for part in message.content -%}{%- if part.type == 'text' -%}"
+        prefix += "{%- set tt.system = tt.system + '\\n\\n' + part.text -%}"
+        prefix += "{%- endif -%}{%- endfor -%}{%- endif -%}"
         prefix += "{%- else -%}{%- set tt.history = tt.history + [message] -%}{%- endif -%}{%- endfor -%}"
         prefix += "{%- set messages = [{'role': 'system', 'content': tt.system}] + tt.history -%}"
         path = temp_dir / "chat-template.jinja"
