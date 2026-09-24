@@ -280,7 +280,9 @@ export async function runFoundationPipeline(args: {
   assertFoundationPlanSupported(args.spec, args.plan);
   assertFoundationSettingsMatch(args.spec.foundation, args.plan);
   const outputDir = resolve(
-    args.outputDir ?? join(dirname(resolve(args.specPath)), DEFAULT_FOUNDATION_RUNS_DIR, randomUUID()),
+    args.outputDir ?? (args.spec.runtime?.artifactRoot
+      ? join(resolve(dirname(args.specPath), args.spec.runtime.artifactRoot), "foundation-runs", randomUUID())
+      : join(dirname(resolve(args.specPath)), DEFAULT_FOUNDATION_RUNS_DIR, randomUUID())),
   );
   if (args.gpu && args.spec.foundation.checkpoint_backup_dir
     && localPathsOverlap(outputDir, args.spec.foundation.checkpoint_backup_dir)) {
@@ -306,6 +308,18 @@ export async function runFoundationPipeline(args: {
     await mkdir(outputDir, { recursive: true, mode: 0o700 });
   }
   await makePrivateTree(outputDir);
+  const workflowPath = join(outputDir, "resolved-workflow.json");
+  const workflow = { spec: args.spec, plan: args.plan };
+  if (outputExists) {
+    const previous = await readFile(workflowPath, "utf8").catch((error) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (previous && JSON.stringify(JSON.parse(previous)) !== JSON.stringify(workflow)) {
+      throw new Error("Foundation workflow configuration changed; resume requires the original resolved workflow.");
+    }
+  }
+  await writePrivateTextAtomic(workflowPath, `${JSON.stringify(workflow, null, 2)}\n`);
   const spawnStep = args.spawnStep ?? defaultFoundationSpawn;
   const produced = new Map<string, ProducedArtifacts>();
   const steps: FoundationStepResult[] = [];

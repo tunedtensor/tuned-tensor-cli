@@ -1,3 +1,5 @@
+import { localBehaviorSpecFileSchema } from "../local-runtime/contracts.js";
+import { DEFAULT_PROJECT_STORE_ROOT } from "../paths.js";
 import { Command } from "commander";
 import { createInterface } from "node:readline/promises";
 import { existsSync, readFileSync } from "node:fs";
@@ -52,6 +54,12 @@ export function resolvePublishStoreRoot(options?: {
   const homeDirectory = options?.homeDirectory ?? (env.HOME ? resolve(env.HOME) : homedir());
   const localConfigPath = join(cwd, "local-runner.json");
 
+  const projectPath = join(cwd, "tunedtensor.json");
+  if (existsSync(projectPath)) {
+    const spec = localBehaviorSpecFileSchema.parse(JSON.parse(readFileSync(projectPath, "utf8")));
+    if (existsSync(localConfigPath) && (spec.runtime || spec.evaluation)) throw new Error("Conflicting configuration sources; migrate local-runner.json first.");
+    if (!existsSync(localConfigPath)) return expandPath(spec.runtime?.storeRoot ?? (env.TT_LOCAL_HOME?.trim() || DEFAULT_PROJECT_STORE_ROOT), cwd, homeDirectory);
+  }
   if (existsSync(localConfigPath)) {
     try {
       const raw = JSON.parse(readFileSync(localConfigPath, "utf-8")) as {

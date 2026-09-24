@@ -78,27 +78,22 @@ Edit both generated examples in `tunedtensor.json`. For a meaningful run,
 replace them with a larger, representative dataset and a separate validation
 split.
 
-The generated `local-runner.json` uses CUDA and project-local artifacts. A
-durable Spark configuration can set:
+Initialization creates only `tunedtensor.json`; CUDA and project-local storage
+are defaults. For durable Spark paths, add this optional section to the spec:
 
 ```json
 {
-  "artifactRoot": "/home/eve/tuned-tensor-runs/artifacts",
-  "storeRoot": "/home/eve/tuned-tensor-runs/store",
-  "paths": {
-    "modelCache": "/home/eve/.cache/huggingface"
-  },
-  "evaluation": {
-    "inference": {
-      "device": "cuda"
-    },
-    "scoring": {
-      "mode": "exact_match"
-    },
-    "timeoutMs": 1800000
+  "runtime": {
+    "artifactRoot": "/home/eve/tuned-tensor-runs/artifacts",
+    "storeRoot": "/home/eve/tuned-tensor-runs/store",
+    "paths": { "modelCache": "/home/eve/.cache/huggingface" }
   }
 }
 ```
+
+Existing projects can use `tt pipeline migrate` to fold sidecar settings into
+the spec while keeping backups.
+
 
 Every Python stage uses the locked runtime included in the npm package; a
 source checkout and a custom runner path are neither required nor supported.
@@ -110,7 +105,7 @@ tt doctor tunedtensor.json
 tt validate tunedtensor.json
 tt models prefetch tunedtensor.json
 tt models verify-base tunedtensor.json
-tt pipeline run --spec tunedtensor.json --config local-runner.json
+tt pipeline run --spec tunedtensor.json
 ```
 
 `doctor` resolves the same bundled project and paths the run will use, imports
@@ -136,7 +131,7 @@ tt serve local-<run-id> --spec tunedtensor.json --port 8000
 ```
 
 `tt serve active` fails unless an adapter is activated. Activation requires a
-`generalRegression` suite in `local-runner.json`. Serve a specific adapter
+`generalRegression` suite in `tunedtensor.json`. Serve a specific adapter
 with `tt serve local-<run-id>` until then.
 
 In another shell:

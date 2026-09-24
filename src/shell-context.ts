@@ -2,6 +2,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import {
   DEFAULT_ARTIFACT_ROOT,
+  DEFAULT_PROJECT_STORE_ROOT,
   defaultStoreRoot,
   expandUserPath,
   getConfigDir,
@@ -250,14 +251,18 @@ export async function discoverShellContext(
   const localConfigDirectory = hasAdjacentLocalConfig
     ? dirname(localConfigPath)
     : cwd;
-  const configuredArtifactRoot = stringField(localConfigJson.value, "artifactRoot");
-  const configuredStoreRoot = stringField(localConfigJson.value, "storeRoot");
+  const runtime = specJson.value?.runtime;
+  const projectRuntime = runtime && typeof runtime === "object" && !Array.isArray(runtime) ? runtime as Record<string, unknown> : undefined;
+  if (hasAdjacentLocalConfig && (projectRuntime || specJson.value?.evaluation)) warnings.push("Conflicting configuration sources; run tt pipeline migrate after reconciling the spec and local-runner.json.");
+  const config = projectRuntime ?? localConfigJson.value;
+  const configuredArtifactRoot = stringField(config, "artifactRoot");
+  const configuredStoreRoot = stringField(config, "storeRoot");
   const artifactRoot = configuredArtifactRoot
     ? expandPath(configuredArtifactRoot, localConfigDirectory, env)
     : resolve(cwd, DEFAULT_ARTIFACT_ROOT);
   const storeRoot = configuredStoreRoot
     ? expandPath(configuredStoreRoot, localConfigDirectory, env)
-    : defaultStoreRoot(env);
+    : specJson.value && !hasAdjacentLocalConfig && !env.TT_LOCAL_HOME?.trim() ? resolve(cwd, DEFAULT_PROJECT_STORE_ROOT) : defaultStoreRoot(env);
 
   const storedConfigPath = configPath(env);
   const storedConfigJson = await readJsonObject(storedConfigPath);

@@ -18,7 +18,9 @@ import {
   specHash,
   type LocalRunInput,
 } from "../local-runtime/local-project.js";
-import { loadLocalRunnerConfig, runLocalPipeline, type LocalPipeline } from "../local-runtime/orchestrator.js";
+import { runLocalPipeline, type LocalPipeline } from "../local-runtime/orchestrator.js";
+import { resolveProjectConfig } from "../local-runtime/project-workflow.js";
+import { migrateProjectWorkflow } from "../local-runtime/project-migration.js";
 import { runFoundationPipeline } from "../local-runtime/foundation-runner.js";
 import { warningsFromSnapshot } from "../local-runtime/capability.js";
 import { readHardwareSnapshot } from "../local-runtime/hardware-snapshot.js";
@@ -104,10 +106,22 @@ export function registerPipelineCommands(parent: Command): void {
 
   pipeline.command("init")
     .description("Write a canonical v1 pipeline recipe")
-    .option("-f, --file <path>", "Output file", DEFAULT_PIPELINE_FILE)
+    .option("-f, --file <path>", "Legacy standalone recipe output (default: embed in tunedtensor.json)")
     .option("--engine <engine>", "adapter (default) or foundation")
     .option("--spec <path>", "Foundation spec whose hyperparameters stamp the DAG")
-    .action(async (options: { file: string; engine?: string; spec?: string }) => {
+    .action(async (options: { file?: string; engine?: string; spec?: string }) => {
+      if (!options.file) {
+        const path = resolve(options.spec ?? DEFAULT_SPEC_FILE);
+        const raw = JSON.parse(readFileSync(path, "utf8"));
+        const input = parseLocalRunInput(raw, path);
+        if (input.kind === "request") throw new Error("Pipeline init requires a behavior spec.");
+        if (options.engine && options.engine !== (input.spec.engine ?? "adapter")) throw new Error("--engine must match the spec.");
+        if (raw.pipeline) throw new Error("The spec already contains a pipeline.");
+        raw.pipeline = pipelineForRunInput(input);
+        writeFileSync(path, `${JSON.stringify(raw, null, 2)}\n`);
+        if (isJsonMode()) return printJson({ created: true, path, pipeline: raw.pipeline });
+        return printSuccess(`Saved pipeline in ${path}`);
+      }
       const engine = options.engine ?? "adapter";
       if (engine !== "adapter" && engine !== "foundation") {
         throw new Error(`--engine must be adapter or foundation, got: ${engine}`);
@@ -134,6 +148,15 @@ export function registerPipelineCommands(parent: Command): void {
       writeFileSync(path, `${JSON.stringify(recipe, null, 2)}\n`);
       if (isJsonMode()) return printJson({ created: true, path, pipeline: recipe });
       printSuccess(`Created ${options.file}`);
+    });
+
+  pipeline.command("migrate")
+    .description("Move legacy configuration into tunedtensor.json, retaining .bak copies")
+    .option("--spec <path>", "Local behavior spec", DEFAULT_SPEC_FILE)
+    .action(async (options: { spec: string }) => {
+      const result = await migrateProjectWorkflow(resolve(options.spec));
+      if (isJsonMode()) return printJson(result);
+      printSuccess(result.migrated ? `Migrated ${result.path}; originals retained as .bak files.` : "No legacy configuration found.");
     });
 
   pipeline.command("validate")
@@ -182,8 +205,8 @@ export function registerPipelineCommands(parent: Command): void {
       if (options.output && options.resume) {
         throw new Error("--output and --resume are mutually exclusive.");
       }
-      const config = await loadLocalRunnerConfig(localConfigPath(options.config, options.spec));
       const { document, input, spec } = resolvePipelineDocument(options, command.getOptionValueSource("spec") !== "default");
+      const { config } = await resolveProjectConfig(options.spec, options.config, printWarning, input);
       const plan = createExecutionPlan(document, { only: parseList(options.only), skip: parseList(options.skip) });
       const hostWarnings = config.gpu ? [] : await hostWarningsForPipeline(document, input);
       if (options.dryRun || config.dryRun) {
@@ -204,7 +227,7 @@ export function registerPipelineCommands(parent: Command): void {
       for (const warning of hostWarnings) printWarning(warning);
       const remote = plan.steps.find((step) => step.target !== "local");
       if (remote) {
-        throw new Error(`Step "${remote.id}" targets cloud execution. Pipeline execution requires local targets; set targets to local and configure gpu in local-runner.json to use your AWS instance.`);
+        throw new Error(`Step "${remote.id}" targets cloud execution. Pipeline execution requires local targets; set targets to local and configure runtime.gpu in tunedtensor.json to use your AWS instance.`);
       }
       if (!input) throw new Error("Pipeline execution requires a behavior spec. Pass --spec tunedtensor.json.");
       if (input.kind === "foundation-spec") {
@@ -228,7 +251,7 @@ export function registerPipelineCommands(parent: Command): void {
         ...(plan.name ? { name: plan.name } : {}),
         steps: plan.steps.map(({ transfers: _transfers, ...step }) => step) as LocalPipeline["steps"],
       };
-      const result = await runLocalPipeline({ request: input.request, config, pipeline: localPipeline });
+      const result = await runLocalPipeline({ request: input.request, config, pipeline: localPipeline, ...(input.kind === "spec" ? { projectSpec: input.spec } : {}) });
       if (isJsonMode()) return printJson({ ...result, spec });
       printSuccess(`Pipeline completed with status ${result.status}.`);
     });

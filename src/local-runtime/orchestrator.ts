@@ -1734,6 +1734,7 @@ export async function runLocalPipeline(input: {
   request: FineTuneRunRequest;
   config: LocalRunnerConfig;
   pipeline: LocalPipeline;
+  projectSpec?: import("./contracts.js").LocalBehaviorSpecFile;
   reporter?: LocalRunReporter;
 }): Promise<LocalPipelineResult> {
   const pipeline = validateLocalPipeline(input.pipeline);
@@ -1769,6 +1770,16 @@ export async function runLocalPipeline(input: {
         artifacts,
         store,
         reporter: input.reporter,
+      });
+      await writeJsonAtomic(join(artifacts.runDir, "resolved-workflow.json"), {
+        spec: input.projectSpec ?? {
+          ...input.request.spec_snapshot,
+          hyperparameters: input.request.hyperparameters,
+          dataset_prebuilt: input.request.dataset_prebuilt,
+        },
+        request: input.request,
+        runtime: input.config,
+        pipeline,
       });
       const outputs: Record<string, LocalPipelineOutput> = {};
       for (const step of pipeline.steps) {

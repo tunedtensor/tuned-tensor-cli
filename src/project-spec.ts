@@ -20,6 +20,9 @@ export const LOCAL_ONLY_SPEC_KEYS = [
   "dataset_prebuilt",
   "engine",
   "foundation",
+  "evaluation",
+  "runtime",
+  "pipeline",
 ] as const;
 
 export const LOCAL_SPEC_KEYS = [

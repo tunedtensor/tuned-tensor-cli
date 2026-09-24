@@ -117,6 +117,10 @@ class UpstreamLaunchTests(unittest.TestCase):
             messages = json.loads(Environment().from_string(template).render(messages=history))
             self.assertEqual(messages[0], {"role": "system", "content": owner + "\n\nClient context"})
             self.assertEqual(messages[1:], history[1:])
+            history[0]["content"] = [{"type": "text", "text": "First context"}, {"type": "text", "text": "Second context"}]
+            messages = json.loads(Environment().from_string(template).render(messages=history))
+            self.assertEqual(messages[0], {"role": "system", "content": owner + "\n\nFirst context\n\nSecond context"})
+            self.assertEqual(messages[1:], history[1:])
             self.assertEqual((source / "chat_template.jinja").read_text(), original)
 
     def test_bootstrap_delegates_to_vllm_and_keeps_credentials_out_of_argv(self):

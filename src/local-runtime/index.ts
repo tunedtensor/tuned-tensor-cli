@@ -1,3 +1,5 @@
+import { pipelineForRunInput } from "../pipeline.js";
+import { resolveProjectConfig } from "./project-workflow.js";
 import { readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
@@ -9,9 +11,10 @@ import { assertArtifactManifest } from "./artifacts.js";
 import { fineTuneRunRequestSchema, isFoundationSpecFile, localBehaviorSpecFileSchema, localRunnerConfigSchema, type FineTuneRunRequest, type LocalRunnerConfig, type SpecSnapshot } from "./contracts.js";
 import { buildSystemMessage } from "./dataset.js";
 import {
-  loadLocalRunnerConfig,
   fingerprintLocalBaseModel,
   runLocalFineTune,
+  runLocalPipeline,
+  type LocalPipeline,
   validateLocalFineTuneInput,
 } from "./orchestrator.js";
 import { runDoctor } from "./doctor.js";
@@ -30,9 +33,9 @@ import {
   DEFAULT_LOCAL_SPEC_PATH,
   assertFoundationSpecReady,
   assertLocalRunInputReady,
-  initLocalRunnerConfigFile,
   initLocalSpecFile,
   loadLocalRunInput,
+  type LocalRunInput,
 } from "./local-project.js";
 import { sanitizeLogLine, type LocalRunProgressEvent, type LocalRunReporter } from "./run-reporter.js";
 import { activateModel, getActiveModel, rollbackActiveModel } from "./active-model.js";
@@ -108,10 +111,9 @@ Global options:
   -h, --help                       Show help
   -V, --version                    Show the installed version
 
-The run command writes local artifacts under config.artifactRoot, defaulting to
-.tuned-tensor/artifacts. The file-backed local store defaults to
-~/.tuned-tensor/store unless config.storeRoot, TT_LOCAL_HOME, or
-TUNED_TENSOR_HOME is set.`);
+tunedtensor.json owns behavior, evaluation, runtime overrides and optional pipeline.
+Project artifacts and state default to .tuned-tensor/artifacts and .tuned-tensor/store.
+TT_LOCAL_HOME overrides the default store. --config is a legacy migration option.`);
 }
 
 interface CliOptionDefinition {
@@ -143,7 +145,7 @@ interface ParsedCli {
   definition?: CliCommandDefinition;
 }
 
-const CONFIG_OPTION = { name: "--config", value: "path", description: "Local runner config JSON path" } as const;
+const CONFIG_OPTION = { name: "--config", value: "path", description: "Legacy runner config (prefer runtime/evaluation in tunedtensor.json)" } as const;
 const VERBOSE_OPTION = { name: "--verbose", description: "Stream subprocess output" } as const;
 const QUIET_OPTION = { name: "--quiet", description: "Suppress progress output on stderr" } as const;
 const MODEL_SERVE_OPTIONS = [
@@ -182,8 +184,8 @@ const COMMAND_DEFINITIONS: Record<string, CliCommandDefinition> = {
       { name: "--engine", value: "engine", description: "adapter (default) or foundation" },
       { name: "--model", value: "model", description: "Base model ID" },
       { name: "--output", value: "path", description: "Output spec path" },
-      { name: "--profile", value: "profile", description: "Write a durable runner config (spark)" },
-      { name: "--config", value: "path", description: "Runner config path (written with --profile)" },
+      { name: "--profile", value: "profile", description: "Compatibility host profile (spark); creates only tunedtensor.json" },
+      { name: "--config", value: "path", description: "Deprecated; put runtime/evaluation in tunedtensor.json" },
       { name: "--force", description: "Overwrite an existing output file" },
     ],
     maxPositionals: 0,
@@ -437,20 +439,10 @@ interface LocalConfigSelection {
   path?: string;
 }
 
-async function selectedConfigPath(argv: string[], adjacentTo?: string): Promise<string | undefined> {
-  const explicitPath = readOption(argv, "--config");
-  if (explicitPath) return resolve(explicitPath);
-  const candidate = join(adjacentTo ? dirname(resolve(adjacentTo)) : cwd(), "local-runner.json");
-  const metadata = await stat(candidate).catch(() => null);
-  return metadata?.isFile() ? candidate : undefined;
-}
-
-async function configSelectionFromArgv(argv: string[], adjacentTo?: string): Promise<LocalConfigSelection> {
-  const path = await selectedConfigPath(argv, adjacentTo);
-  return {
-    config: await loadLocalRunnerConfig(path),
-    ...(path ? { path } : {}),
-  };
+async function configSelectionFromArgv(argv: string[], adjacentTo?: string, input?: LocalRunInput): Promise<LocalConfigSelection> {
+  const specPath = adjacentTo ?? readOption(argv, "--spec") ?? resolve(cwd(), DEFAULT_LOCAL_SPEC_PATH);
+  const resolved = await resolveProjectConfig(specPath, readOption(argv, "--config"), (message) => console.error(message), input);
+  return { config: resolved.config, ...(resolved.legacyConfigPath ? { path: resolved.legacyConfigPath } : {}) };
 }
 
 async function configFromArgv(argv: string[], adjacentTo?: string): Promise<LocalRunnerConfig> {
@@ -588,7 +580,7 @@ async function verifyActivationEvidence(model: LocalModelRecord): Promise<void> 
   if (!hasBaseline || !hasCandidate) {
     throw new Error(
       "This model cannot be activated because the run did not include a general-regression suite. "
-      + "Add evaluation.generalRegression to local-runner.json with a held-out dataset, re-run training, then activate. "
+      + "Add evaluation.generalRegression to tunedtensor.json with a held-out dataset, re-run training, then activate. "
       + "Until then, serve the adapter with `tt serve local-<run-id>`.",
     );
   }
@@ -1072,6 +1064,7 @@ async function main(argv: string[]): Promise<void> {
     if (engine === "foundation" && readOption(argv, "--model")) {
       throw new Error("Foundation specs do not take --model; they train a tokenizer and GPT from scratch.");
     }
+    if (readOption(argv, "--config")) throw new Error("tt init uses one tunedtensor.json; put overrides in runtime/evaluation instead of --config.");
     const spec = await initLocalSpecFile({
       outputPath,
       name: readOption(argv, "--name") ?? (engine === "foundation" ? "Foundation chat model" : "Local Tuned Tensor Spec"),
@@ -1079,18 +1072,8 @@ async function main(argv: string[]): Promise<void> {
       baseModel: engine === "foundation" ? undefined : (readOption(argv, "--model") ?? "Qwen/Qwen3.5-2B"),
       force: hasFlag(argv, "--force"),
     });
-    const configPath = profile
-      ? resolve(readOption(argv, "--config") ?? resolve(dirname(outputPath), "local-runner.json"))
-      : await selectedConfigPath(argv, outputPath);
-    if (profile) {
-      await initLocalRunnerConfigFile({
-        outputPath: configPath!,
-        profile,
-        force: hasFlag(argv, "--force"),
-      });
-    } else if (configPath) {
-      await loadLocalRunnerConfig(configPath);
-    }
+    // Spark uses the same defaults; initialization creates only the core spec.
+    const configPath = undefined;
     printJson({
       ok: true,
       path: outputPath,
@@ -1144,13 +1127,13 @@ async function main(argv: string[]): Promise<void> {
 
   if (command === "run") {
     const inputPath = resolve(cli.positionals[0] ?? DEFAULT_LOCAL_SPEC_PATH);
-    const configSelection = await configSelectionFromArgv(argv, inputPath);
+    const input = await loadCliBehaviorSpec(inputPath);
+    const configSelection = await configSelectionFromArgv(argv, inputPath, input);
     const configInput = configSelection.config;
     const config = localRunnerConfigSchema.parse({
       ...configInput,
       dryRun: hasFlag(argv, "--dry-run") ? true : configInput.dryRun,
     });
-    const input = await loadCliBehaviorSpec(inputPath);
     assertLocalRunInputReady(input.request);
     const validated = await validateLocalFineTuneInput({
       request: input.request,
@@ -1182,11 +1165,12 @@ async function main(argv: string[]): Promise<void> {
         },
       });
     }
-    const result = await runLocalFineTune({
-      request,
-      config,
-      reporter,
-    });
+    if (input.spec.pipeline) {
+      const result = await runLocalPipeline({ request, config, reporter, pipeline: pipelineForRunInput(input) as LocalPipeline, projectSpec: input.spec });
+      printJson(result);
+      return;
+    }
+    const result = await runLocalFineTune({ request, config, reporter });
     printJson({
       status: result.report.status,
       run_id: result.report.run_id,

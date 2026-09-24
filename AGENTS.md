@@ -6,7 +6,7 @@ This is a single-package Node.js/TypeScript CLI (`tt`) for Tuned Tensor's
 local CUDA runner and laptop-local agent. Local workflow commands require no
 TT token. Hosted operations are registered under `tt cloud`; `tt auth`,
 `tt usage`, `tt balance`, `tt topup`, and `tt publish` handle account access and
-reporting. Training uses one local orchestrator; optional `gpu` configuration
+reporting. Training uses one local orchestrator; optional `runtime.gpu` configuration
 sends GPU processes to a user-owned EC2 instance over SSH. Hosted training
 start/estimate are retired. See `docs/local-runtime/aws-gpu.md`. No Docker or database is required for CLI development.
 
@@ -16,8 +16,9 @@ Treat `tunedtensor.json` as the source of truth for behavior and training settin
 Read with `get_local_spec` before proposing `prepare_update_local_spec`; preserve
 unrelated fields and review the diff before `/approve`. Direct `/spec` review,
 validation, diff and history require no model or credentials. Pipelines derive
-from the saved spec by default; only explicit `--file` loads a separate recipe,
-and foundation settings must match the spec. See `docs/spec-workflow.md`.
+from its optional pipeline section or saved spec by default; only explicit `--file` loads a separate recipe,
+and foundation settings must match the spec. Runtime placement and evaluation policy
+also live in the spec; migrate legacy sidecars with `tt pipeline migrate`. See `docs/spec-workflow.md`.
 
 ### Key commands
 
@@ -56,7 +57,7 @@ After `npm run build`, run `npm link` to make the `tt` command available globall
 
 - Start new users at `docs/local-runtime/aws-gpu.md`; include spec creation,
   separate AWS/SSH access, `doctor`, dry-run, real run, results and shutdown.
-- Use `tt pipeline run` with `gpu` in the runner config for both engines.
+- Use `tt pipeline run` with `runtime.gpu` in tunedtensor.json for both engines.
   `tt cloud` operates TT account records; never recommend retired hosted
   start/estimate commands or require TT credits for user-owned EC2 training.
 - `tt hardware` and `examine_hardware` inspect the laptop only. A missing local

@@ -8,6 +8,9 @@ import { TRAINING_MODELS } from "./local-runtime/model-registry.js";
 import { validateSpec } from "./eval/rules.js";
 import type { LocalSpec } from "./eval/types.js";
 
+import { parseLocalRunInput } from "./local-runtime/local-project.js";
+import { pipelineForRunInput } from "./pipeline.js";
+
 const FolderName = Type.String({
   minLength: 1,
   maxLength: 120,
@@ -23,7 +26,14 @@ const NonEmptyText = Type.String({ minLength: 1, maxLength: 1_000 });
 export const LocalProjectSpecSchema = Type.Object({
   name: Type.String({ minLength: 1, maxLength: 255 }),
   description: Type.Optional(Type.String({ maxLength: 5_000 })),
-  base_model: LocalBaseModel,
+  base_model: Type.Optional(LocalBaseModel),
+  engine: Type.Optional(Type.Union([Type.Literal("adapter"), Type.Literal("foundation")])),
+  hyperparameters: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  foundation: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  dataset_prebuilt: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  evaluation: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  runtime: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  pipeline: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   system_prompt: Type.String({ minLength: 1, maxLength: 10_000 }),
   guidelines: Type.Array(NonEmptyText, { minItems: 1, maxItems: 50 }),
   constraints: Type.Optional(Type.Array(NonEmptyText, { maxItems: 50 })),
@@ -94,6 +104,8 @@ function validateInputs(directory: string, spec: unknown): asserts spec is Local
   if (!Value.Check(LocalProjectSpecSchema, spec)) {
     throw new Error("Local spec content does not match the canonical tunedtensor.json schema.");
   }
+  pipelineForRunInput(parseLocalRunInput(spec, join(directory, "tunedtensor.json")));
+  if (spec.engine === "foundation") return;
   const validation = validateSpec({
     ...spec,
     description: spec.description ?? "",

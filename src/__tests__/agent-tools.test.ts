@@ -121,6 +121,7 @@ describe("Tuned Tensor agent tools", () => {
     };
     writeFileSync(join(workspace, "tunedtensor.json"), JSON.stringify({
       name: "Sentiment",
+      pipeline,
       base_model: "Qwen/Qwen3.5-2B",
       system_prompt: "Classify sentiment.",
       guidelines: ["Return one label."],
@@ -176,11 +177,11 @@ describe("Tuned Tensor agent tools", () => {
         additional_steps: ["rl", "chat_rl"],
       },
       commands: {
-        init: "tt pipeline init --engine foundation --spec tunedtensor.json --file tunedtensor.pipeline.json",
-        validate: "tt pipeline validate --file tunedtensor.pipeline.json --spec tunedtensor.json",
-        plan: "tt pipeline plan --file tunedtensor.pipeline.json",
-        dry_run: "tt pipeline run --dry-run --file tunedtensor.pipeline.json --spec tunedtensor.json",
-        run: "tt pipeline run --file tunedtensor.pipeline.json --spec tunedtensor.json",
+        init: "tt pipeline init --engine foundation --spec tunedtensor.json",
+        validate: "tt pipeline validate --spec tunedtensor.json",
+        plan: "tt pipeline plan",
+        dry_run: "tt pipeline run --dry-run --spec tunedtensor.json",
+        run: "tt pipeline run --spec tunedtensor.json",
       },
     });
   });
@@ -190,9 +191,9 @@ describe("Tuned Tensor agent tools", () => {
     expect(described.details).toMatchObject({
       scope: { execution: "local", gpu_provider: "aws", access_token_required: false },
       commands: {
-        run: "tt pipeline run --spec tunedtensor.json --config local-runner.json",
-        doctor: "tt doctor tunedtensor.json --config local-runner.json",
-        dry_run: "tt pipeline run --spec tunedtensor.json --config local-runner.json --dry-run",
+        run: "tt pipeline run --spec tunedtensor.json",
+        doctor: "tt doctor tunedtensor.json",
+        dry_run: "tt pipeline run --spec tunedtensor.json --dry-run",
       },
     });
   });

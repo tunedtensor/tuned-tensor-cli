@@ -447,12 +447,12 @@ export function createTunedTensorTools(
       const awsSetup = p.target === "cloud" ? {
         scope: { execution: "local", gpu_provider: "aws", access_token_required: false },
         commands: {
-          ...(engine === "adapter" ? { prefetch: "tt models prefetch tunedtensor.json --config local-runner.json" } : {}),
-          doctor: "tt doctor tunedtensor.json --config local-runner.json",
-          dry_run: "tt pipeline run --spec tunedtensor.json --config local-runner.json --dry-run",
-          run: "tt pipeline run --spec tunedtensor.json --config local-runner.json",
+          ...(engine === "adapter" ? { prefetch: "tt models prefetch tunedtensor.json" } : {}),
+          doctor: "tt doctor tunedtensor.json",
+          dry_run: "tt pipeline run --spec tunedtensor.json --dry-run",
+          run: "tt pipeline run --spec tunedtensor.json",
         },
-        note: "Configure gpu in local-runner.json with provider aws, instanceId, SSH user and optional AWS profile/region/identityFile. The instance must already be running and reachable with a verified SSH host key. AWS profile lookup and SSH access are separate; no TT token is required. GPU processes use it automatically; orchestration, scoring and artifacts stay local. Hardware tools inspect only the laptop; doctor checks the configured instance. The user manages AWS quota, costs and shutdown. Keep the laptop running until outputs return. Hosted training is retired.",
+        note: "Configure runtime.gpu in tunedtensor.json with provider aws, instanceId, SSH user and optional AWS profile/region/identityFile. The instance must already be running and reachable with a verified SSH host key. AWS profile lookup and SSH access are separate; no TT token is required. GPU processes use it automatically; orchestration, scoring and artifacts stay local. Hardware tools inspect only the laptop; doctor checks the configured instance. The user manages AWS quota, costs and shutdown. Keep the laptop running until outputs return. Hosted training is retired.",
       } : undefined;
       if (engine === "foundation") {
         const foundation = {
@@ -465,11 +465,11 @@ export function createTunedTensorTools(
             additional_steps: ["rl", "chat_rl"],
           },
           commands: {
-            init: "tt pipeline init --engine foundation --spec tunedtensor.json --file tunedtensor.pipeline.json",
-            validate: "tt pipeline validate --file tunedtensor.pipeline.json --spec tunedtensor.json",
-            plan: "tt pipeline plan --file tunedtensor.pipeline.json",
-            dry_run: "tt pipeline run --dry-run --file tunedtensor.pipeline.json --spec tunedtensor.json",
-            run: "tt pipeline run --file tunedtensor.pipeline.json --spec tunedtensor.json",
+            init: "tt pipeline init --engine foundation --spec tunedtensor.json",
+            validate: "tt pipeline validate --spec tunedtensor.json",
+            plan: "tt pipeline plan",
+            dry_run: "tt pipeline run --dry-run --spec tunedtensor.json",
+            run: "tt pipeline run --spec tunedtensor.json",
           },
           ...(!awsSetup && host ? { host } : {}),
         };
@@ -488,11 +488,11 @@ export function createTunedTensorTools(
         engine,
         canonical: canonicalPipeline(p.target ?? "local"),
         commands: {
-          init: "tt pipeline init --engine adapter --file tunedtensor.pipeline.json",
-          validate: "tt pipeline validate --file tunedtensor.pipeline.json --spec tunedtensor.json",
-          plan: "tt pipeline plan --file tunedtensor.pipeline.json",
-          dry_run: "tt pipeline run --dry-run --file tunedtensor.pipeline.json --spec tunedtensor.json",
-          run: "tt pipeline run --file tunedtensor.pipeline.json --spec tunedtensor.json",
+          init: "tt pipeline init --engine adapter",
+          validate: "tt pipeline validate --spec tunedtensor.json",
+          plan: "tt pipeline plan",
+          dry_run: "tt pipeline run --dry-run --spec tunedtensor.json",
+          run: "tt pipeline run --spec tunedtensor.json",
         },
         ...(host ? { host } : {}),
       };
@@ -564,7 +564,7 @@ export function createTunedTensorTools(
     define(
       "prepare_update_local_spec",
       "Prepare behavior spec edit",
-      "Prepare a reviewed edit of the existing local spec using the SHA-256 from get_local_spec. Arrays replace whole fields; hyperparameters and foundation settings merge by key. Preserve unrelated fields. No write until /approve.",
+      "Prepare a reviewed edit of the existing local spec using the SHA-256 from get_local_spec. Arrays and pipeline replace whole fields; hyperparameters and foundation settings merge by key. Runtime and evaluation objects merge recursively; null removes optional settings. Preserve unrelated fields. No write until /approve.",
       Type.Object({
         spec_path: Type.Optional(Type.String({ maxLength: 1000 })),
         expected_sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
@@ -581,6 +581,9 @@ export function createTunedTensorTools(
           }, { additionalProperties: false }))),
           hyperparameters: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
           foundation: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+          runtime: Type.Optional(Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Null()])),
+          evaluation: Type.Optional(Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Null()])),
+          pipeline: Type.Optional(Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Null()])),
           dataset_prebuilt: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
         }, { additionalProperties: false }),
       }, { additionalProperties: false }),
@@ -631,7 +634,7 @@ export function createTunedTensorTools(
     define(
       "prepare_pipeline_run",
       "Prepare pipeline dry-run",
-      "Prepare a sealed local pipeline dry-run for explicit /approve preview. Omit pipeline to derive the canonical adapter or foundation recipe from the spec. Real execution remains an explicit direct tt pipeline run command.",
+      "Prepare a sealed local pipeline dry-run for explicit /approve preview. Omit pipeline to use the saved spec recipe or derive the default recipe. A supplied pipeline must match it; propose a spec edit first to change the recipe. Real execution remains an explicit direct tt pipeline run command.",
       Type.Object({
         pipeline: Type.Optional(PipelineDocument),
         spec_path: Type.Optional(Type.String({

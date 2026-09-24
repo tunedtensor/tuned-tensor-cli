@@ -1,6 +1,6 @@
 # Use your AWS GPU with the local pipeline
 
-TT runs one pipeline on your laptop. Add `gpu` to `local-runner.json` to send
+TT runs one pipeline on your laptop. Add `runtime.gpu` to `tunedtensor.json` to send
 adapter training and CUDA evaluation, or foundation pretraining, fine-tuning,
 RL and evaluation, to an existing EC2 instance in your account. Foundation
 tokenization, dataset preparation, adapter scoring/comparisons, run history,
@@ -52,21 +52,23 @@ only needs `ec2:DescribeInstances` for lookup.
 
 ## 3. Configure the connection
 
-Save this as `local-runner.json` beside `tunedtensor.json`,
-replacing the example values with your own. You can also copy
-[`examples/local-runtime/aws-runner.json`](../../examples/local-runtime/aws-runner.json).
-All runner paths refer to the laptop; TT translates the paths needed remotely.
+Add this `runtime` section to your existing `tunedtensor.json`, replacing the
+example values with your own. All paths refer to the laptop; TT translates
+paths needed remotely. Existing sidecars can be consolidated with
+`tt pipeline migrate`, which retains `.bak` copies.
 
 ```json
 {
-  "gpu": {
-    "provider": "aws",
-    "profile": "research",
-    "region": "eu-west-1",
-    "instanceId": "i-0123456789abcdef0",
-    "user": "ubuntu",
-    "identityFile": "~/.ssh/research-gpu.pem",
-    "maxSeconds": 86400
+  "runtime": {
+    "gpu": {
+      "provider": "aws",
+      "profile": "research",
+      "region": "eu-west-1",
+      "instanceId": "i-0123456789abcdef0",
+      "user": "ubuntu",
+      "identityFile": "~/.ssh/research-gpu.pem",
+      "maxSeconds": 86400
+    }
   }
 }
 ```
@@ -94,7 +96,7 @@ Verify the instance's SSH host key for the selected IP address and connect
 once yourself before using TT. TT requires a known host key and noninteractive
 SSH authentication. Omit
 `identityFile` to use your SSH agent or SSH configuration. Relative identity
-file paths resolve beside the runner config; `~` expands locally. Set
+file paths resolve beside the core spec; `~` expands locally. Set
 `privateIp: true` when connected to the instance's VPC through a VPN or other
 private network. The default uses its public IPv4 address. Security groups and
 network routes must allow the laptop to reach that address over SSH.
@@ -137,28 +139,27 @@ Run these commands on your laptop in the project directory. Adapter workflow:
 ```bash
 # Fetch the base model locally first.
 tt validate tunedtensor.json
-tt models prefetch tunedtensor.json --config local-runner.json
-tt doctor tunedtensor.json --config local-runner.json
-tt pipeline run --spec tunedtensor.json --config local-runner.json --dry-run
-tt pipeline run --spec tunedtensor.json --config local-runner.json
+tt models prefetch tunedtensor.json
+tt doctor tunedtensor.json
+tt pipeline run --spec tunedtensor.json --dry-run
+tt pipeline run --spec tunedtensor.json
 ```
 
 For a foundation spec, no base-model prefetch is needed. Start a new run with:
 
 ```bash
 tt validate tunedtensor.json
-tt doctor tunedtensor.json --config local-runner.json
-tt pipeline run --spec tunedtensor.json --config local-runner.json \
+tt doctor tunedtensor.json
+tt pipeline run --spec tunedtensor.json \
   --dry-run
-tt pipeline run --spec tunedtensor.json --config local-runner.json
+tt pipeline run --spec tunedtensor.json
 ```
 
 Choose the command block for your spec's engine. `tt doctor` connects to the
 instance and prepares/probes its locked Python/CUDA runtime, which may take
 time on first use. It does not start training or reserve GPU capacity.
 `tt hardware` reports the laptop's hardware; it does not inspect the AWS
-instance. `tt pipeline run` discovers `local-runner.json` beside the selected
-spec when `--config` is omitted.
+instance. `tt pipeline run` reads `runtime.gpu` from the selected spec.
 
 Keep pipeline step targets set to `local`: the target describes the
 orchestrator, and `gpu` selects where its GPU processes execute. CPU adapter
@@ -172,10 +173,10 @@ Wait for a successful completion message. Adapter runs return a run ID and a
 local model ID; use the actual IDs from the output:
 
 ```bash
-tt runs list --config local-runner.json
-tt runs report RUN_ID --config local-runner.json
-tt models list --config local-runner.json
-tt models verify MODEL_ID --config local-runner.json
+tt runs list
+tt runs report RUN_ID
+tt models list
+tt models verify MODEL_ID
 ```
 
 For foundation runs, inspect `report.json` in the run directory printed by the
