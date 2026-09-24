@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+## [0.18.0] - 2026-09-24
+
+### Added
+
+- Keep optional evaluation policy, runtime placement (including AWS GPU settings),
+  and advanced pipeline recipes in `tunedtensor.json` alongside behavior and
+  training settings. Default pipelines derive from the saved spec.
+- Consolidate adjacent legacy runner and pipeline files with `tt pipeline migrate`,
+  retaining `.bak` copies and rejecting conflicting or unsupported settings.
+- Save resolved workflow snapshots for reproducibility, with single-spec examples
+  and updated interactive HTML architecture documentation.
+
+### Changed
+
+- Initialize projects with one core spec. `tt pipeline init` embeds an optional
+  recipe; explicit legacy `--file` and `--config` inputs remain supported but
+  cannot silently override conflicting inline settings.
+- Let reviewed conversation edits update runtime, evaluation and pipeline settings
+  while preserving unrelated fields. Agent previews must match the saved recipe;
+  real execution remains an explicit CLI command.
+- Resolve project paths beside the spec and default new project state to
+  `.tuned-tensor/store`. Migration preserves existing store and artifact locations.
+  Set `TT_LOCAL_HOME` to override the default store.
+
+### Fixed
+
+- Preserve AWS GPU configuration during migration, reject stale workflow previews,
+  and validate agent-created specs against the same execution rules as edits.
+- Align publishing and runner store lookup when `TT_LOCAL_HOME` is blank.
+- Merge both string and text-part system messages with the saved spec prompt in
+  vLLM serving, fixing HTTP 400 responses for normal system/user chat requests.
+- Update Vitest to the patched 4.1.11 release.
+
 ## [0.17.0] - 2026-09-23
 
 ### Added
