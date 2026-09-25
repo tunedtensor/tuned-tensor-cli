@@ -4,8 +4,8 @@ The foundation engine can run recoverable, single-GPU pretraining from `.txt`
 files or JSONL shards whose rows contain a string `text` field. Keep training
 and validation data in different files or directories.
 
-The commands below also support an [AWS GPU](aws-gpu.md) configured in the
-adjacent `local-runner.json`. The CLI and tokenizer still run locally; the
+The commands below also support an [AWS GPU](aws-gpu.md) configured as
+`runtime.gpu` in `tunedtensor.json`. The CLI and tokenizer still run locally; the
 local machine must stay awake and connected throughout the pipeline.
 
 ## Spec
