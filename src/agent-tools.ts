@@ -564,7 +564,7 @@ export function createTunedTensorTools(
     define(
       "prepare_update_local_spec",
       "Prepare behavior spec edit",
-      "Prepare a reviewed edit of the existing local spec using the SHA-256 from get_local_spec. Arrays and pipeline replace whole fields; hyperparameters and foundation settings merge by key. Runtime and evaluation objects merge recursively; null removes optional settings. Preserve unrelated fields. No write until /approve.",
+      "Prepare a reviewed edit of the existing local spec using the SHA-256 from get_local_spec. Use add_examples to append examples without resending existing ones. Other arrays and pipeline replace whole fields; hyperparameters and foundation settings merge by key. Runtime and evaluation objects merge recursively; null removes optional settings. Preserve unrelated fields. No write until /approve.",
       Type.Object({
         spec_path: Type.Optional(Type.String({ maxLength: 1000 })),
         expected_sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
@@ -579,6 +579,10 @@ export function createTunedTensorTools(
             input: Type.String(),
             output: Type.String(),
           }, { additionalProperties: false }))),
+          add_examples: Type.Optional(Type.Array(Type.Object({
+            input: Type.String(),
+            output: Type.String(),
+          }, { additionalProperties: false }), { minItems: 1 })),
           hyperparameters: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
           foundation: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
           runtime: Type.Optional(Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Null()])),

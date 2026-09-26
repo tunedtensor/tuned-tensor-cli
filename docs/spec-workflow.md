@@ -46,10 +46,14 @@ for an invalid spec.
 
 `get_local_spec` returns the document, validation diagnostics and content hash.
 `prepare_update_local_spec` requires that hash and a patch of supported fields.
-Arrays replace their whole field; `hyperparameters` and `foundation` merge by
+`add_examples` appends examples without resending existing ones; other arrays
+replace their whole field, and the diff lists only removed and added items.
+`hyperparameters` and `foundation` merge by
 key. `runtime` and `evaluation` merge recursively; null removes optional settings.
 `pipeline` replaces the entire recipe (null restores the derived default). Unmentioned fields remain unchanged. Identity and engine cannot change
-through this edit tool. The full resulting document must pass the runtime's
+through this edit tool. An adapter spec without an `id` gets one on its first
+edit, pinned to the ID its earlier runs used, so later edits keep the same run
+identity and evaluation split. Specs created by the agent start with an `id`. The full resulting document must pass the runtime's
 strict schema, readiness checks, nonblank content checks and distinct-example
 checks. Small example sets produce a warning; validation is not a claim of model
 quality or GPU readiness.

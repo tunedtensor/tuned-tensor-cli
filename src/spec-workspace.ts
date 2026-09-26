@@ -10,7 +10,7 @@ import { pipelineForRunInput } from "./pipeline.js";
 const MAX_BYTES = 200_000;
 const EDIT_KEYS = new Set([
   "name", "description", "system_prompt", "guidelines", "constraints", "examples",
-  "base_model", "hyperparameters", "foundation", "dataset_prebuilt", "runtime", "evaluation", "pipeline",
+  "base_model", "hyperparameters", "foundation", "dataset_prebuilt", "runtime", "evaluation", "pipeline", "add_examples",
 ]);
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -110,6 +110,30 @@ export async function inspectLocalSpec(workspaceRoot: string, specPath = "tunedt
   return { ...location, source, sha256: specHash(source), document, validation };
 }
 
+/** List removed and added items so one new example does not reprint the whole array. */
+function arrayDiff(before: unknown[], after: unknown[]): string[] {
+  const added = after.map(item => JSON.stringify(item));
+  const removed: string[] = [];
+  for (const item of before.map(value => JSON.stringify(value))) {
+    const index = added.indexOf(item);
+    if (index === -1) removed.push(`- ${item}`);
+    else added.splice(index, 1);
+  }
+  const lines = [...removed, ...added.map(item => `+ ${item}`)];
+  return lines.length ? lines : ["  (order changed)"];
+}
+
+/** Pin the ID that runs of an ID-less adapter spec already used, so edits keep its identity and eval split. */
+function derivedSpecId(document: Record<string, unknown>, path: string): string | undefined {
+  if (document.id !== undefined) return undefined;
+  try {
+    const input = parseLocalRunInput(document, path);
+    return input.kind === "spec" ? input.request.behavior_spec_id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function specDiff(before: unknown, after: unknown): string {
   const left = isObject(before) ? before : {};
   const right = isObject(after) ? after : {};
@@ -117,6 +141,10 @@ export function specDiff(before: unknown, after: unknown): string {
   const lines: string[] = [];
   for (const key of keys) {
     if (JSON.stringify(left[key]) === JSON.stringify(right[key])) continue;
+    if (Array.isArray(left[key]) && Array.isArray(right[key])) {
+      lines.push(`@@ ${key} @@`, ...arrayDiff(left[key], right[key]));
+      continue;
+    }
     lines.push(
       `@@ ${key} @@`,
       ...JSON.stringify(left[key] ?? null, null, 2).split("\n").map(line => `- ${line}`),
@@ -142,7 +170,14 @@ export async function prepareSpecUpdate(workspaceRoot: string, specPath: string,
   if (!isObject(changes) || !Object.keys(changes).length || Object.keys(changes).some(key => !EDIT_KEYS.has(key))) {
     throw new Error("Provide supported spec field changes; identity and engine cannot be changed by an edit.");
   }
-  const next = { ...current.document, ...changes };
+  const { add_examples: added, ...fields } = changes;
+  if (added !== undefined) {
+    if (!Array.isArray(added) || "examples" in fields) throw new Error("Use add_examples to append examples, or examples to replace them, not both.");
+    const existing = Array.isArray(current.document.examples) ? current.document.examples : [];
+    fields.examples = [...existing, ...added];
+  }
+  const id = derivedSpecId(current.document, current.path);
+  const next: Record<string, unknown> = { ...(id ? { id } : {}), ...current.document, ...fields };
   function mergeSettings(before: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
     const result = { ...before };
     for (const [key, value] of Object.entries(patch)) {
@@ -152,13 +187,13 @@ export async function prepareSpecUpdate(workspaceRoot: string, specPath: string,
     return result;
   }
   for (const key of ["runtime", "evaluation", "pipeline"]) {
-    if (changes[key] === null) delete next[key];
-    else if (key !== "pipeline" && isObject(changes[key])) next[key] = mergeSettings(isObject(current.document[key]) ? current.document[key] : {}, changes[key]);
+    if (fields[key] === null) delete next[key];
+    else if (key !== "pipeline" && isObject(fields[key])) next[key] = mergeSettings(isObject(current.document[key]) ? current.document[key] : {}, fields[key]);
   }
   for (const key of ["hyperparameters", "foundation"] as const) {
-    if (isObject(changes[key])) {
+    if (isObject(fields[key])) {
       const previous = isObject(current.document[key]) ? current.document[key] : {};
-      next[key] = { ...previous, ...changes[key] };
+      next[key] = { ...previous, ...fields[key] };
     }
   }
   const validation = validateDocument(next, current.path);

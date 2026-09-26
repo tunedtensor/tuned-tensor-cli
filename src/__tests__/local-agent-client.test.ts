@@ -433,7 +433,7 @@ describe("local agent conversation client", () => {
       join(activeWorkspace, "sentiment-demo", "tunedtensor.json"),
       "utf8",
     )))
-      .toEqual(spec);
+      .toEqual({ id: expect.any(String), ...spec });
     expect((await store.load(threadId)).actions[0]?.status).toBe("completed");
     expect(mutationApi.get).not.toHaveBeenCalled();
     expect(mutationApi.post).not.toHaveBeenCalled();

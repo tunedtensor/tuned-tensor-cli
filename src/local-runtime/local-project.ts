@@ -18,6 +18,7 @@ import {
   type LocalBehaviorSpecFile,
   type LocalFoundationSpecFile,
 } from "./contracts.js";
+import { checkConstraints } from "../eval/rules.js";
 
 export const DEFAULT_LOCAL_SPEC_PATH = "tunedtensor.json";
 
@@ -374,6 +375,11 @@ export function validateBehaviorSpec(input: LocalRunInput): SpecValidation {
       errors.push(`examples[${index}] repeats an input; use distinct examples to avoid conflicting labels or train/eval overlap.`);
     }
     seen.add(key);
+  }
+  for (const [index, example] of spec.examples.entries()) {
+    for (const result of checkConstraints(example.output, spec.constraints ?? [])) {
+      if (!result.passed) warnings.push(`examples[${index}] may violate ${result.assertion} (${result.message})`);
+    }
   }
   if (!spec.guidelines.length) {
     warnings.push("Add guidelines to make expected behavior explicit.");

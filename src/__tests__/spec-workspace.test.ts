@@ -13,6 +13,8 @@ const spec = {
   examples: [{ input: "Great", output: "positive" }, { input: "Bad", output: "negative" }],
   hyperparameters: { n_epochs: 2, learning_rate: 0.0002 },
 };
+const input = parseLocalRunInput(spec, "/workspace/tunedtensor.json");
+const derivedId = input.kind === "spec" ? input.request.behavior_spec_id : "";
 let root: string;
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "tt-spec-review-")); await writeFile(join(root, "tunedtensor.json"), JSON.stringify(spec)); });
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
@@ -25,13 +27,14 @@ describe("behavior spec review and editing", () => {
     const original = await readFile(join(root, "tunedtensor.json"), "utf8");
     const prepared = await proposal({ guidelines: ["Return one lowercase label."], hyperparameters: { n_epochs: 3 } });
     expect(prepared.diff).toContain('@@ guidelines @@');
-    expect(prepared.diff).toContain('-   "Return one label."');
+    expect(prepared.diff).toContain('- "Return one label."');
+    expect(prepared.diff).toContain('+ "Return one lowercase label."');
     expect(await readFile(join(root, "tunedtensor.json"), "utf8")).toBe(original);
     expect(await readSpecHistory(root)).toEqual([]);
     const result = await applySpecUpdate(root, prepared.update);
     const updated = await inspectLocalSpec(root);
     expect(result.sha256).toBe(updated.sha256);
-    expect(updated.document).toEqual({ ...spec, guidelines: ["Return one lowercase label."], hyperparameters: { n_epochs: 3, learning_rate: 0.0002 } });
+    expect(updated.document).toEqual({ id: derivedId, ...spec, guidelines: ["Return one lowercase label."], hyperparameters: { n_epochs: 3, learning_rate: 0.0002 } });
     expect(await readSpecHistory(root)).toEqual([expect.objectContaining({ status: "applied", before: spec, after: updated.document })]);
     expect((await reviewSpec(root, "diff")).text).toContain(prepared.diff);
     await writeFile(join(root, "tunedtensor.json"), JSON.stringify({ ...prepared.next, name: "External edit" }));
@@ -52,7 +55,34 @@ describe("behavior spec review and editing", () => {
     });
     expect(((await inspectLocalSpec(root)).document as Record<string, unknown>).runtime).not.toHaveProperty("paths.modelCache");
     await applySpecUpdate(root, (await proposal({ runtime: null, evaluation: null })).update);
-    expect((await inspectLocalSpec(root)).document).toEqual(spec);
+    expect((await inspectLocalSpec(root)).document).toEqual({ id: derivedId, ...spec });
+  });
+
+  it("pins the ID earlier runs used so later edits keep the spec identity and eval split", async () => {
+    const first = await proposal({ guidelines: ["Return one lowercase label."] });
+    expect(first.diff).toContain("@@ id @@");
+    await applySpecUpdate(root, first.update);
+    await applySpecUpdate(root, (await proposal({ name: "Renamed" })).update);
+    const current = await inspectLocalSpec(root);
+    expect(current.document).toMatchObject({ id: derivedId, name: "Renamed" });
+    const edited = parseLocalRunInput(current.document, join(root, "tunedtensor.json"));
+    expect(edited.kind === "spec" && edited.request.behavior_spec_id).toBe(derivedId);
+  });
+
+  it("appends examples and diffs only the changed array items", async () => {
+    const added = { input: "Fine", output: "neutral" };
+    const prepared = await proposal({ add_examples: [added] });
+    expect(prepared.diff).toBe(`@@ examples @@\n+ ${JSON.stringify(added)}\n@@ id @@\n- null\n+ "${derivedId}"`);
+    await applySpecUpdate(root, prepared.update);
+    expect((await inspectLocalSpec(root)).document).toMatchObject({ examples: [...spec.examples, added] });
+    await expect(proposal({ add_examples: [added], examples: spec.examples })).rejects.toThrow(/not both/);
+    await expect(proposal({ add_examples: [{ input: "Great", output: "neutral" }] })).rejects.toThrow(/repeats an input/);
+  });
+
+  it("warns, without blocking, when examples appear to violate constraints", async () => {
+    const prepared = await proposal({ constraints: ["Never mention refund"], add_examples: [{ input: "Money back?", output: "refund issued" }] });
+    expect(prepared.validation.valid).toBe(true);
+    expect(prepared.validation.warnings).toContain('examples[2] may violate constraint: Never mention refund (Output contains "refund")');
   });
 
   it.each([

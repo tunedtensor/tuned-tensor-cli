@@ -1,12 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, realpath, rmdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { TRAINING_MODELS } from "./local-runtime/model-registry.js";
-import { validateSpec } from "./eval/rules.js";
-import type { LocalSpec } from "./eval/types.js";
 
 import { parseLocalRunInput } from "./local-runtime/local-project.js";
 import { pipelineForRunInput } from "./pipeline.js";
@@ -104,19 +102,8 @@ function validateInputs(directory: string, spec: unknown): asserts spec is Local
   if (!Value.Check(LocalProjectSpecSchema, spec)) {
     throw new Error("Local spec content does not match the canonical tunedtensor.json schema.");
   }
+  // Same behavior-spec rules as review, edits and execution.
   pipelineForRunInput(parseLocalRunInput(spec, join(directory, "tunedtensor.json")));
-  if (spec.engine === "foundation") return;
-  const validation = validateSpec({
-    ...spec,
-    description: spec.description ?? "",
-    constraints: spec.constraints ?? [],
-  } as LocalSpec);
-  if (!validation.valid) {
-    const messages = validation.checks
-      .filter((check) => !check.passed)
-      .map((check) => check.message ?? check.name);
-    throw new Error(`Local spec validation failed:\n- ${messages.join("\n- ")}`);
-  }
 }
 
 export async function canonicalWorkspace(workspaceRoot: string): Promise<string> {
@@ -266,7 +253,8 @@ export async function createLocalSpecProject(
     }
     const stableSpecPath = join(`/proc/self/fd/${directoryHandle.fd}`, "tunedtensor.json");
     writeStarted = true;
-    await operations.writeFile(stableSpecPath, `${JSON.stringify(spec, null, 2)}\n`, {
+    // A stable ID keeps run identity and the eval split fixed across later edits.
+    await operations.writeFile(stableSpecPath, `${JSON.stringify({ id: randomUUID(), ...(spec as LocalProjectSpec) }, null, 2)}\n`, {
       encoding: "utf8",
       flag: "wx",
       mode: 0o600,
