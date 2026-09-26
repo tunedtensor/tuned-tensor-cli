@@ -523,9 +523,9 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       { id: "gpt-5.2", provider: "openai", name: "GPT 5.2", reasoning: true },
       { id: "gpt-5.6-sol", provider: "openai", name: "GPT-5.6 Sol", reasoning: true },
       {
-        id: "deepseek/deepseek-v4-flash-0731",
+        id: "anthropic/claude-sonnet-5",
         provider: "openrouter",
-        name: "DeepSeek V4 Flash 0731",
+        name: "Anthropic: Claude Sonnet 5",
         reasoning: true,
       },
       { id: "llama-3.3-70b", provider: "groq", name: "Llama 3.3 70B", reasoning: false },
@@ -568,7 +568,8 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       expect(output).toContain("Providers");
       expect(output).toContain("openai");
       expect(output).toContain("openrouter");
-      expect(output).not.toContain("anthropic");
+      const providersSection = output.split("Suggestions")[0]!;
+      expect(providersSection).not.toContain("anthropic");
       expect(output).not.toContain("groq");
       expect(output).toContain("Other providers: /login <id> or /model <id>");
       expect(output).toMatch(/openai[\s\S]*auth required/);
@@ -576,7 +577,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       expect(output).toContain("/login <provider>");
       expect(output).toContain("Suggestions");
       expect(output).toContain("openai/gpt-5.6-sol");
-      expect(output).toContain("openrouter/deepseek/deepseek-v4-flash-0731");
+      expect(output).toContain("openrouter/anthropic/claude-sonnet-5");
       expect(output).not.toContain("anthropic/claude-sonnet-4-5");
       expect(output).not.toContain("openai/gpt-5.2");
       expect(output).not.toContain("groq/llama-3.3-70b");

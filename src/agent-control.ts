@@ -34,10 +34,7 @@ export const FEATURED_AGENT_PROVIDERS = [
 export const RECOMMENDED_AGENT_MODELS = [
   { provider: "tunedtensor", ids: ["managed"] },
   { provider: "openai", ids: ["gpt-5.6-sol"] },
-  {
-    provider: "openrouter",
-    ids: ["deepseek/deepseek-v4-flash-0731", "deepseek/deepseek-v4-flash"],
-  },
+  { provider: "openrouter", ids: ["anthropic/claude-sonnet-5"] },
 ] as const;
 
 const FEATURED_PROVIDER_INDEX = new Map<string, number>(

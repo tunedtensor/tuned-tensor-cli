@@ -106,7 +106,8 @@ describe("TunedTensorAgentSession", () => {
       expect.any(AbortSignal),
     );
     expect(stdout.join("")).toContain("Here is the answer.");
-    expect(stdout.join("")).toContain(
+    expect(stdout.join("")).toContain("Thinking…");
+    expect(stdout.join("")).not.toContain(
       "I should inspect the available context first.",
     );
     expect(stdout.join("")).toContain("Approval required");
@@ -308,44 +309,48 @@ describe("TunedTensorAgentSession", () => {
 
     const output = stdout.join("");
     const parts = [
-      "Checking runs.",
+      "Thinking…",
       "list_runs",
       "Tool complete",
-      "Comparing results.",
+      "Thinking…",
       "The latest run improved.",
     ];
-    for (let index = 1; index < parts.length; index += 1) {
-      expect(output.indexOf(parts[index - 1]!)).toBeLessThan(
-        output.indexOf(parts[index]!),
-      );
+    let cursor = -1;
+    for (const part of parts) {
+      const next = output.indexOf(part, cursor + 1);
+      expect(next).toBeGreaterThan(cursor);
+      cursor = next;
     }
+    expect(output).not.toContain("Checking runs.");
+    expect(output).not.toContain("Comparing results.");
     expect(output.split("tt  ")).toHaveLength(2);
   });
 
-  it("strips terminal controls from streamed reasoning", async () => {
+  it("collapses streamed reasoning into one indicator", async () => {
     const client = fakeClient();
     client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
-      onEvent({
-        type: "reasoning_delta",
-        payload: { delta: "safe\u001b[2J reasoning\u0007" },
-      });
+      onEvent({ type: "reasoning_delta", payload: { delta: "first\u001b[2J part" } });
+      onEvent({ type: "reasoning_delta", payload: { delta: " second part\u0007" } });
+      onEvent({ type: "text_delta", payload: { delta: "Done." } });
       return {
         threadId: thread.id,
         turnId: "turn-1",
         status: "completed",
-        response: "",
+        response: "Done.",
         actions: [],
       };
     });
     const { io, stdout } = testIO();
     const session = new TunedTensorAgentSession({ client, io });
 
-    await session.send("think safely");
+    await session.send("think quietly");
 
     const output = stdout.join("");
-    expect(output).toContain("safe reasoning");
+    expect(output.split("Thinking…")).toHaveLength(2);
+    expect(output).not.toContain("first");
+    expect(output).not.toContain("second part");
     expect(output).not.toContain("[2J");
-    expect(output).not.toContain("\u0007");
+    expect(output).toContain("Done.");
   });
 
   it("renders streamed assistant Markdown without exposing syntax markers", async () => {

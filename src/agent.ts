@@ -200,30 +200,19 @@ export class TunedTensorAgentSession {
         stringValue(payload.text) ??
         stringValue(payload.content);
       if (!delta) return;
-      if (this.reasoningActive) {
-        this.endOpenLine();
-        this.options.io.write("\n");
-      }
+      this.reasoningActive = false;
       this.writeRenderedResponse(this.responseMarkdown.push(delta));
       return;
     }
 
     if (event.type === "reasoning_delta") {
-      const delta =
-        stringValue(payload.delta) ??
-        stringValue(payload.text) ??
-        stringValue(payload.content);
-      if (!delta) return;
-      const safeDelta = sanitizeTerminalText(delta);
-      if (!safeDelta) return;
-      if (!this.reasoningActive) {
-        this.flushResponse();
-        this.endOpenLine();
-        this.options.io.write("\n");
-        this.reasoningActive = true;
-      }
-      this.options.io.write(chalk.dim.italic(safeDelta));
-      this.lineOpen = !safeDelta.endsWith("\n");
+      // Raw reasoning is verbose and rarely useful to the user; show one
+      // compact indicator per reasoning block instead of streaming it.
+      if (this.reasoningActive) return;
+      this.flushResponse();
+      this.endOpenLine();
+      this.options.io.write(chalk.dim("  ○ Thinking…\n"));
+      this.reasoningActive = true;
       return;
     }
 

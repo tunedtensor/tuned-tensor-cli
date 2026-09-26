@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Changed
+
+- Show a single `Thinking…` line per reasoning block in the agent shell instead
+  of streaming the model's raw reasoning.
+- Suggest Claude Sonnet 5 (`openrouter/anthropic/claude-sonnet-5`) as the
+  OpenRouter model in `/model`.
+
 ## [0.19.0] - 2026-09-26
 
 ### Added
