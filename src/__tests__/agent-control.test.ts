@@ -109,11 +109,17 @@ describe("listAgentProviders", () => {
 });
 
 describe("recommendAgentModels", () => {
-  it("recommends GPT-5.6 Sol and DeepSeek V4 Flash when they are in the catalog", () => {
+  it("recommends GPT-5.6 Sol and Claude Sonnet 5 when they are in the catalog", () => {
     const runtime = makeRuntime({
       getModels: () => [
         ...models,
         { id: "gpt-5.6-sol", provider: "openai", name: "GPT-5.6 Sol", reasoning: true },
+        {
+          id: "anthropic/claude-sonnet-5",
+          provider: "openrouter",
+          name: "Anthropic: Claude Sonnet 5",
+          reasoning: true,
+        },
         {
           id: "deepseek/deepseek-v4-flash-0731",
           provider: "openrouter",
@@ -124,23 +130,23 @@ describe("recommendAgentModels", () => {
     });
     expect(recommendAgentModels(runtime).map((model) => `${model.provider}/${model.id}`)).toEqual([
       "openai/gpt-5.6-sol",
-      "openrouter/deepseek/deepseek-v4-flash-0731",
+      "openrouter/anthropic/claude-sonnet-5",
     ]);
   });
 
-  it("falls back to undated DeepSeek V4 Flash and omits missing picks", () => {
+  it("omits picks that are missing from the catalog", () => {
     const runtime = makeRuntime({
       getModels: () => [
         {
-          id: "deepseek/deepseek-v4-flash",
+          id: "anthropic/claude-sonnet-5",
           provider: "openrouter",
-          name: "DeepSeek V4 Flash",
+          name: "Anthropic: Claude Sonnet 5",
           reasoning: true,
         },
       ],
     });
     expect(recommendAgentModels(runtime).map((model) => `${model.provider}/${model.id}`)).toEqual([
-      "openrouter/deepseek/deepseek-v4-flash",
+      "openrouter/anthropic/claude-sonnet-5",
     ]);
   });
 });

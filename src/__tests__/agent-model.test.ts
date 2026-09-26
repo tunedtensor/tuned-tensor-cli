@@ -102,7 +102,7 @@ describe("local agent model resolution", () => {
         .toEqual([
           "tunedtensor/managed",
           "openai/gpt-5.6-sol",
-          "openrouter/deepseek/deepseek-v4-flash-0731",
+          "openrouter/anthropic/claude-sonnet-5",
         ]);
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally {
