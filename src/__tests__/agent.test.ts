@@ -329,6 +329,7 @@ describe("TunedTensorAgentSession", () => {
   it("collapses streamed reasoning into one indicator", async () => {
     const client = fakeClient();
     client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
+      onEvent({ type: "reasoning_delta", payload: { delta: "" } });
       onEvent({ type: "reasoning_delta", payload: { delta: "first\u001b[2J part" } });
       onEvent({ type: "reasoning_delta", payload: { delta: " second part\u0007" } });
       onEvent({ type: "text_delta", payload: { delta: "Done." } });

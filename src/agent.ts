@@ -206,6 +206,11 @@ export class TunedTensorAgentSession {
     }
 
     if (event.type === "reasoning_delta") {
+      const delta =
+        stringValue(payload.delta) ??
+        stringValue(payload.text) ??
+        stringValue(payload.content);
+      if (!delta) return;
       // Raw reasoning is verbose and rarely useful to the user; show one
       // compact indicator per reasoning block instead of streaming it.
       if (this.reasoningActive) return;
