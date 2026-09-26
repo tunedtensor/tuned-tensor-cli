@@ -2,13 +2,6 @@
 
 ## Unreleased
 
-### Changed
-
-- Show a single `Thinking…` line per reasoning block in the agent shell instead
-  of streaming the model's raw reasoning.
-- Suggest Claude Sonnet 5 (`openrouter/anthropic/claude-sonnet-5`) as the
-  OpenRouter model in `/model`.
-
 ## [0.19.0] - 2026-09-26
 
 ### Added
@@ -18,12 +11,18 @@
 
 ### Changed
 
+- Show a single `Thinking…` line per reasoning block in the agent shell instead
+  of streaming the model's raw reasoning.
+- Suggest Claude Sonnet 5 (`openrouter/anthropic/claude-sonnet-5`) as the
+  OpenRouter model in `/model`.
 - Report examples that appear to violate the spec's constraints as a validation
   warning in every path (creation, edits, `tt spec validate`, runs) instead of
   rejecting only agent-created specs.
 
 ### Fixed
 
+- Ignore empty reasoning updates so they do not show a misleading `Thinking…`
+  line.
 - Keep a spec's identity and train/evaluation split stable across edits. Agent-created
   specs now get an `id`, and the first edit of a spec without one pins the ID its
   earlier runs used.
