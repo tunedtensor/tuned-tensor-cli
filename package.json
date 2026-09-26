@@ -1,6 +1,6 @@
 {
   "name": "@tuned-tensor/cli",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "Local TT agent and CUDA fine-tuning CLI for Tuned Tensor workflows",
   "repository": {
     "type": "git",
