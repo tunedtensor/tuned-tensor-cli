@@ -336,7 +336,7 @@ describe("deterministic local approvals", () => {
       expect(client.post).not.toHaveBeenCalled();
       expect(client.put).not.toHaveBeenCalled();
       expect(JSON.parse(readFileSync(join(workspace, "sentiment-demo", "tunedtensor.json"), "utf8")))
-        .toEqual(spec);
+        .toEqual({ id: expect.stringMatching(/^[0-9a-f-]{36}$/), ...spec });
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }

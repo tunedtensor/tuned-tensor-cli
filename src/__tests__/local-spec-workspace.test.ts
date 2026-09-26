@@ -86,20 +86,19 @@ describe("local spec workspace", () => {
     },
   );
 
-  it("rejects specs whose examples violate their constraints", async () => {
+  it("applies the shared behavior-spec rules to new specs", async () => {
     await expect(prepareLocalSpecProject(workspace, "too-small-spec", {
       ...spec,
       examples: [{ input: "Classify this.", output: "positive" }],
     })).rejects.toThrow(/canonical tunedtensor\.json schema/i);
-    await expect(prepareLocalSpecProject(workspace, "invalid-spec", {
+    await expect(prepareLocalSpecProject(workspace, "duplicate-spec", {
       ...spec,
-      constraints: ["Never mention secret"],
       examples: [
-        { input: "Classify this.", output: "secret" },
-        { input: "Classify that.", output: "another secret" },
+        { input: "Classify this.", output: "positive" },
+        { input: "Classify this.", output: "negative" },
       ],
-    })).rejects.toThrow(/violates/i);
-    expect(existsSync(join(workspace, "invalid-spec"))).toBe(false);
+    })).rejects.toThrow(/repeats an input/i);
+    expect(existsSync(join(workspace, "duplicate-spec"))).toBe(false);
   });
 
   it("refuses existing targets and symlinked workspace roots", async () => {
@@ -158,7 +157,7 @@ describe("local spec workspace", () => {
 
     const target = join(workspace, "safe-spec");
     const specPath = join(target, "tunedtensor.json");
-    expect(JSON.parse(readFileSync(specPath, "utf8"))).toEqual(spec);
+    expect(JSON.parse(readFileSync(specPath, "utf8"))).toEqual({ id: expect.stringMatching(/^[0-9a-f-]{36}$/), ...spec });
     expect(lstatSync(target).mode & 0o777).toBe(0o700);
     expect(lstatSync(specPath).mode & 0o777).toBe(0o600);
     await expect(createLocalSpecProject(
@@ -269,6 +268,6 @@ describe("local spec workspace", () => {
     )).rejects.toMatchObject({ outcome: "unknown" });
 
     expect(existsSync(target)).toBe(true);
-    expect(JSON.parse(readFileSync(join(target, "tunedtensor.json"), "utf8"))).toEqual(spec);
+    expect(JSON.parse(readFileSync(join(target, "tunedtensor.json"), "utf8"))).toEqual({ id: expect.any(String), ...spec });
   });
 });

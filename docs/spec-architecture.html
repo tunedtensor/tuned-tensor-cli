@@ -234,7 +234,7 @@
     "summary": "Validate the proposed document and bind it to the current file and workspace before approval.",
     "input": "Field changes + the hash returned by get_local_spec.",
     "output": "After /approve: atomic spec replacement and a before/after revision record.",
-    "boundary": "Stale edits fail. Arrays replace fields; foundation and hyperparameters merge by key. Secure edits currently require Linux.",
+    "boundary": "Stale edits fail. add_examples appends; other arrays replace fields; foundation and hyperparameters merge by key. Secure edits currently require Linux.",
     "flow": [
       "prepareSpecUpdate",
       "diff",

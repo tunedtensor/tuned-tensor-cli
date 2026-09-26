@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## [0.19.0] - 2026-09-26
+
+### Added
+
+- Append examples in agent spec edits with `add_examples`, without resending the
+  existing examples. Spec diffs list only the added and removed array items.
+
+### Changed
+
+- Report examples that appear to violate the spec's constraints as a validation
+  warning in every path (creation, edits, `tt spec validate`, runs) instead of
+  rejecting only agent-created specs.
+
+### Fixed
+
+- Keep a spec's identity and train/evaluation split stable across edits. Agent-created
+  specs now get an `id`, and the first edit of a spec without one pins the ID its
+  earlier runs used.
+
 ## [0.18.0] - 2026-09-24
 
 ### Added

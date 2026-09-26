@@ -311,3 +311,25 @@ it("executes the approved adapter spec through CLI, dataset compiler, trainer pr
     expect(config.storeRoot).toBeDefined();
   } finally { log.mockRestore(); setJsonMode(false); }
 });
+
+it("keeps an ID-less spec's run identity and train/eval split stable across an approved edit", async () => {
+  await setup();
+  const specPath = join(root, "tunedtensor.json");
+  await writeFile(specPath, JSON.stringify({ ...request().spec_snapshot, guidelines: ["Return one label."] }));
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  async function run() {
+    await createProgram("test").parseAsync(["--json", "pipeline", "run", "--spec", specPath, "--config", join(root, "local-runner.json")], { from: "user" });
+    const result = JSON.parse(String(log.mock.calls.at(-1)![0]));
+    return { specId: result.request.behavior_spec_id, trained: [...trainedPrompts].sort() };
+  }
+  try {
+    const before = await run();
+    const prepared = await prepareSpecUpdate(root, "tunedtensor.json", (await inspectLocalSpec(root)).sha256, {
+      guidelines: ["Return one lowercase label."],
+    });
+    await applySpecUpdate(root, prepared.update);
+    const after = await run();
+    expect(after.specId).toBe(before.specId);
+    expect(after.trained).toEqual(before.trained);
+  } finally { log.mockRestore(); setJsonMode(false); }
+});
