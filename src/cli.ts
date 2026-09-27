@@ -423,9 +423,12 @@ function createShellAgent(options: {
   output: NodeJS.WritableStream;
   error: NodeJS.WritableStream;
 }): TunedTensorAgentSession {
+  const terminal = options.output as NodeJS.WritableStream & { isTTY?: boolean; columns?: number };
   return new TunedTensorAgentSession({
     client: options.client,
     io: {
+      live: terminal.isTTY === true,
+      columns: () => terminal.columns,
       write(text) {
         options.output.write(text);
       },

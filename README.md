@@ -96,7 +96,8 @@ npm link
 `tunedtensor.json` is the source of truth for behavior and training settings.
 Use `/spec`, `/spec diff`, `/spec validate`, and `/spec history` in the shell to
 review it without a model call. Ask the agent for changes, inspect its proposed
-diff, then `/approve` to save a validated edit with revision history. Pipeline
+diff, then press `y` when tt asks (or `/approve` later) to save a validated edit
+with revision history. Pipeline
 runs use the saved spec. See [the spec workflow](docs/spec-workflow.md).
 
 ## Conversational terminal
@@ -173,7 +174,9 @@ Ordinary sentences go through the locally orchestrated model session. The
 model has no shell or general filesystem tool. It can read and propose reviewed
 edits to an existing spec, or prepare one new folder directly beneath the shell's current working directory with a validated
 `tunedtensor.json`, or prepare a local pipeline dry-run sealed to the reviewed
-workspace and spec contents. Writes and pipeline previews wait for `/approve`. The tools refuse path
+workspace and spec contents. Writes and pipeline previews wait for your approval: after the
+answer, tt shows the proposal and asks inline, where `y` approves, `n` rejects and `Esc`
+leaves it pending for a later `/approve` or `/reject`. Any other key is ignored. The tools refuse path
 traversal, symlinked workspace roots, overwriting a new-project target, unsupported spec
 fields, cloud pipeline targets, and spec changes after review. Known CLI
 commands such as `runs list`, `doctor`, and `models list` still execute directly.

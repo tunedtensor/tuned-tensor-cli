@@ -332,6 +332,9 @@ describe("renderShellPrompt", () => {
       expect(submitted).toContain("\u001b[K\u001b[0m\r\n");
       expect(submitted).toMatch(/^\u001b\[1A\r\u001b\[2K/);
       expect(renderSubmittedShellInput("too long", 5)).toBe("");
+      const wrapped = renderSubmittedShellInput("a question that wraps", 10);
+      expect(wrapped).toMatch(/^\u001b\[3A\r\u001b\[J/);
+      expect(wrapped).toContain("a question that wraps");
       expect(renderSubmittedShellInput("safe\u001b[31m", 80)).not.toContain("[31m");
     } finally {
       chalk.level = originalLevel;

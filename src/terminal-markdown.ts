@@ -153,3 +153,57 @@ export class StreamingTerminalMarkdown {
     return renderMarkdownLine(safeLine, this.inCodeBlock);
   }
 }
+
+function isWideCodePoint(code: number): boolean {
+  return code >= 0x1100 && (
+    code <= 0x115f
+    || (code >= 0x2e80 && code <= 0xa4cf)
+    || (code >= 0xac00 && code <= 0xd7a3)
+    || (code >= 0xf900 && code <= 0xfaff)
+    || (code >= 0xfe30 && code <= 0xfe4f)
+    || (code >= 0xff00 && code <= 0xff60)
+    || (code >= 0xffe0 && code <= 0xffe6)
+    || (code >= 0x1f300 && code <= 0x1faff)
+    || (code >= 0x20000 && code <= 0x3fffd)
+  );
+}
+
+/** Approximate terminal cell width of text, ignoring ANSI styling. */
+export function terminalWidth(text: string): number {
+  let width = 0;
+  for (const char of stripVTControlCharacters(text)) {
+    width += isWideCodePoint(char.codePointAt(0)!) ? 2 : 1;
+  }
+  return width;
+}
+
+/**
+ * Word-wrap one styled line to `width` cells. List items keep a hanging
+ * indent so wrapped text lines up under the item rather than its marker.
+ * Words wider than the line are left for the terminal to break.
+ */
+export function wrapTerminalLine(line: string, width: number): string[] {
+  if (width < 20 || terminalWidth(line) <= width) return [line];
+  const plain = stripVTControlCharacters(line);
+  const hang = plain.match(/^(\s*(?:[•│]|\d+\.)?\s*)/)?.[1]?.length ?? 0;
+  const continuation = " ".repeat(hang < width / 2 ? hang : 0);
+  const lines: string[] = [];
+  let current = "";
+  let currentWidth = 0;
+  let started = false;
+  for (const word of line.split(" ")) {
+    const wordWidth = terminalWidth(word);
+    const hasContent = stripVTControlCharacters(current).trim().length > 0;
+    if (started && hasContent && wordWidth > 0 && currentWidth + 1 + wordWidth > width) {
+      lines.push(current);
+      current = continuation + word;
+      currentWidth = continuation.length + wordWidth;
+      continue;
+    }
+    current += (started ? " " : "") + word;
+    currentWidth += (started ? 1 : 0) + wordWidth;
+    started = true;
+  }
+  lines.push(current);
+  return lines;
+}
