@@ -190,7 +190,8 @@ export class TunedTensorAgentSession {
   private reasoningActive = false;
   /** A live status line is on screen without a trailing newline. */
   private transient: string | null = null;
-  private pendingToolLabel: string | null = null;
+  private readonly pendingToolLabels = new Map<string, string>();
+  private pendingUnkeyedToolLabel: string | null = null;
   private readonly responseMarkdown = new StreamingTerminalMarkdown();
 
   constructor(private readonly options: AgentSessionOptions) {
@@ -382,15 +383,20 @@ export class TunedTensorAgentSession {
 
     if (event.type === "tool_call") {
       this.reasoningActive = false;
-      this.writeStatus(chalk.dim(`○ ${toolLabel(payload)}…`), { transient: true });
-      this.pendingToolLabel = toolLabel(payload);
+      const label = toolLabel(payload);
+      this.writeStatus(chalk.dim(`○ ${label}…`), { transient: true });
+      const id = stringValue(payload.toolUseId);
+      if (id) this.pendingToolLabels.set(id, label);
+      else this.pendingUnkeyedToolLabel = label;
       return;
     }
 
     if (event.type === "tool_result") {
       const failed = payload.status === "error" || Boolean(payload.error);
-      const label = this.pendingToolLabel ?? "Tool";
-      this.pendingToolLabel = null;
+      const id = stringValue(payload.toolUseId);
+      const label = (id && this.pendingToolLabels.get(id)) ?? this.pendingUnkeyedToolLabel ?? "Tool";
+      if (id) this.pendingToolLabels.delete(id);
+      else this.pendingUnkeyedToolLabel = null;
       this.writeStatus(
         `${failed ? errorMark() : successMark()} ${chalk.dim(failed ? `${label} failed` : label)}`,
       );
@@ -489,7 +495,8 @@ export class TunedTensorAgentSession {
     this.reasoningActive = false;
     this.lineOpen = false;
     this.transient = null;
-    this.pendingToolLabel = null;
+    this.pendingToolLabels.clear();
+    this.pendingUnkeyedToolLabel = null;
     this.responseMarkdown.reset();
   }
 

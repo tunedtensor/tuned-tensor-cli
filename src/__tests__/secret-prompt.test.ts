@@ -84,4 +84,17 @@ describe("promptKeyChoice", () => {
     const input = new PassThrough();
     await expect(promptKeyChoice("Approve?", input, new PassThrough())).resolves.toBe("later");
   });
+
+  it("defers and restores key handlers when input closes during approval", async () => {
+    const { input, output } = fakeTerminal();
+    const parent = () => {};
+    input.on("keypress", parent);
+
+    const pending = promptKeyChoice("Approve?", input, output);
+    input.emit("close");
+
+    await expect(pending).resolves.toBe("later");
+    expect(input.listeners("keypress")).toEqual([parent]);
+    expect(input.isRaw).toBe(true);
+  });
 });

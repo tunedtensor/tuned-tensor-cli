@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.20.0] - 2026-09-27
+
 ### Added
 
 - Approve proposals inline. After an answer that proposes a spec edit, project,
@@ -21,6 +23,11 @@
   a specific result such as `Spec edit saved.`
 - Tell the agent to summarize proposals instead of repeating the diff, and not to
   ask the user to type `/approve`.
+
+### Fixed
+
+- Match tool results to their labels when several tools finish out of order.
+- Leave an inline approval pending if terminal input closes during the prompt.
 
 ## [0.19.0] - 2026-09-26
 

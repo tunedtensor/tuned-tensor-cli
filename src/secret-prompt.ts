@@ -135,10 +135,20 @@ export async function promptKeyChoice(
     output.write(`${message} ${hint()}`);
     try {
       const choice = await new Promise<KeyChoice>((resolve) => {
-        input.on("keypress", (text: string | undefined, key: Keypress | undefined) => {
+        const finish = (decision: KeyChoice) => {
+          input.removeListener("keypress", onKeypress);
+          input.removeListener("end", onEnd);
+          input.removeListener("close", onEnd);
+          resolve(decision);
+        };
+        const onKeypress = (text: string | undefined, key: Keypress | undefined) => {
           const decided = keyChoiceFor(key, text);
-          if (decided) resolve(decided);
-        });
+          if (decided) finish(decided);
+        };
+        const onEnd = () => finish("later");
+        input.on("keypress", onKeypress);
+        input.once("end", onEnd);
+        input.once("close", onEnd);
       });
       output.write(`\r\u001b[2K${message} ${CHOICE_ECHO[choice]}\n`);
       return choice;

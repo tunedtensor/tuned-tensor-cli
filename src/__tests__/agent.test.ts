@@ -588,4 +588,23 @@ describe("TunedTensorAgentSession", () => {
     expect(output).toContain("✓ Review local behavior spec\n");
     expect(output).toContain("Thinking…\r\u001b[2K");
   });
+
+  it("matches results to tool labels when tools finish out of order", async () => {
+    const client = fakeClient();
+    client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
+      onEvent({ type: "tool_call", payload: { toolUseId: "first", label: "Inspect spec" } });
+      onEvent({ type: "tool_call", payload: { toolUseId: "second", label: "Check hardware" } });
+      onEvent({ type: "tool_result", payload: { toolUseId: "first", status: "success" } });
+      onEvent({ type: "tool_result", payload: { toolUseId: "second", status: "success" } });
+      return { threadId: thread.id, turnId: "t", status: "completed", response: "", actions: [] };
+    });
+    const { io, stdout } = testIO();
+    const session = new TunedTensorAgentSession({ client, io });
+
+    await session.send("check");
+
+    const output = stdout.join("");
+    expect(output).toContain("✓ Inspect spec");
+    expect(output).toContain("✓ Check hardware");
+  });
 });
