@@ -9,7 +9,11 @@ import {
   type AgentTurnResult,
 } from "./agent-client.js";
 import { tokenizeShellInput } from "./shell.js";
-import { sanitizeTerminalText, StreamingTerminalMarkdown } from "./terminal-markdown.js";
+import {
+  sanitizeTerminalText,
+  StreamingTerminalMarkdown,
+  wrapTerminalLine,
+} from "./terminal-markdown.js";
 
 const accent = chalk.hex("#8B5CF6");
 const successMark = (): string => chalk.green("✓");
@@ -19,7 +23,19 @@ export interface AgentSessionIO {
   write(text: string): void;
   writeError(text: string): void;
   clear(): void;
+  /** Terminal width used to wrap answers; omit to leave wrapping to the terminal. */
+  columns?(): number | undefined;
+  /** True for an interactive terminal where status lines can be redrawn in place. */
+  live?: boolean;
 }
+
+export type ApprovalDecision = "approve" | "reject" | "later";
+
+/** Ask the user to decide on a proposal without leaving the conversation. */
+export type ApprovalPrompter = (question: string) => Promise<ApprovalDecision>;
+
+const ANSI_CLEAR_LINE = "\r\u001b[2K";
+const GUTTER = "  ";
 
 export interface AgentSessionOptions {
   client: AgentConversationClient;
@@ -44,14 +60,14 @@ function helpText(): string {
     `  ${accent("/new".padEnd(22))} Start a new conversation.`,
     `  ${accent("/threads".padEnd(22))} List recent conversations.`,
     `  ${accent("/resume <id>".padEnd(22))} Resume a conversation by ID or prefix.`,
-    `  ${accent("/approve [id]".padEnd(22))} Approve a proposed action.`,
-    `  ${accent("/reject [id]".padEnd(22))} Reject a proposed action.`,
+    `  ${accent("/approve [id]".padEnd(22))} Approve an action left pending.`,
+    `  ${accent("/reject [id]".padEnd(22))} Reject an action left pending.`,
     `  ${accent("/status".padEnd(22))} Show the active conversation.`,
     `  ${accent("/clear".padEnd(22))} Clear the terminal.`,
     `  ${accent("/exit".padEnd(22))} Exit the agent.`,
     "",
     chalk.dim(
-      "Everything else is sent to the laptop-local Tuned Tensor assistant; known TT commands still run directly in the shell.",
+      "Everything else is sent to the laptop-local Tuned Tensor assistant; known TT commands still run directly in the shell. Proposed changes ask for approval right after the answer.",
     ),
     "",
   ].join("\n");
@@ -105,13 +121,77 @@ function formatJson(value: unknown): string {
   }
 }
 
+function riskLabel(risk: string): string {
+  const safe = sanitizeTerminalText(risk);
+  const color = safe === "low" ? chalk.green : safe === "high" ? chalk.red : chalk.yellow;
+  return color(`${safe} risk`);
+}
+
+function diffStyle(line: string): (text: string) => string {
+  if (line.startsWith("+++") || line.startsWith("---")) return chalk.dim;
+  if (line.startsWith("+")) return chalk.green;
+  if (line.startsWith("-")) return chalk.red;
+  if (line.startsWith("@@")) return chalk.cyan;
+  return (text) => text;
+}
+
+function approvalQuestion(action: AgentAction): string {
+  switch (action.operation) {
+    case "update_local_spec":
+      return "Save this spec edit?";
+    case "create_local_spec":
+      return "Create this project?";
+    case "run_local_pipeline":
+      return "Run this dry-run preview?";
+    case "create_spec":
+    case "update_spec":
+      return "Apply this change to your TT account?";
+    default:
+      return "Approve this action?";
+  }
+}
+
+function completionMessage(action: AgentAction | null): string {
+  switch (action?.operation) {
+    case "update_local_spec":
+      return "Spec edit saved.";
+    case "create_local_spec":
+      return "Project created.";
+    case "run_local_pipeline":
+      return "Dry-run preview finished.";
+    default:
+      return "Approved action completed.";
+  }
+}
+
+function toolLabel(payload: Record<string, unknown>): string {
+  const label = stringValue(payload.label);
+  if (label) return sanitizeTerminalText(label);
+  const name =
+    stringValue(payload.name) ??
+    stringValue(isRecord(payload.tool_call) ? payload.tool_call.name : null) ??
+    "tool";
+  const words = sanitizeTerminalText(name).replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 export class TunedTensorAgentSession {
   private thread: AgentThread | null;
   private readonly pendingActions = new Map<string, AgentAction>();
   private activeRequest: { controller: AbortController; interruptible: boolean } | null = null;
-  private responseStarted = false;
-  private reasoningActive = false;
+  private prompter: ApprovalPrompter | null = null;
+  /** Proposals raised during the current turn, reviewed once the answer ends. */
+  private turnProposals: string[] = [];
+  private runningAction: AgentAction | null = null;
+  /** The next answer line starts a new block and carries the ● marker. */
+  private blockStart = true;
+  private wroteInTurn = false;
   private lineOpen = false;
+  private reasoningActive = false;
+  /** A live status line is on screen without a trailing newline. */
+  private transient: string | null = null;
+  private readonly pendingToolLabels = new Map<string, string>();
+  private pendingUnkeyedToolLabel: string | null = null;
   private readonly responseMarkdown = new StreamingTerminalMarkdown();
 
   constructor(private readonly options: AgentSessionOptions) {
@@ -120,6 +200,14 @@ export class TunedTensorAgentSession {
 
   get busy(): boolean {
     return this.activeRequest !== null;
+  }
+
+  /**
+   * Enable inline approval. When set, tt asks for a decision right after an
+   * answer that proposes a change instead of waiting for /approve.
+   */
+  setApprovalPrompter(prompter: ApprovalPrompter | null): void {
+    this.prompter = prompter;
   }
 
   snapshot(): {
@@ -135,60 +223,134 @@ export class TunedTensorAgentSession {
   interrupt(): boolean {
     if (!this.activeRequest) return false;
     if (!this.activeRequest.interruptible) {
-      this.options.io.writeError(
-        `${errorMark()} Approved action is settling and cannot be interrupted safely. Do not retry it.\n`,
-      );
+      this.writeErrorLine("Approved action is settling and cannot be interrupted safely. Do not retry it.");
       return true;
     }
     this.activeRequest.controller.abort("user-stop");
     return true;
   }
 
-  private endOpenLine(): void {
-    if (this.lineOpen) this.options.io.write("\n");
-    this.lineOpen = false;
-    this.reasoningActive = false;
+  private get io(): AgentSessionIO {
+    return this.options.io;
   }
 
-  private writeRenderedResponse(rendered: string): void {
-    if (!rendered) return;
-    if (!this.responseStarted) {
-      this.options.io.write(`\n${accent.bold("tt")}  `);
-      this.responseStarted = true;
+  private clearTransient(): void {
+    if (this.transient === null) return;
+    this.io.write(ANSI_CLEAR_LINE);
+    this.transient = null;
+  }
+
+  private endOpenLine(): void {
+    this.clearTransient();
+    if (this.lineOpen) this.io.write("\n");
+    this.lineOpen = false;
+  }
+
+  /** Write a status line in the answer gutter, e.g. "○ Thinking…". */
+  private writeStatus(text: string, options: { transient?: boolean } = {}): void {
+    this.flushResponse();
+    this.endOpenLine();
+    if (!this.blockStart) this.io.write("\n");
+    this.blockStart = true;
+    this.wroteInTurn = true;
+    const line = `${GUTTER}${text}`;
+    if (options.transient && this.io.live) {
+      this.io.write(line);
+      this.transient = line;
+      return;
     }
-    this.options.io.write(rendered);
-    this.lineOpen = !rendered.endsWith("\n");
+    this.io.write(`${line}\n`);
+  }
+
+  private writeErrorLine(message: string): void {
+    this.endOpenLine();
+    this.io.writeError(`${GUTTER}${errorMark()} ${sanitizeTerminalText(message)}\n`);
+  }
+
+  private wrapWidth(): number | undefined {
+    const columns = this.io.columns?.();
+    return columns ? columns - GUTTER.length : undefined;
+  }
+
+  /** Write rendered answer text in the gutter, marking the start of each block. */
+  private writeAnswer(rendered: string): void {
+    if (!rendered) return;
+    this.clearTransient();
+    const width = this.wrapWidth();
+    const lines = rendered.split("\n");
+    lines.forEach((line, index) => {
+      if (index > 0) {
+        this.io.write("\n");
+        this.lineOpen = false;
+      }
+      if (!line) return;
+      const wrapped = width ? wrapTerminalLine(line, width) : [line];
+      wrapped.forEach((part, partIndex) => {
+        if (partIndex > 0) this.io.write("\n");
+        if (!this.lineOpen || partIndex > 0) {
+          const marker = this.blockStart ? `${accent("●")} ` : GUTTER;
+          // Separate a new answer block from status lines above it.
+          if (this.blockStart && this.wroteInTurn) this.io.write("\n");
+          this.blockStart = false;
+          this.wroteInTurn = true;
+          this.io.write(marker);
+        }
+        this.io.write(part);
+      });
+      this.lineOpen = true;
+    });
   }
 
   private flushResponse(): void {
-    this.writeRenderedResponse(this.responseMarkdown.flush());
+    this.writeAnswer(this.responseMarkdown.flush());
   }
 
   private renderAction(action: AgentAction): void {
+    this.flushResponse();
     this.endOpenLine();
-    this.options.io.write(
-      `\n${chalk.yellow.bold("Approval required")}  ${chalk.dim(action.id.slice(0, 8))}\n`,
-    );
-    this.options.io.write(`${chalk.bold(sanitizeTerminalText(action.title))}  ${chalk.yellow(`[${sanitizeTerminalText(action.risk)} risk]`)}\n`);
-    if (action.summary) this.options.io.write(`${sanitizeTerminalText(action.summary)}\n`);
+    const bar = chalk.yellow("│");
+    const out: string[] = [
+      "",
+      `${GUTTER}${chalk.yellow.bold("◆ Approval needed")}  ${chalk.dim(action.id.slice(0, 8))}`,
+      `${GUTTER}${bar} ${chalk.bold(sanitizeTerminalText(action.title))} ${chalk.dim("·")} ${riskLabel(action.risk)}`,
+    ];
+    const width = this.wrapWidth();
+    const push = (text: string, style: (line: string) => string = (line) => line) => {
+      for (const raw of sanitizeTerminalText(text).split("\n")) {
+        const parts = width ? wrapTerminalLine(raw, width - 2) : [raw];
+        for (const part of parts) out.push(`${GUTTER}${bar} ${style(part)}`);
+      }
+    };
+    if (action.summary) push(action.summary, chalk.dim);
     if (action.operation === "update_local_spec") {
       const preview = action.preview as { diff?: string; validation?: { warnings?: string[] } } | undefined;
-      this.options.io.write(`${sanitizeTerminalText(preview?.diff ?? "No diff available.")}\n`);
-      for (const warning of preview?.validation?.warnings ?? []) this.options.io.write(`${sanitizeTerminalText(warning)}\n`);
-      this.options.io.write("Use /spec diff to review again; /approve saves the edit, /reject leaves the spec unchanged.\n");
-      return;
+      out.push(`${GUTTER}${bar}`);
+      for (const line of sanitizeTerminalText(preview?.diff ?? "No diff available.").replace(/\n$/, "").split("\n")) {
+        // Continuation rows keep the line's diff color and sit under its text.
+        const style = diffStyle(line);
+        const parts = width ? wrapTerminalLine(line, width - 4) : [line];
+        parts.forEach((part, index) => {
+          out.push(`${GUTTER}${bar} ${style(index === 0 ? part : `  ${part}`)}`);
+        });
+      }
+      for (const warning of preview?.validation?.warnings ?? []) push(`! ${warning}`, chalk.yellow);
+    } else {
+      const request = [action.method, action.path].filter(Boolean).join(" ");
+      const technical = {
+        operation: action.operation,
+        ...(request ? { request } : {}),
+        arguments: action.arguments ?? null,
+        preview: action.preview ?? null,
+      };
+      out.push(`${GUTTER}${bar}`);
+      push(formatJson(technical), chalk.dim);
     }
-    const request = [action.method, action.path].filter(Boolean).join(" ");
-    const technical = {
-      operation: action.operation,
-      ...(request ? { request } : {}),
-      arguments: action.arguments ?? null,
-      preview: action.preview ?? null,
-    };
-    this.options.io.write(`${chalk.bold("Proposed action")}\n`);
-    this.options.io.write(`${formatJson(technical)}\n`);
-    this.options.io.write(
-      chalk.dim("Use /approve or /reject. The action will not run without approval.") + "\n",
+    this.io.write(`${out.join("\n")}\n`);
+  }
+
+  private writePendingHint(): void {
+    this.io.write(
+      chalk.dim(`${GUTTER}Nothing changes until you decide: /approve applies it, /reject discards it.\n`),
     );
   }
 
@@ -201,7 +363,7 @@ export class TunedTensorAgentSession {
         stringValue(payload.content);
       if (!delta) return;
       this.reasoningActive = false;
-      this.writeRenderedResponse(this.responseMarkdown.push(delta));
+      this.writeAnswer(this.responseMarkdown.push(delta));
       return;
     }
 
@@ -214,74 +376,70 @@ export class TunedTensorAgentSession {
       // Raw reasoning is verbose and rarely useful to the user; show one
       // compact indicator per reasoning block instead of streaming it.
       if (this.reasoningActive) return;
-      this.flushResponse();
-      this.endOpenLine();
-      this.options.io.write(chalk.dim("  ○ Thinking…\n"));
+      this.writeStatus(chalk.dim("○ Thinking…"), { transient: true });
       this.reasoningActive = true;
       return;
     }
 
     if (event.type === "tool_call") {
-      this.flushResponse();
-      this.endOpenLine();
-      const name =
-        stringValue(payload.name) ??
-        stringValue(isRecord(payload.tool_call) ? payload.tool_call.name : null) ??
-        "tool";
-      this.options.io.write(chalk.dim(`  ○ ${name}\n`));
+      this.reasoningActive = false;
+      const label = toolLabel(payload);
+      this.writeStatus(chalk.dim(`○ ${label}…`), { transient: true });
+      const id = stringValue(payload.toolUseId);
+      if (id) this.pendingToolLabels.set(id, label);
+      else this.pendingUnkeyedToolLabel = label;
       return;
     }
 
     if (event.type === "tool_result") {
-      this.flushResponse();
-      this.endOpenLine();
       const failed = payload.status === "error" || Boolean(payload.error);
-      this.options.io.write(
-        chalk.dim(`  ${failed ? chalk.red("✗") : chalk.green("✓")} Tool ${failed ? "failed" : "complete"}\n`),
+      const id = stringValue(payload.toolUseId);
+      const label = (id && this.pendingToolLabels.get(id)) ?? this.pendingUnkeyedToolLabel ?? "Tool";
+      if (id) this.pendingToolLabels.delete(id);
+      else this.pendingUnkeyedToolLabel = null;
+      this.writeStatus(
+        `${failed ? errorMark() : successMark()} ${chalk.dim(failed ? `${label} failed` : label)}`,
       );
       return;
     }
 
     if (event.type === "approval_required") {
-      this.flushResponse();
       const action = actionFromPayload(payload);
       if (!action) return;
       this.pendingActions.set(action.id, action);
-      this.renderAction(action);
+      if (!this.turnProposals.includes(action.id)) this.turnProposals.push(action.id);
       return;
     }
 
     if (event.type === "action_started") {
-      this.flushResponse();
-      this.endOpenLine();
-      this.options.io.write(chalk.dim("  ○ Running approved action…\n"));
+      // Kept on screen: an approved pipeline preview streams child output below it.
+      this.writeStatus(chalk.dim("○ Running approved action…"));
       return;
     }
 
     if (event.type === "action_result") {
-      this.flushResponse();
-      this.endOpenLine();
       if (payload.status === "outcome_unknown") {
-        this.options.io.writeError(
-          `${errorMark()} Approved action outcome is unknown. It cannot be retried; inspect the remote spec before preparing another action.\n`,
+        this.writeErrorLine(
+          "Approved action outcome is unknown. It cannot be retried; inspect the remote spec before preparing another action.",
         );
         return;
       }
       const failed = payload.status === "failed" || Boolean(payload.error);
-      this.options.io.write(
-        `${failed ? errorMark() : successMark()} Approved action ${failed ? "failed" : "completed"}.\n`,
-      );
+      if (failed) {
+        this.writeErrorLine("Approved action failed.");
+        return;
+      }
+      this.writeStatus(`${successMark()} ${completionMessage(this.runningAction)}`);
       return;
     }
 
     if (event.type === "error") {
       this.flushResponse();
-      this.endOpenLine();
       const message =
         stringValue(payload.message) ??
         stringValue(payload.error) ??
         "The agent could not complete this request.";
-      this.options.io.writeError(`${errorMark()} ${sanitizeTerminalText(message)}\n`);
+      this.writeErrorLine(message);
     }
   }
 
@@ -295,24 +453,25 @@ export class TunedTensorAgentSession {
     interruptible = true,
   ): Promise<AgentTurnResult | null> {
     if (this.activeRequest) {
-      this.options.io.writeError(`${errorMark()} A response is already running.\n`);
+      this.writeErrorLine("A response is already running.");
       return null;
     }
     const controller = new AbortController();
     this.activeRequest = { controller, interruptible };
-    this.responseStarted = false;
-    this.reasoningActive = false;
-    this.lineOpen = false;
-    this.responseMarkdown.reset();
+    this.resetRenderState();
     try {
       const result = await operation(controller.signal);
       this.flushResponse();
       this.endOpenLine();
       for (const action of result.actions) {
-        this.pendingActions.set(action.id, action);
+        // Streamed proposals carry the full preview; keep that copy.
+        if (!this.pendingActions.has(action.id)) this.pendingActions.set(action.id, action);
+        if (action.status !== "executing" && !this.turnProposals.includes(action.id)) {
+          this.turnProposals.push(action.id);
+        }
       }
       if (controller.signal.aborted || result.status === "cancelled") {
-        this.options.io.write(chalk.dim("Response stopped.\n"));
+        this.io.write(chalk.dim(`${GUTTER}Response stopped.\n`));
         return null;
       }
       return result;
@@ -320,40 +479,106 @@ export class TunedTensorAgentSession {
       this.flushResponse();
       this.endOpenLine();
       if (controller.signal.aborted) {
-        this.options.io.write(chalk.dim("Response stopped.\n"));
+        this.io.write(chalk.dim(`${GUTTER}Response stopped.\n`));
         return null;
       }
       throw error;
     } finally {
       this.activeRequest = null;
-      this.responseStarted = false;
-      this.reasoningActive = false;
-      this.lineOpen = false;
-      this.responseMarkdown.reset();
+      this.resetRenderState();
     }
+  }
+
+  private resetRenderState(): void {
+    this.blockStart = true;
+    this.wroteInTurn = false;
+    this.reasoningActive = false;
+    this.lineOpen = false;
+    this.transient = null;
+    this.pendingToolLabels.clear();
+    this.pendingUnkeyedToolLabel = null;
+    this.responseMarkdown.reset();
   }
 
   async send(prompt: string, context?: AgentTurnContext): Promise<AgentTurnResult | null> {
     const normalized = prompt.trim();
     if (!normalized) return null;
     const thread = await this.ensureThread();
-    return await this.runStream(async (signal) => {
-      const onEvent = (event: AgentStreamEvent) => this.renderEvent(event);
-      return context
-        ? await this.options.client.runTurn(
-            thread.id,
-            normalized,
-            onEvent,
-            signal,
-            context,
-          )
-        : await this.options.client.runTurn(
-            thread.id,
-            normalized,
-            onEvent,
-            signal,
-          );
-    });
+    this.turnProposals = [];
+    // Leave a gap between the submitted question and the answer.
+    this.io.write("\n");
+    let result: AgentTurnResult | null = null;
+    let failure: { error: unknown } | null = null;
+    try {
+      result = await this.runStream(async (signal) => {
+        const onEvent = (event: AgentStreamEvent) => this.renderEvent(event);
+        return context
+          ? await this.options.client.runTurn(
+              thread.id,
+              normalized,
+              onEvent,
+              signal,
+              context,
+            )
+          : await this.options.client.runTurn(
+              thread.id,
+              normalized,
+              onEvent,
+              signal,
+            );
+      });
+    } catch (error) {
+      failure = { error };
+    }
+    // Show proposals after the answer so its explanation reads first.
+    const proposals = this.takeTurnProposals();
+    for (const action of proposals) this.renderAction(action);
+    if (failure) {
+      if (proposals.length > 0) this.writePendingHint();
+      throw failure.error;
+    }
+    await this.reviewProposals(proposals, result !== null, context);
+    return result;
+  }
+
+  private takeTurnProposals(): AgentAction[] {
+    const actions = this.turnProposals
+      .map((id) => this.pendingActions.get(id))
+      .filter((action): action is AgentAction => action !== undefined);
+    this.turnProposals = [];
+    return actions;
+  }
+
+  /**
+   * Ask for a decision on each new proposal. Approval stays a deterministic
+   * user action: the model never answers this prompt.
+   */
+  private async reviewProposals(
+    actions: AgentAction[],
+    canPrompt: boolean,
+    context?: AgentTurnContext,
+  ): Promise<void> {
+    if (actions.length === 0) return;
+    if (!this.prompter || !canPrompt) {
+      this.writePendingHint();
+      return;
+    }
+    for (const action of actions) {
+      if (!this.pendingActions.has(action.id)) continue;
+      const label = actions.length > 1
+        ? `${approvalQuestion(action)} ${chalk.dim(`(${action.title})`)}`
+        : approvalQuestion(action);
+      const decision = await this.prompter(`${GUTTER}${chalk.yellow("?")} ${chalk.bold(label)}`);
+      try {
+        if (decision === "approve") await this.approve(action.id, context);
+        else if (decision === "reject") await this.reject(action.id);
+        else {
+          this.io.write(chalk.dim(`${GUTTER}Left pending. Use /approve or /reject when you're ready.\n`));
+        }
+      } catch (error) {
+        this.writeErrorLine(error instanceof Error ? error.message : String(error));
+      }
+    }
   }
 
   private resolvePendingAction(idOrPrefix?: string): AgentAction {
@@ -379,6 +604,7 @@ export class TunedTensorAgentSession {
   ): Promise<void> {
     const action = this.resolvePendingAction(idOrPrefix);
     action.status = "executing";
+    this.runningAction = action;
     try {
       await this.runStream(async (signal) => {
         const onEvent = (event: AgentStreamEvent) => this.renderEvent(event);
@@ -390,6 +616,7 @@ export class TunedTensorAgentSession {
       // Approval is one-way once requested. Preflight failures, completed
       // actions, and unknown outcomes are all non-retryable under this ID.
       this.pendingActions.delete(action.id);
+      this.runningAction = null;
     }
   }
 
@@ -397,7 +624,7 @@ export class TunedTensorAgentSession {
     const action = this.resolvePendingAction(idOrPrefix);
     await this.options.client.rejectAction(action.id);
     this.pendingActions.delete(action.id);
-    this.options.io.write(`${successMark()} Action rejected.\n`);
+    this.io.write(`${GUTTER}${successMark()} Rejected. Nothing was changed.\n`);
   }
 
   private async resolveThread(idOrPrefix: string): Promise<AgentThreadDetail> {
@@ -499,8 +726,7 @@ export class TunedTensorAgentSession {
       await this.send(normalized, context);
       return "continue";
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.options.io.writeError(`${errorMark()} ${sanitizeTerminalText(message)}\n`);
+      this.writeErrorLine(error instanceof Error ? error.message : String(error));
       return "continue";
     }
   }

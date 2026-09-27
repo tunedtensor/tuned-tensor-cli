@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## [0.20.0] - 2026-09-27
+
+### Added
+
+- Approve proposals inline. After an answer that proposes a spec edit, project,
+  pipeline dry-run or cloud spec change, the shell shows the proposal and asks
+  right away: `y` approves, `n` rejects, and `Esc` leaves it pending for
+  `/approve` or `/reject`. Other keys, including Enter, are ignored.
+
+### Changed
+
+- Separate questions from answers in the shell. Answers render in an indented
+  gutter that starts with `●` and wrap at the terminal width. Long questions
+  keep the shaded input bar when they wrap.
+- Show tool activity by name (for example `✓ Review local behavior spec`) and
+  redraw it in place, instead of printing the raw tool ID and a separate
+  `Tool complete` line. `Thinking…` disappears once the answer starts.
+- Show proposals after the answer with a colored diff, a colored risk level and
+  a specific result such as `Spec edit saved.`
+- Tell the agent to summarize proposals instead of repeating the diff, and not to
+  ask the user to type `/approve`.
+
+### Fixed
+
+- Match tool results to their labels when several tools finish out of order.
+- Leave an inline approval pending if terminal input closes during the prompt.
+
 ## [0.19.0] - 2026-09-26
 
 ### Added

@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { sanitizeTerminalText } from "./terminal-markdown.js";
+import { sanitizeTerminalText, terminalWidth } from "./terminal-markdown.js";
 import { reviewSpec } from "./commands/spec.js";
 import { inspectLocalSpec } from "./spec-workspace.js";
 import type { AgentAction } from "./agent-client.js";
@@ -36,12 +36,16 @@ import {
 } from "./agent-control.js";
 import { unknownAgentProviderMessage, type AgentModelRuntime } from "./agent-model.js";
 import { MANAGED_AGENT_PROVIDER } from "./config.js";
-import { promptHiddenInput, promptVisibleInput } from "./secret-prompt.js";
+import { promptHiddenInput, promptKeyChoice, promptVisibleInput } from "./secret-prompt.js";
 
 export type { WorkflowMode } from "./command-catalog.js";
 
 export interface ShellAgent {
   snapshot?(): { pendingActions: AgentAction[] };
+  /** Lets the agent ask for approval inline, right after it proposes a change. */
+  setApprovalPrompter?(
+    prompter: ((question: string) => Promise<"approve" | "reject" | "later">) | null,
+  ): void;
   busy: boolean;
   handleLine(
     input: string,
@@ -397,6 +401,7 @@ const ANSI_BOLD = "\u001b[1m";
 const ANSI_BOLD_OFF = "\u001b[22m";
 const ANSI_CLEAR_LINE = "\u001b[2K";
 const ANSI_CLEAR_TO_END = "\u001b[K";
+const ANSI_CLEAR_DOWN = "\u001b[J";
 const ANSI_CURSOR_UP = "\u001b[1A";
 const ANSI_RESET = "\u001b[0m";
 
@@ -487,8 +492,8 @@ function helpText(mode: WorkflowMode, query?: string, palette = false): string {
     lines.push(`  ${accent("/new".padEnd(22))} Start a new agent conversation.`);
     lines.push(`  ${accent("/threads".padEnd(22))} List recent conversations.`);
     lines.push(`  ${accent("/resume <id>".padEnd(22))} Resume a conversation.`);
-    lines.push(`  ${accent("/approve [id]".padEnd(22))} Approve a proposed action.`);
-    lines.push(`  ${accent("/reject [id]".padEnd(22))} Reject a proposed action.`);
+    lines.push(`  ${accent("/approve [id]".padEnd(22))} Approve an action left pending.`);
+    lines.push(`  ${accent("/reject [id]".padEnd(22))} Reject an action left pending.`);
     lines.push("");
     lines.push(chalk.bold("Session"));
     for (const command of SLASH_COMMANDS) {
@@ -546,11 +551,20 @@ export function renderSubmittedShellInput(input: string, columns?: number): stri
   if (!colors) return "";
   const safeInput = stripVTControlCharacters(input)
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "");
-  if (columns && Array.from(`› ${safeInput}`).length >= columns) return "";
+  // Readline wrapped a long entry over several rows; repaint all of them so a
+  // long question keeps the same surface as a short one.
+  const width = terminalWidth(`› ${safeInput}`);
+  let rows = 1;
+  if (columns) {
+    // An entry that exactly fills its last row leaves the cursor in the
+    // terminal's pending-wrap state, where the row count is ambiguous.
+    if (width % columns === 0) return "";
+    rows = Math.ceil(width / columns);
+  }
   return [
-    ANSI_CURSOR_UP,
+    rows === 1 ? ANSI_CURSOR_UP : `\u001b[${rows}A`,
     "\r",
-    ANSI_CLEAR_LINE,
+    rows === 1 ? ANSI_CLEAR_LINE : ANSI_CLEAR_DOWN,
     colors.background,
     colors.accent,
     ANSI_BOLD,
@@ -1122,6 +1136,16 @@ export async function startInteractiveShell(
     historySize: 100,
     removeHistoryDuplicates: true,
     completer,
+  });
+  options.agent?.setApprovalPrompter?.(async (question) => {
+    // Detach readline while waiting so the keypress is not also typed into
+    // the next prompt.
+    readline?.pause();
+    try {
+      return await promptKeyChoice(question, input, output);
+    } finally {
+      readline?.resume();
+    }
   });
   readline.on("SIGINT", () => {
     if (session.interruptAgent()) {

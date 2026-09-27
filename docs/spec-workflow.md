@@ -37,9 +37,8 @@ for an invalid spec.
 
 ```text
 › Keep my training settings, but require a single lowercase sentiment label.
-  [agent reads the spec and proposes a diff]
-› /spec diff
-› /approve
+  [agent reads the spec and shows the proposed diff]
+  ? Save this spec edit? y yes · n no · esc decide later
 › /spec
 › /spec history
 ```
@@ -58,7 +57,9 @@ strict schema, readiness checks, nonblank content checks and distinct-example
 checks. Small example sets produce a warning; validation is not a claim of model
 quality or GPU readiness.
 
-Proposing an edit does not write anything. `/approve` revalidates the workspace,
+Proposing an edit does not write anything. tt asks for a decision right after the
+answer; pressing `Esc` leaves the edit pending, and `/spec diff` then shows it again
+until you run `/approve` or `/reject`. Approval revalidates the workspace,
 parent directory, current file bytes and proposed result, acquires the spec's
 writer lock and atomically replaces the file. `/reject` leaves it unchanged.
 If the file changes after review, prepare a fresh edit. A saved edit invalidates

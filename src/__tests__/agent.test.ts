@@ -1,3 +1,4 @@
+import chalk from "chalk";
 import { describe, expect, it, vi } from "vitest";
 import {
   TunedTensorAgentSession,
@@ -110,8 +111,8 @@ describe("TunedTensorAgentSession", () => {
     expect(stdout.join("")).not.toContain(
       "I should inspect the available context first.",
     );
-    expect(stdout.join("")).toContain("Approval required");
-    expect(stdout.join("")).toContain("will not run without approval");
+    expect(stdout.join("")).toContain("Approval needed");
+    expect(stdout.join("")).toContain("Nothing changes until you decide");
     expect(stdout.join("")).toContain("\"name\": \"Support\"");
     expect(stdout.join("")).toContain(
       "\"request\": \"POST /api/v1/behavior-specs\"",
@@ -310,8 +311,8 @@ describe("TunedTensorAgentSession", () => {
     const output = stdout.join("");
     const parts = [
       "Thinking…",
-      "list_runs",
-      "Tool complete",
+      "List runs…",
+      "✓ List runs",
       "Thinking…",
       "The latest run improved.",
     ];
@@ -323,7 +324,7 @@ describe("TunedTensorAgentSession", () => {
     }
     expect(output).not.toContain("Checking runs.");
     expect(output).not.toContain("Comparing results.");
-    expect(output.split("tt  ")).toHaveLength(2);
+    expect(output.split("● ")).toHaveLength(2);
   });
 
   it("collapses streamed reasoning into one indicator", async () => {
@@ -380,7 +381,7 @@ describe("TunedTensorAgentSession", () => {
     expect(output).toContain("• List and inspect specs.");
     expect(output).not.toContain("**");
     expect(output).not.toContain("`specs`");
-    expect(output.split("tt  ")).toHaveLength(2);
+    expect(output.split("● ")).toHaveLength(2);
   });
 
   it("cancels an active response without ending the session", async () => {
@@ -436,5 +437,174 @@ describe("TunedTensorAgentSession", () => {
     expect(session.interrupt()).toBe(true);
     await expect(pending).resolves.toBeNull();
     expect(stdout.join("")).toContain("Response stopped");
+  });
+
+  describe("inline approval", () => {
+    it("asks right after the answer and approves without /approve", async () => {
+      const client = fakeClient();
+      const { io, stdout } = testIO();
+      const session = new TunedTensorAgentSession({ client, io });
+      const prompter = vi.fn(async (_question: string) => "approve" as const);
+      session.setApprovalPrompter(prompter);
+
+      await session.handleLine("Create a support spec");
+
+      expect(prompter).toHaveBeenCalledTimes(1);
+      expect(prompter.mock.calls[0]![0]).toContain("Apply this change to your TT account?");
+      expect(client.approveAction).toHaveBeenCalledWith(
+        "action-123",
+        expect.any(Function),
+        expect.any(AbortSignal),
+      );
+      const output = stdout.join("");
+      expect(output.indexOf("Here is the answer.")).toBeLessThan(output.indexOf("Approval needed"));
+      expect(output).toContain("Approved action completed.");
+      expect(output).not.toContain("Nothing changes until you decide");
+      expect(session.snapshot().pendingActions).toHaveLength(0);
+    });
+
+    it("rejects inline without running the action", async () => {
+      const client = fakeClient();
+      const { io, stdout } = testIO();
+      const session = new TunedTensorAgentSession({ client, io });
+      session.setApprovalPrompter(async () => "reject");
+
+      await session.handleLine("Create a support spec");
+
+      expect(client.rejectAction).toHaveBeenCalledWith("action-123");
+      expect(client.approveAction).not.toHaveBeenCalled();
+      expect(stdout.join("")).toContain("Rejected. Nothing was changed.");
+      expect(session.snapshot().pendingActions).toHaveLength(0);
+    });
+
+    it("leaves the action pending when the decision is deferred", async () => {
+      const client = fakeClient();
+      const { io, stdout } = testIO();
+      const session = new TunedTensorAgentSession({ client, io });
+      session.setApprovalPrompter(async () => "later");
+
+      await session.handleLine("Create a support spec");
+
+      expect(client.approveAction).not.toHaveBeenCalled();
+      expect(client.rejectAction).not.toHaveBeenCalled();
+      expect(stdout.join("")).toContain("Left pending");
+      expect(session.snapshot().pendingActions).toHaveLength(1);
+
+      await session.handleLine("/approve");
+      expect(client.approveAction).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not prompt for a stopped response", async () => {
+      const client = fakeClient();
+      client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
+        onEvent({
+          type: "approval_required",
+          payload: { action: { id: "action-9", title: "Prepare edit", risk: "low", operation: "update_local_spec" } },
+        });
+        return { threadId: thread.id, turnId: "t", status: "cancelled", response: "", actions: [] };
+      });
+      const { io, stdout } = testIO();
+      const session = new TunedTensorAgentSession({ client, io });
+      const prompter = vi.fn(async (_question: string) => "approve" as const);
+      session.setApprovalPrompter(prompter);
+
+      await session.handleLine("edit");
+
+      expect(prompter).not.toHaveBeenCalled();
+      expect(stdout.join("")).toContain("Nothing changes until you decide");
+      expect(session.snapshot().pendingActions).toHaveLength(1);
+    });
+  });
+
+  it("colors spec diffs in the approval card", async () => {
+    const originalLevel = chalk.level;
+    chalk.level = 1;
+    try {
+      const client = fakeClient();
+      client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
+        onEvent({
+          type: "approval_required",
+          payload: {
+            action: {
+              id: "action-7",
+              title: "Update spec",
+              risk: "low",
+              operation: "update_local_spec",
+              preview: { diff: "@@ system_prompt @@\n-casual\n+formal\n" },
+            },
+          },
+        });
+        return { threadId: thread.id, turnId: "t", status: "completed", response: "", actions: [] };
+      });
+      const { io, stdout } = testIO();
+      const session = new TunedTensorAgentSession({ client, io });
+      await session.handleLine("be formal");
+      const output = stdout.join("");
+      expect(output).toContain(chalk.green("+formal"));
+      expect(output).toContain(chalk.red("-casual"));
+      expect(output).toContain(chalk.green("low risk"));
+    } finally {
+      chalk.level = originalLevel;
+    }
+  });
+
+  it("wraps answers inside the gutter at the terminal width", async () => {
+    const client = fakeClient();
+    const words = Array.from({ length: 30 }, (_, index) => `word${index}`).join(" ");
+    client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
+      onEvent({ type: "text_delta", payload: { delta: `${words}\n` } });
+      return { threadId: thread.id, turnId: "t", status: "completed", response: words, actions: [] };
+    });
+    const { io, stdout } = testIO();
+    io.columns = () => 40;
+    const session = new TunedTensorAgentSession({ client, io });
+
+    await session.send("long");
+
+    const lines = stdout.join("").split("\n").filter((line) => line.includes("word"));
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines[0]!.startsWith("● ")).toBe(true);
+    for (const line of lines.slice(1)) expect(line.startsWith("  word")).toBe(true);
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(40);
+  });
+
+  it("redraws tool status in place on a live terminal", async () => {
+    const client = fakeClient();
+    client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
+      onEvent({ type: "reasoning_delta", payload: { delta: "hmm" } });
+      onEvent({ type: "tool_call", payload: { name: "get_local_spec", label: "Review local behavior spec" } });
+      onEvent({ type: "tool_result", payload: { status: "success" } });
+      onEvent({ type: "text_delta", payload: { delta: "Done." } });
+      return { threadId: thread.id, turnId: "t", status: "completed", response: "Done.", actions: [] };
+    });
+    const { io, stdout } = testIO();
+    io.live = true;
+    const session = new TunedTensorAgentSession({ client, io });
+
+    await session.send("check");
+
+    const output = stdout.join("");
+    expect(output).toContain("Review local behavior spec…\r\u001b[2K");
+    expect(output).toContain("✓ Review local behavior spec\n");
+    expect(output).toContain("Thinking…\r\u001b[2K");
+  });
+
+  it("matches results to tool labels when tools finish out of order", async () => {
+    const client = fakeClient();
+    client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
+      onEvent({ type: "tool_call", payload: { toolUseId: "first", label: "Inspect spec" } });
+      onEvent({ type: "tool_call", payload: { toolUseId: "second", label: "Check hardware" } });
+      onEvent({ type: "tool_result", payload: { toolUseId: "first", status: "success" } });
+      onEvent({ type: "tool_result", payload: { toolUseId: "second", status: "success" } });
+      return { threadId: thread.id, turnId: "t", status: "completed", response: "", actions: [] };
+    });
+    const { io, stdout } = testIO();
+    const session = new TunedTensorAgentSession({ client, io });
+
+    await session.send("check");
+
+    const output = stdout.join("");
+    expect(output).toContain("✓ Inspect spec");
+    expect(output).toContain("✓ Check hardware");
   });
 });

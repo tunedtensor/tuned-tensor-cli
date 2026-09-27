@@ -1,3 +1,5 @@
+import chalk from "chalk";
+import { emitKeypressEvents } from "node:readline";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { Writable } from "node:stream";
@@ -84,4 +86,78 @@ async function promptInput(
       rl.close();
     }
   });
+}
+
+export type KeyChoice = "approve" | "reject" | "later";
+
+interface Keypress {
+  name?: string;
+  ctrl?: boolean;
+  sequence?: string;
+}
+
+/** Map one keypress to an approval decision; unknown keys return null. */
+export function keyChoiceFor(key: Keypress | undefined, text?: string): KeyChoice | null {
+  const name = (key?.name ?? text ?? "").toLowerCase();
+  if (key?.ctrl && (name === "c" || name === "d")) return "later";
+  if (name === "y") return "approve";
+  if (name === "n") return "reject";
+  if (name === "escape" || name === "l") return "later";
+  return null;
+}
+
+const CHOICE_ECHO: Record<KeyChoice, string> = {
+  approve: "yes",
+  reject: "no",
+  later: "later",
+};
+
+/**
+ * Wait for a single keypress: y approves, n rejects, Esc (or Ctrl-C) defers.
+ * Other keys are ignored so a stray Enter cannot approve a change.
+ */
+export async function promptKeyChoice(
+  message: string,
+  input: NodeJS.ReadableStream = stdin,
+  output: NodeJS.WritableStream = stdout,
+): Promise<KeyChoice> {
+  const terminal = input as NodeJS.ReadableStream & {
+    isTTY?: boolean;
+    isRaw?: boolean;
+    setRawMode?(mode: boolean): unknown;
+  };
+  if (terminal.isTTY !== true || typeof terminal.setRawMode !== "function") return "later";
+  emitKeypressEvents(input);
+  return await withDetachedKeypress(input, async () => {
+    const wasRaw = terminal.isRaw === true;
+    terminal.setRawMode!(true);
+    input.resume();
+    output.write(`${message} ${hint()}`);
+    try {
+      const choice = await new Promise<KeyChoice>((resolve) => {
+        const finish = (decision: KeyChoice) => {
+          input.removeListener("keypress", onKeypress);
+          input.removeListener("end", onEnd);
+          input.removeListener("close", onEnd);
+          resolve(decision);
+        };
+        const onKeypress = (text: string | undefined, key: Keypress | undefined) => {
+          const decided = keyChoiceFor(key, text);
+          if (decided) finish(decided);
+        };
+        const onEnd = () => finish("later");
+        input.on("keypress", onKeypress);
+        input.once("end", onEnd);
+        input.once("close", onEnd);
+      });
+      output.write(`\r\u001b[2K${message} ${CHOICE_ECHO[choice]}\n`);
+      return choice;
+    } finally {
+      if (!wasRaw) terminal.setRawMode!(false);
+    }
+  });
+}
+
+function hint(): string {
+  return chalk.dim("y yes · n no · esc decide later ");
 }
