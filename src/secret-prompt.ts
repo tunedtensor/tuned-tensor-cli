@@ -130,10 +130,10 @@ export async function promptKeyChoice(
   emitKeypressEvents(input);
   return await withDetachedKeypress(input, async () => {
     const wasRaw = terminal.isRaw === true;
-    terminal.setRawMode!(true);
-    input.resume();
-    output.write(`${message} ${hint()}`);
     try {
+      terminal.setRawMode!(true);
+      input.resume();
+      output.write(`${message} ${hint()}`);
       const choice = await new Promise<KeyChoice>((resolve) => {
         const finish = (decision: KeyChoice) => {
           input.removeListener("keypress", onKeypress);
