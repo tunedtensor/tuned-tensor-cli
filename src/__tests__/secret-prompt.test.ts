@@ -97,4 +97,26 @@ describe("promptKeyChoice", () => {
     expect(input.listeners("keypress")).toEqual([parent]);
     expect(input.isRaw).toBe(true);
   });
+
+  it("restores raw mode even if the initial prompt write throws synchronously", async () => {
+    const { input, output } = fakeTerminal();
+    input.isRaw = false;
+    const rawModeCalls: boolean[] = [];
+    const originalSetRawMode = input.setRawMode;
+    input.setRawMode = (mode) => {
+      rawModeCalls.push(mode);
+      originalSetRawMode(mode);
+    };
+    output.write = () => {
+      throw new Error("EPIPE: write after destroyed stream");
+    };
+
+    await expect(promptKeyChoice("Approve?", input, output)).rejects.toThrow(
+      "EPIPE: write after destroyed stream",
+    );
+
+    expect(rawModeCalls).toContain(true);
+    expect(rawModeCalls).toContain(false);
+    expect(input.isRaw).toBe(false);
+  });
 });
