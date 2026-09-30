@@ -202,8 +202,10 @@ class ViewBuilder {
     this.push(`${accent("▍")}${accent.bold(title)}${extra}`);
   }
 
-  settingsGrid(rows: Array<[string, unknown]>, indent = "  "): void {
-    if (rows.length === 0) return;
+  settingsGrid(entries: Array<[string, unknown]>, indent = "  "): void {
+    if (entries.length === 0) return;
+    // Keys come from the spec file too; strip control sequences before layout.
+    const rows = entries.map(([key, value]): [string, unknown] => [clean(key), value]);
     // Short scalar settings (hyperparameters) pack into columns, read top-down.
     const compact = rows.every(([, value]) => value === null || ["number", "boolean"].includes(typeof value)
       || (typeof value === "string" && value.length <= 16));

@@ -95,10 +95,18 @@ describe("renderSpecView", () => {
   });
 
   it("strips terminal control sequences from spec content", () => {
-    const hostile = { ...document, name: "Evil\u001b[2Jname", guidelines: ["\u001b]0;title\u0007hi"] };
+    const hostile = {
+      ...document,
+      name: "Evil\u001b[2Jname",
+      guidelines: ["\u001b]0;title\u0007hi"],
+      hyperparameters: { "\u001b[31mred": 1 },
+      "\u001b[2Kother": "x",
+    };
     const view = renderSpecView(input({ document: hostile }));
     expect(view).not.toContain("\u001b[2J");
     expect(view).not.toContain("\u001b]0;");
+    expect(view).not.toContain("\u001b[31m");
+    expect(view).not.toContain("\u001b[2K");
   });
 });
 

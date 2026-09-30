@@ -114,7 +114,7 @@ export function describeFineTuneFit(usage: LiveUsage | undefined, context: Shell
   }
   const snapshot = context.host && !context.host.stale ? context.host.capabilities : undefined;
   let report: CapabilityReport | undefined = snapshot;
-  let source = snapshot ? "from tt hardware" : "quick check · tt hardware for a full probe";
+  const source = snapshot ? "from tt hardware" : "quick check · tt hardware for a full probe";
   if (!report && usage) report = evaluateCapabilities(inventoryFromUsage(usage));
   if (!report) return { status: "unknown", text: "not checked yet", source: "run tt hardware" };
 
@@ -320,7 +320,7 @@ export function bannerTip(input: BannerInput): string {
   }
   const busy = usage?.gpus.find((gpu) => (gpu.utilization_percent ?? 0) >= 85);
   if (busy) {
-    return `${busy.name} is ${busy.utilization_percent}% busy; training now may be slow.`;
+    return `${sanitizeTerminalText(busy.name)} is ${busy.utilization_percent}% busy; training now may be slow.`;
   }
   const examples = context.spec.exampleCount ?? 0;
   if (examples < 20) {
