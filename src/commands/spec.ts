@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { inspectLocalSpec, readSpecHistory, specDiff } from "../spec-workspace.js";
 import { isJsonMode, printJson } from "../output.js";
 import { sanitizeTerminalText } from "../terminal-markdown.js";
+import { SPEC_SECTIONS, renderSpecView, resolveSpecSection } from "../spec-view.js";
 
 export async function reviewSpec(workspaceRoot: string, operation = "show", specPath = "tunedtensor.json") {
   if (!["show", "validate", "diff", "history"].includes(operation)) {
@@ -56,10 +57,16 @@ export async function reviewSpec(workspaceRoot: string, operation = "show", spec
 
 export function registerSpecCommands(program: Command, cwd: string) {
   program.command("spec").description("Review the local behavior spec, validation, changes and history")
-    .argument("[operation]", "show, validate, diff, or history", "show")
+    .argument("[operation]", `show, view, validate, diff, history, or a section (${SPEC_SECTIONS.join(", ")})`, "show")
     .argument("[path]", "Workspace-relative tunedtensor.json", "tunedtensor.json")
     .action(async (operation: string, path: string) => {
-      const result = await reviewSpec(cwd, operation, path);
+      const section = resolveSpecSection(operation);
+      if ((section || operation === "view") && !isJsonMode()) {
+        const spec = await inspectLocalSpec(cwd, path);
+        process.stdout.write(renderSpecView(spec, { section, columns: process.stdout.columns }));
+        return;
+      }
+      const result = await reviewSpec(cwd, section || operation === "view" ? "show" : operation, path);
       if (isJsonMode()) {
         const { text: _text, ...data } = result;
         printJson(data);

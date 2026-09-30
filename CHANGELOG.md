@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Added
+
+- Show a live machine panel when the shell opens: GPU utilization, VRAM and
+  temperature, CPU and RAM use, free space in the model cache, and whether this
+  machine can fine-tune the spec's base model. `/system` refreshes it and lists
+  the verdict for every certified base model. Verdicts use the certified memory
+  profiles; a fresh `tt hardware` snapshot takes precedence.
+- Meet Tardi, the TT tardigrade. Tardi opens the shell with the most useful next
+  step (log in, create or fix the spec, add examples, or a busy-GPU warning),
+  shows while the agent is thinking, and says goodbye on exit.
+- Read the behavior spec as highlighted sections. `/spec` now shows a readable
+  overview of behavior, examples, training, evaluation and runtime;
+  `/spec <section>` shows one section in full, and `tt spec view` /
+  `tt spec <section>` do the same outside the shell.
+
+### Changed
+
+- `/spec show` prints the spec JSON with syntax highlighting, and spec diffs are
+  colored. `tt spec show` output is unchanged.
+- Redesign the shell banner around the spec, the agent model and the machine.
+
 ## [0.20.0] - 2026-09-27
 
 ### Added
