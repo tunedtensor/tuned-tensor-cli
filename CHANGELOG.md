@@ -2,7 +2,14 @@
 
 ## Unreleased
 
+## [0.21.0] - 2026-09-30
+
 ### Added
+
+- Fine-tune uncertified Hugging Face causal language models by pinning an
+  immutable commit SHA in `hyperparameters.base_model_revision`. Use generic
+  LoRA defaults, safetensors weights and no remote code; certified model
+  revisions and checks remain unchanged.
 
 - Decision engine: fine-tune a typed decision model (`convaiinnovations/laya`,
   pinned revision) as a local classifier, router or yes/no gate. A spec with
@@ -31,6 +38,16 @@
 - `/spec show` prints the spec JSON with syntax highlighting, and spec diffs are
   colored. `tt spec show` output is unchanged.
 - Redesign the shell banner around the spec, the agent model and the machine.
+
+### Fixed
+
+- Reject pickle-only uncertified checkpoints during prefetch, before training.
+- Validate decision prediction IDs, probabilities and confidence before scoring,
+  while allowing the upstream model's four-decimal probability rounding.
+- Show decision questions and the correct engine in the shell's spec view.
+- Preserve the native chat-template content format when adding a serving system
+  prompt, fixing chat requests for string-only models such as IBM Granite.
+- Remove host disk-capacity assumptions from the GPU inventory regression test.
 
 ## [0.20.0] - 2026-09-27
 
