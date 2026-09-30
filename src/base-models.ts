@@ -97,9 +97,23 @@ export function canonicalizeHostedBaseModel(model: unknown): HostedBaseModel {
   return canonical as HostedBaseModel;
 }
 
+const HUGGING_FACE_REPO_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;
+
+/**
+ * Local specs may name any Hugging Face repo. Known aliases are canonicalized;
+ * other repo ids pass through as uncertified models, which the local runtime
+ * requires to pin hyperparameters.base_model_revision.
+ */
+export function canonicalizeLocalBaseModel(model: unknown): string {
+  if (typeof model === "string" && HUGGING_FACE_REPO_ID.test(model.trim())) {
+    return BASE_MODEL_ALIASES.get(model.trim().toLowerCase()) ?? model.trim();
+  }
+  return canonicalizeBaseModel(model);
+}
+
 export function canonicalizeSpecBaseModel<T extends Record<string, unknown>>(body: T): T {
   if ("base_model" in body && body.base_model !== undefined) {
-    return { ...body, base_model: canonicalizeBaseModel(body.base_model) };
+    return { ...body, base_model: canonicalizeLocalBaseModel(body.base_model) };
   }
 
   return body;

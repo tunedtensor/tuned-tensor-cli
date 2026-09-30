@@ -102,17 +102,66 @@ export const TRAINING_MODELS: TrainingModel[] = [
   },
 ];
 
-export function resolveTrainingModel(modelId: string): TrainingModel {
+/** A Hugging Face model repository id such as `owner/name`. */
+const HUGGING_FACE_REPO_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;
+
+/**
+ * Conservative defaults for an uncertified Hugging Face causal LM. TT has not
+ * reviewed its architecture, weights or memory needs, so the run must pin an
+ * immutable `hyperparameters.base_model_revision` and loads without remote
+ * code. Users can still override the numeric defaults in the spec.
+ */
+function uncertifiedTrainingModel(id: string): TrainingModel {
+  return {
+    id,
+    family: "uncertified",
+    modelLoader: "causal_lm",
+    defaultLearningRate: 0.0001,
+    defaultPerDeviceBatchSize: 1,
+    defaultGradientAccumulationSteps: 8,
+    defaultLoraRank: 16,
+    defaultLoraAlpha: 32,
+    defaultLoraDropout: 0.05,
+    defaultMaxSeqLength: 2048,
+    loraTargetModules: "all-linear",
+    gradientCheckpointing: true,
+  };
+}
+
+function findCertifiedTrainingModel(modelId: string): TrainingModel | undefined {
   const normalized = modelId.trim().toLowerCase();
-  const model = TRAINING_MODELS.find((candidate) =>
-    candidate.id.toLowerCase() === normalized
+  return TRAINING_MODELS.find((candidate) => candidate.id.toLowerCase() === normalized);
+}
+
+/** Whether TT has reviewed and pinned this model's training path. */
+export function isCertifiedTrainingModel(modelId: string): boolean {
+  return findCertifiedTrainingModel(modelId) !== undefined;
+}
+
+/**
+ * Resolve a certified model, or any other Hugging Face repo id as an
+ * uncertified causal LM. Uncertified models require a pinned revision; see
+ * `uncertifiedRevisionError`.
+ */
+export function resolveTrainingModel(modelId: string): TrainingModel {
+  const model = findCertifiedTrainingModel(modelId);
+  if (model) return model;
+  const id = modelId.trim();
+  if (HUGGING_FACE_REPO_ID.test(id)) return uncertifiedTrainingModel(id);
+  throw new Error(
+    `Unsupported base model "${modelId}". Use a certified model (${TRAINING_MODELS.map((item) => item.id).join(", ")}) `
+    + "or a Hugging Face repo id such as owner/name.",
   );
-  if (!model) {
-    throw new Error(
-      `Unsupported base model "${modelId}". Supported models: ${TRAINING_MODELS.map((item) => item.id).join(", ")}`,
-    );
-  }
-  return model;
+}
+
+/** Explain how to opt in to an uncertified model that has no pinned revision. */
+export function uncertifiedRevisionError(modelId: string): Error {
+  return new Error(
+    `${modelId} is not a TT-certified base model. To fine-tune it anyway, set `
+    + "hyperparameters.base_model_revision to its 40-character commit SHA "
+    + `(see https://huggingface.co/${modelId}/commits/main). `
+    + "Uncertified models load as text causal LMs with safetensors weights and no remote code.",
+  );
 }
 
 export function canonicalizeTrainingModel(modelId: string): string {
@@ -125,6 +174,9 @@ export function resolveRequestedBaseModelRevision(
   requestedRevision?: string,
 ): string | undefined {
   const model = resolveTrainingModel(modelId);
+  if (!isCertifiedTrainingModel(model.id) && !requestedRevision) {
+    throw uncertifiedRevisionError(model.id);
+  }
   if (
     model.defaultRevision
     && requestedRevision
@@ -139,7 +191,7 @@ export function resolveRequestedBaseModelRevision(
 
 /** Resolve the immutable revision a training model is bound to, if any. */
 export function defaultBaseModelRevision(modelId: string): string | undefined {
-  return resolveRequestedBaseModelRevision(modelId);
+  return resolveTrainingModel(modelId).defaultRevision;
 }
 
 /** Resolve how the bundled text-only runtime must load a training model. */
@@ -228,6 +280,8 @@ export function assertCertifiedBaseModelConfig(
     throw new Error(`${label} must contain a JSON object.`);
   }
   const config = value;
+  // Uncertified models have no reviewed architecture to compare against.
+  if (expectedModelId && !isCertifiedTrainingModel(expectedModelId)) return;
   const expectedFamily = expectedModelId
     ? resolveTrainingModel(expectedModelId).family
     : undefined;

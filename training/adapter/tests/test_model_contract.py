@@ -14,10 +14,12 @@ from model_contract import (
     NEMOTRON_BASE_MODEL,
     NEMOTRON_BASE_MODEL_REVISION,
     QWEN_BASE_MODEL_REVISION,
+    assert_certified_base_model,
     assert_certified_base_model_revision,
     assert_certified_model_config,
     chat_template_kwargs,
     parse_lora_target_modules,
+    uncertified_load_kwargs,
 )
 
 
@@ -149,6 +151,25 @@ class ModelContractTests(unittest.TestCase):
             assert_certified_base_model_revision(MUSE_GLIMMER_BASE_MODEL, None)
         with self.assertRaisesRegex(ValueError, MUSE_GLIMMER_BASE_MODEL_REVISION):
             assert_certified_base_model_revision(MUSE_GLIMMER_BASE_MODEL, "deadbeef" * 5)
+
+
+    def test_uncertified_repo_requires_a_pinned_commit_and_safetensors(self) -> None:
+        model = "mistralai/Mistral-7B-Instruct-v0.3"
+        sha = "0123456789abcdef0123456789abcdef01234567"
+        assert_certified_base_model(model)
+        with self.assertRaisesRegex(ValueError, "Hugging Face repo id"):
+            assert_certified_base_model("not a repo")
+        assert_certified_base_model_revision(model, sha)
+        assert_certified_base_model_revision(model, None, local_source=True)
+        with self.assertRaisesRegex(ValueError, "40-character commit SHA"):
+            assert_certified_base_model_revision(model, None)
+        with self.assertRaisesRegex(ValueError, "40-character commit SHA"):
+            assert_certified_base_model_revision(model, "main")
+        assert_certified_model_config({"model_type": "mistral"}, expected_model_id=model)
+        with self.assertRaisesRegex(ValueError, "not a certified"):
+            assert_certified_model_config({"model_type": "mistral"})
+        self.assertEqual(uncertified_load_kwargs(model), {"use_safetensors": True})
+        self.assertEqual(uncertified_load_kwargs(CERTIFIED_BASE_MODEL), {})
 
 
 if __name__ == "__main__":
