@@ -12,6 +12,7 @@ import {
   readHardwareSnapshot,
   type LoadedHardwareSnapshot,
 } from "./local-runtime/hardware-snapshot.js";
+import type { CapabilityReport } from "./local-runtime/capability.js";
 import { hardenExistingLocalStore } from "./local-runtime/store.js";
 import { MANAGED_AGENT_SELECTION, MANAGED_AGENT_PROVIDER, MANAGED_AGENT_MODEL } from "./config.js";
 
@@ -22,7 +23,10 @@ export interface ShellSpecContext {
   id?: string;
   name?: string;
   baseModel?: string;
+  engine?: string;
   exampleCount?: number;
+  /** AWS instance ID when runtime.gpu sends training to a remote GPU. */
+  remoteGpu?: string;
   parseError: boolean;
 }
 
@@ -54,6 +58,7 @@ export interface ShellHostContext {
   line: string;
   cuda?: boolean;
   gpuName?: string;
+  capabilities?: CapabilityReport;
 }
 
 export interface ShellContext {
@@ -209,6 +214,7 @@ function hostFromSnapshot(snapshot: LoadedHardwareSnapshot | undefined): ShellHo
     line: formatHostStatusLine(snapshot),
     cuda: snapshot.capabilities.cuda_available,
     gpuName: snapshot.capabilities.gpu?.name,
+    capabilities: snapshot.capabilities,
   };
 }
 
@@ -228,12 +234,20 @@ export async function discoverShellContext(
       warnings.push("tunedtensor.json could not be parsed.");
     } else {
       const examples = specJson.value.examples;
+      const runtime = specJson.value.runtime;
+      const gpu = runtime && typeof runtime === "object" && !Array.isArray(runtime)
+        ? (runtime as Record<string, unknown>).gpu
+        : undefined;
       spec = {
         path: specPath,
         id: stringField(specJson.value, "id"),
         name: stringField(specJson.value, "name"),
         baseModel: stringField(specJson.value, "base_model"),
+        engine: stringField(specJson.value, "engine"),
         exampleCount: Array.isArray(examples) ? examples.length : undefined,
+        remoteGpu: gpu && typeof gpu === "object" && !Array.isArray(gpu)
+          ? stringField(gpu as Record<string, unknown>, "instanceId")
+          : undefined,
         parseError: false,
       };
     }

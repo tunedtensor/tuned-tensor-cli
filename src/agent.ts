@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { mascotMark } from "./mascot.js";
 import {
   type AgentAction,
   type AgentConversationClient,
@@ -376,7 +377,7 @@ export class TunedTensorAgentSession {
       // Raw reasoning is verbose and rarely useful to the user; show one
       // compact indicator per reasoning block instead of streaming it.
       if (this.reasoningActive) return;
-      this.writeStatus(chalk.dim("○ Thinking…"), { transient: true });
+      this.writeStatus(`${mascotMark()} ${chalk.dim("Thinking…")}`, { transient: true });
       this.reasoningActive = true;
       return;
     }

@@ -15,19 +15,27 @@ Inside the TT shell, in your project directory:
 
 ```text
 /spec
+/spec examples
+/spec show
 /spec validate
 /spec diff
 /spec history
 ```
 
-`/spec` shows the complete current file, validation results and SHA-256.
+`/spec` shows a readable overview: name, engine, base model and example count,
+then highlighted sections for behavior (system prompt, guidelines, constraints),
+examples, training settings, evaluation, runtime and pipeline, followed by
+validation results. `/spec <section>` shows one section in full; sections are
+`identity`, `behavior`, `examples`, `training`, `evaluation`, `runtime` and
+`pipeline`. `/spec show` prints the complete file with JSON highlighting,
+validation results and SHA-256.
 `/spec diff` shows pending spec edits in the current conversation; otherwise it
 shows the latest approved edit, or external changes since that revision.
 `/spec history` lists up to 50 recent revision records. These commands require
 no credentials and work before the agent is configured.
 
-Outside the shell, use `tt spec show`, `tt spec validate`, `tt spec diff`, and
-`tt spec history`. Add a workspace-relative path, for example
+Outside the shell, use `tt spec view` (or `tt spec <section>`), `tt spec show`,
+`tt spec validate`, `tt spec diff`, and `tt spec history`. Add a workspace-relative path, for example
 `tt spec show feedback/tunedtensor.json`. For continued work on a nested
 project, `/cd feedback` makes its `tunedtensor.json` the current recipe.
 `--json` returns structured review results. `tt spec validate` exits nonzero
