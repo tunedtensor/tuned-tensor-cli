@@ -310,7 +310,7 @@ interface Tip {
   text: string;
 }
 
-/** Tardi's opening line: the single most useful next step. */
+/** Tess's opening line: the single most useful next step. */
 export function bannerTip(input: BannerInput): Tip {
   const { context, usage } = input;
   const agent = agentLabel(context);
@@ -363,15 +363,17 @@ export function renderBanner(input: BannerInput): string {
   ];
   const mascot = renderMascot(tip.mood);
   const textWidth = width - MASCOT_WIDTH - 1;
+  // Bottom-align the heading so it sits beside the cube's face.
+  const offset = mascot.length - heading.length;
   const lines = mascot.map((row, index) => {
-    const text = heading[index] ?? "";
+    const text = heading[index - offset] ?? "";
     return `${row} ${terminalWidth(text) > textWidth ? truncateText(text, textWidth) : text}`;
   });
 
   if (input.usage) {
     lines.push("", ...renderMachinePanel(input.usage, context, { columns: input.columns }));
   }
-  // Wrap Tardi's line so continuation rows hang under the message text.
+  // Wrap Tess's line so continuation rows hang under the message text.
   const prefix = mascotSays("", tip.mood);
   const hang = terminalWidth(prefix);
   const wrapped = wrapTerminalLine(tip.text, Math.max(20, width - hang));

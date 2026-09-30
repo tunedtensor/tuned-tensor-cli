@@ -9,7 +9,8 @@
   machine can fine-tune the spec's base model. `/system` refreshes it and lists
   the verdict for every certified base model. Verdicts use the certified memory
   profiles; a fresh `tt hardware` snapshot takes precedence.
-- Meet Tardi, the TT tardigrade. Tardi opens the shell with the most useful next
+- Meet Tess, the TT tensor cube: a small 3D purple cube drawn in the
+  terminal. Tess opens the shell with the most useful next
   step (log in, create or fix the spec, add examples, or a busy-GPU warning),
   shows while the agent is thinking, and says goodbye on exit.
 - Read the behavior spec as highlighted sections. `/spec` now shows a readable

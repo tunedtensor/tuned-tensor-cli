@@ -232,7 +232,7 @@ A changed workspace or spec requires a new review.
 
 Useful shell controls include `/help`, `/status`, `/context`, `/system`,
 `/model`, `/login`, `/cd`, `/clear`, and `/exit`.
-When the shell opens, Tardi the tardigrade greets you with the current spec, a
+When the shell opens, Tess the tensor cube (a small 3D purple cube) greets you with the current spec, a
 live machine panel (GPU utilization, VRAM and temperature from `nvidia-smi`,
 CPU, RAM, and free space in the model cache) and whether this machine can
 fine-tune the spec's base model, plus a suggested next step. `/system` refreshes
