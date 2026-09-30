@@ -41,6 +41,40 @@ export type FoundationPythonEntrypoint =
   | "rl.py"
   | "-c";
 
+const decisionProject = join(packageRoot, "training/decision");
+const decisionRuntimeHash = (() => {
+  const hash = createHash("sha256");
+  for (const name of ["pyproject.toml", "uv.lock"]) {
+    hash.update(readFileSync(join(decisionProject, name)));
+  }
+  return hash.digest("hex").slice(0, 20);
+})();
+export const DECISION_PYTHON_ENVIRONMENT = pythonEnvironmentPath("uv-decision", decisionRuntimeHash);
+export type DecisionPythonEntrypoint = "train.py" | "evaluate.py";
+
+/** Build a command for the locked typed decision-model runtime. */
+export function buildDecisionPythonCommand(
+  entrypoint: DecisionPythonEntrypoint,
+  args: string[] = [],
+): { command: "uv"; commandArgs: string[]; displayCommand: string[] } {
+  const commandArgs = [
+    "run",
+    "--frozen",
+    "--quiet",
+    "--project",
+    decisionProject,
+    "python",
+    join(decisionProject, "src", entrypoint),
+    ...args,
+  ];
+  return { command: "uv", commandArgs, displayCommand: ["uv", ...commandArgs] };
+}
+
+/** Keep the decision virtualenv outside a possibly read-only npm install. */
+export function withDecisionPythonEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...env, UV_PROJECT_ENVIRONMENT: DECISION_PYTHON_ENVIRONMENT };
+}
+
 /** Build a command for the locked adapter Python runtime bundled with TT. */
 export function buildBundledPythonCommand(
   entrypoint: BundledPythonEntrypoint,

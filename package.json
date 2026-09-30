@@ -19,7 +19,7 @@
     "test:workflows": "vitest run src/__tests__/workflows",
     "eval:agent": "tsx scripts/eval-agent.ts",
     "test:local-runtime": "node --import tsx --test \"test/local-runtime/**/*.test.ts\"",
-    "test:python": "python3 -m unittest discover -s training/adapter/tests -p 'test_*.py' && uv run --frozen --project training/foundation --group test python -m unittest discover -s training/foundation/tests -p 'test_*.py'",
+    "test:python": "python3 -m unittest discover -s training/adapter/tests -p 'test_*.py' && uv run --frozen --project training/foundation --group test python -m unittest discover -s training/foundation/tests -p 'test_*.py' && uv run --frozen --project training/decision python -m unittest discover -s training/decision/tests -p 'test_*.py'",
     "test:watch": "vitest",
     "check": "npm run typecheck && npm test && npm run build"
   },
@@ -33,6 +33,9 @@
     "training/foundation/pyproject.toml",
     "training/foundation/uv.lock",
     "training/foundation/src/*.py",
+    "training/decision/pyproject.toml",
+    "training/decision/uv.lock",
+    "training/decision/src/*.py",
     "docs/local-runtime",
     "docs/spec-workflow.md",
     "docs/spec-architecture.html",

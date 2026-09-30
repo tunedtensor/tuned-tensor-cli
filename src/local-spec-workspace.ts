@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { TRAINING_MODELS } from "./local-runtime/model-registry.js";
+import { DECISION_MODELS } from "./local-runtime/decision-models.js";
 
 import { parseLocalRunInput } from "./local-runtime/local-project.js";
 import { pipelineForRunInput } from "./pipeline.js";
@@ -19,8 +20,9 @@ const LocalBaseModel = Type.String({
   minLength: 3,
   maxLength: 193,
   pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$",
-  description: `Hugging Face repo id. Certified: ${TRAINING_MODELS.map((model) => model.id).join(", ")}. `
-    + "Any other repo is uncertified and requires hyperparameters.base_model_revision (40-character commit SHA).",
+  description: `Hugging Face repo id. Certified adapter models: ${TRAINING_MODELS.map((model) => model.id).join(", ")}. `
+    + `Decision models: ${DECISION_MODELS.map((model) => model.id).join(", ")}. `
+    + "Other adapter repos require hyperparameters.base_model_revision (40-character commit SHA).",
 });
 const NonEmptyText = Type.String({ minLength: 1, maxLength: 1_000 });
 
@@ -28,7 +30,8 @@ export const LocalProjectSpecSchema = Type.Object({
   name: Type.String({ minLength: 1, maxLength: 255 }),
   description: Type.Optional(Type.String({ maxLength: 5_000 })),
   base_model: Type.Optional(LocalBaseModel),
-  engine: Type.Optional(Type.Union([Type.Literal("adapter"), Type.Literal("foundation")])),
+  engine: Type.Optional(Type.Union([Type.Literal("adapter"), Type.Literal("foundation"), Type.Literal("decision")])),
+  decision: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   hyperparameters: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   foundation: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   dataset_prebuilt: Type.Optional(Type.Record(Type.String(), Type.Unknown())),

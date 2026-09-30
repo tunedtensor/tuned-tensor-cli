@@ -28,7 +28,7 @@ export interface PreparedLocalPipelineAction {
   specPath: string;
   specSha256: string;
   dryRun: boolean;
-  engine: "adapter" | "foundation";
+  engine: "adapter" | "foundation" | "decision";
   resolvedSpec: Exclude<LocalRunInput, { kind: "request" }>[
     "spec"
   ];
@@ -221,7 +221,7 @@ export async function prepareLocalPipelineAction(args: {
     specPath: spec.displayPath,
     specSha256: createHash("sha256").update(spec.source).digest("hex"),
     dryRun,
-    engine: input.kind === "foundation-spec" ? "foundation" : "adapter",
+    engine: input.kind === "foundation-spec" ? "foundation" : input.kind === "decision-spec" ? "decision" : "adapter",
     resolvedSpec: input.spec,
     resolvedConfig,
     ...(config ? {
@@ -277,7 +277,7 @@ export async function executeLocalPipelineAction(args: ValidatePreparedLocalPipe
 }): Promise<{
   completed: true;
   command: string[];
-  engine: "adapter" | "foundation";
+  engine: "adapter" | "foundation" | "decision";
   spec_path: string;
   config_path: string | null;
   dry_run: boolean;

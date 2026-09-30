@@ -62,7 +62,7 @@ const SECTION_BLURBS: Record<SpecSection, string> = {
 
 const SECTION_KEYS: Record<SpecSection, readonly string[]> = {
   identity: ["name", "description", "engine", "base_model", "id", "dataset_prebuilt"],
-  behavior: ["system_prompt", "guidelines", "constraints"],
+  behavior: ["system_prompt", "guidelines", "constraints", "decision"],
   examples: ["examples"],
   training: ["hyperparameters", "foundation"],
   evaluation: ["evaluation"],
@@ -285,6 +285,10 @@ function renderBehavior(view: ViewBuilder, spec: JsonObject, full: boolean): voi
     }
     if (items.length > limit) view.push(`    ${chalk.dim(`… ${items.length - limit} more · /spec behavior`)}`);
   };
+  if (isObject(spec.decision)) {
+    view.push(`  ${chalk.bold("Decision question")}`);
+    view.settingsGrid(flattenSettings(spec.decision));
+  }
   renderList("Guidelines", guidelines, chalk.green("✓"));
   renderList("Constraints", constraints, chalk.red("✗"));
 }
@@ -325,6 +329,7 @@ function renderTraining(view: ViewBuilder, spec: JsonObject): void {
   const settings = foundation ? spec.foundation : spec.hyperparameters;
   view.heading("training", foundation
     ? "foundation · tokenizer, pretrain, SFT"
+    : spec.engine === "decision" ? "decision · typed classification"
     : `adapter · LoRA on ${typeof spec.base_model === "string" ? clean(spec.base_model) : "base_model"}`);
   const rows = isObject(settings) ? flattenSettings(settings) : [];
   if (rows.length === 0) {
@@ -383,7 +388,7 @@ function renderHeader(view: ViewBuilder, input: SpecViewInput, spec: JsonObject)
   }
   const examples = Array.isArray(spec.examples) ? spec.examples.length : 0;
   const facts = [
-    spec.engine === "foundation" ? "foundation" : "adapter",
+    spec.engine === "foundation" ? "foundation" : spec.engine === "decision" ? "decision" : "adapter",
     typeof spec.base_model === "string" ? truncateText(spec.base_model, view.width) : undefined,
     `${examples} example${examples === 1 ? "" : "s"}`,
     isObject(spec.runtime) && isObject(spec.runtime.gpu) ? "remote GPU" : undefined,

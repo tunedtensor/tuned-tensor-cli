@@ -6,7 +6,9 @@ This is a single-package Node.js/TypeScript CLI (`tt`) for Tuned Tensor's
 local CUDA runner and laptop-local agent. Local workflow commands require no
 TT token. Hosted operations are registered under `tt cloud`; `tt auth`,
 `tt usage`, `tt balance`, `tt topup`, and `tt publish` handle account access and
-reporting. Training uses one local orchestrator; optional `runtime.gpu` configuration
+reporting. Decision specs (`engine: "decision"`) fine-tune a small typed decision
+model such as `convaiinnovations/laya` on CPU, MPS or CUDA; see
+`docs/local-runtime/decision.md`. Training uses one local orchestrator; optional `runtime.gpu` configuration
 sends GPU processes to a user-owned EC2 instance over SSH. Hosted training
 start/estimate are retired. See `docs/local-runtime/aws-gpu.md`. No Docker or database is required for CLI development.
 

@@ -215,8 +215,9 @@ export function pipelineForRunInput(input: LocalRunInput, requested?: unknown): 
     : canonicalPipeline("local"));
   const pipeline = parsePipeline(recipe);
   if (isFoundationPipeline(pipeline) !== foundation) {
+    // Decision specs reuse the adapter vocabulary: evaluate, train, compare.
     const recipeEngine = isFoundationPipeline(pipeline) ? "a foundation" : "an adapter";
-    const specEngine = foundation ? "a foundation" : "an adapter";
+    const specEngine = foundation ? "a foundation" : input.kind === "decision-spec" ? "a decision" : "an adapter";
     throw new Error(`Pipeline is ${recipeEngine} recipe, but the behavior spec is ${specEngine} spec. Use a matching recipe or omit --file.`);
   }
   if (foundation) assertFoundationSettingsMatch(input.spec.foundation, pipeline);

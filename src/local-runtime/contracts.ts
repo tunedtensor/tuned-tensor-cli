@@ -2,6 +2,7 @@ import { z } from "zod";
 import { pipelineDocumentSchema, isFoundationPipeline, parsePipeline } from "@tuned-tensor/pipeline-contract";
 import { DEFAULT_ARTIFACT_ROOT } from "../paths.js";
 import { canonicalizeTrainingModel, isCertifiedTrainingModel, uncertifiedRevisionError } from "./model-registry.js";
+import { DECISION_MODELS, canonicalizeDecisionModel, isDecisionModel } from "./decision-models.js";
 
 /**
  * The local adapter training contract uses text supervised
@@ -356,8 +357,64 @@ export const localAdapterSpecFileSchema = specSnapshotSchema.extend({
   dataset_prebuilt: datasetPrebuiltSchema.optional(),
 }).strict().superRefine(requirePinnedUncertifiedModel);
 
+/**
+ * One typed question a decision model answers per input. Example outputs are
+ * the answer labels: a choice key, `true`/`false`, or a score level index.
+ */
+export const decisionQuestionSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("choice"),
+    /** Answer label -> description the model reads. Key order is option order. */
+    criteria: z.record(z.string().min(1), z.string()).refine(
+      (criteria) => Object.keys(criteria).length >= 2 && Object.keys(criteria).length <= 32,
+      "A choice decision needs 2 to 32 labels.",
+    ),
+  }).strict(),
+  z.object({
+    type: z.literal("noul"),
+    criteria: z.object({ true: z.string().optional(), false: z.string().optional() }).strict().optional(),
+  }).strict(),
+  z.object({
+    type: z.literal("score"),
+    /** Level descriptions, index 0 first; example outputs are level indices. */
+    criteria: z.array(z.string().min(1)).min(2).max(10),
+  }).strict(),
+]);
+
+export const decisionHyperparametersSchema = z.object({
+  n_epochs: z.number().int().min(1).max(50).optional(),
+  learning_rate: z.number().positive().max(1).optional(),
+  batch_size: z.number().int().min(1).max(256).optional(),
+  /** Train only the decision head; faster on CPU, usually less accurate. */
+  freeze_encoder: z.boolean().optional(),
+  /** Shuffle option order per training row so the head learns meaning, not position. */
+  shuffle_options: z.boolean().optional(),
+  seed: z.number().int().min(0).max(2_147_483_647).optional(),
+  device: z.enum(["auto", "cpu", "cuda", "mps"]).optional(),
+}).strict();
+
+export const localDecisionSpecFileSchema = behaviorSpecSchema.extend({
+  ...projectWorkflowFields,
+  engine: z.literal("decision"),
+  id: z.string().uuid().optional(),
+  // Refine first: a union member must report an issue, not throw, for other engines' specs.
+  base_model: z.string()
+    .refine(isDecisionModel, `Unsupported decision model. Supported decision models: ${DECISION_MODELS.map((model) => model.id).join(", ")}`)
+    .transform((value) => canonicalizeDecisionModel(value)),
+  decision: decisionQuestionSchema,
+  hyperparameters: decisionHyperparametersSchema.optional(),
+});
+
+/** Answer labels in option order; example outputs must be one of these. */
+export function decisionLabels(question: z.infer<typeof decisionQuestionSchema>): string[] {
+  if (question.type === "choice") return Object.keys(question.criteria);
+  if (question.type === "noul") return ["false", "true"];
+  return question.criteria.map((_, index) => String(index));
+}
+
 export const localBehaviorSpecFileSchema = z.union([
   localFoundationSpecFileSchema,
+  localDecisionSpecFileSchema,
   localAdapterSpecFileSchema,
 ]).superRefine((spec, ctx) => {
   if (spec.pipeline && isFoundationPipeline(parsePipeline(spec.pipeline)) !== (spec.engine === "foundation")) {
@@ -365,6 +422,9 @@ export const localBehaviorSpecFileSchema = z.union([
   }
   if (spec.engine === "foundation" && (spec.evaluation || spec.runtime?.storeRoot || spec.runtime?.paths)) {
     ctx.addIssue({ code: "custom", path: ["runtime"], message: "Foundation uses foundation settings for evaluation and checkpoints; runtime.artifactRoot and runtime.gpu are supported." });
+  }
+  if (spec.engine === "decision" && (spec.evaluation || spec.runtime?.gpu || spec.runtime?.storeRoot || spec.runtime?.paths)) {
+    ctx.addIssue({ code: "custom", path: ["runtime"], message: "Decision specs support runtime.artifactRoot only; the device is set in hyperparameters.device." });
   }
 });
 
@@ -376,12 +436,21 @@ export type FineTuneRunRequest = z.infer<typeof fineTuneRunRequestSchema>;
 export type FoundationHyperparameters = z.infer<typeof foundationHyperparametersSchema>;
 export type LocalAdapterSpecFile = z.infer<typeof localAdapterSpecFileSchema>;
 export type LocalFoundationSpecFile = z.infer<typeof localFoundationSpecFileSchema>;
+export type LocalDecisionSpecFile = z.infer<typeof localDecisionSpecFileSchema>;
+export type DecisionQuestion = z.infer<typeof decisionQuestionSchema>;
+export type DecisionHyperparameters = z.infer<typeof decisionHyperparametersSchema>;
 export type LocalBehaviorSpecFile = z.infer<typeof localBehaviorSpecFileSchema>;
 
 export function isFoundationSpecFile(
   spec: LocalBehaviorSpecFile,
 ): spec is LocalFoundationSpecFile {
   return spec.engine === "foundation";
+}
+
+export function isDecisionSpecFile(
+  spec: LocalBehaviorSpecFile,
+): spec is LocalDecisionSpecFile {
+  return spec.engine === "decision";
 }
 export type EvalExampleResult = z.infer<typeof evalExampleResultSchema>;
 export type EvalSplit = z.infer<typeof evalSplitSchema>;

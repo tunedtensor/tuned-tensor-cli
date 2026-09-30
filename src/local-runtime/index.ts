@@ -8,7 +8,7 @@ import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { compareRuns } from "./compare.js";
 import { assertArtifactManifest } from "./artifacts.js";
-import { fineTuneRunRequestSchema, isFoundationSpecFile, localBehaviorSpecFileSchema, localRunnerConfigSchema, type FineTuneRunRequest, type LocalRunnerConfig, type SpecSnapshot } from "./contracts.js";
+import { fineTuneRunRequestSchema, isDecisionSpecFile, isFoundationSpecFile, localBehaviorSpecFileSchema, localRunnerConfigSchema, type FineTuneRunRequest, type LocalRunnerConfig, type SpecSnapshot } from "./contracts.js";
 import { buildSystemMessage } from "./dataset.js";
 import {
   fingerprintLocalBaseModel,
@@ -36,6 +36,7 @@ import {
   initLocalSpecFile,
   loadLocalRunInput,
   type LocalRunInput,
+  validateBehaviorSpec,
 } from "./local-project.js";
 import { sanitizeLogLine, type LocalRunProgressEvent, type LocalRunReporter } from "./run-reporter.js";
 import { activateModel, getActiveModel, rollbackActiveModel } from "./active-model.js";
@@ -181,7 +182,7 @@ const COMMAND_DEFINITIONS: Record<string, CliCommandDefinition> = {
     description: "Create a local tunedtensor.json behavior spec.",
     options: [
       { name: "--name", value: "name", description: "Behavior spec name" },
-      { name: "--engine", value: "engine", description: "adapter (default) or foundation" },
+      { name: "--engine", value: "engine", description: "adapter (default), foundation or decision" },
       { name: "--model", value: "model", description: "Base model ID" },
       { name: "--output", value: "path", description: "Output spec path" },
       { name: "--profile", value: "profile", description: "Compatibility host profile (spark); creates only tunedtensor.json" },
@@ -449,6 +450,8 @@ async function configFromArgv(argv: string[], adjacentTo?: string): Promise<Loca
   return (await configSelectionFromArgv(argv, adjacentTo)).config;
 }
 
+const DECISION_SERVE_MESSAGE = "Decision models are not served through vLLM. Load the tuned model directory with `laya.load(<model_dir>)`; see docs/local-runtime/decision.md.";
+
 async function loadCliBehaviorSpec(inputPath: string, runId?: string) {
   const input = await loadLocalRunInput(inputPath, {
     ...(runId ? { runId } : {}),
@@ -456,6 +459,11 @@ async function loadCliBehaviorSpec(inputPath: string, runId?: string) {
   if (input.kind === "foundation-spec") {
     throw new Error(
       `This spec uses engine "foundation". Use \`tt pipeline run --spec ${input.path}\`; the legacy adapter runner cannot execute foundation specs.`,
+    );
+  }
+  if (input.kind === "decision-spec") {
+    throw new Error(
+      `This spec uses engine "decision". Use \`tt pipeline run --spec ${input.path}\`; the legacy adapter runner cannot execute decision specs.`,
     );
   }
   if (input.kind !== "spec") {
@@ -689,6 +697,7 @@ async function modelSystemPrompt(args: {
     if (isFoundationSpecFile(local.data)) {
       throw new Error("Foundation specs have no Hugging Face base model. Use `tt serve foundation --checkpoint <model-dir> --tokenizer <tokenizer.json>`.");
     }
+    if (isDecisionSpecFile(local.data)) throw new Error(DECISION_SERVE_MESSAGE);
     spec = local.data;
   } else {
     const runRequestPath = join(args.store.paths.runsDir, args.model.run_id, "request.json");
@@ -859,6 +868,7 @@ async function serveBaseModelFromCli(args: {
   if (spec && isFoundationSpecFile(spec)) {
     throw new Error("Foundation specs have no Hugging Face base model. Use `tt serve foundation --checkpoint <model-dir> --tokenizer <tokenizer.json>`.");
   }
+  if (spec && isDecisionSpecFile(spec)) throw new Error(DECISION_SERVE_MESSAGE);
   let baseModel = spec?.base_model;
   if (!baseModel) {
     const store = createLocalStore(args.config.storeRoot);
@@ -1012,6 +1022,8 @@ async function main(argv: string[]): Promise<void> {
       const input = await loadLocalRunInput(inputPath);
       if (input.kind === "foundation-spec") {
         foundationSpec = input.spec;
+      } else if (input.kind === "decision-spec") {
+        // Decision runs need no CUDA or adapter model checks; host checks still apply.
       } else if (input.kind === "spec") {
         request = input.request;
       } else {
@@ -1058,8 +1070,8 @@ async function main(argv: string[]): Promise<void> {
       throw new Error(`--profile must be spark, got: ${profile}`);
     }
     const engine = readOption(argv, "--engine") ?? "adapter";
-    if (engine !== "adapter" && engine !== "foundation") {
-      throw new Error(`--engine must be adapter or foundation, got: ${engine}`);
+    if (engine !== "adapter" && engine !== "foundation" && engine !== "decision") {
+      throw new Error(`--engine must be adapter, foundation or decision, got: ${engine}`);
     }
     if (engine === "foundation" && readOption(argv, "--model")) {
       throw new Error("Foundation specs do not take --model; they train a tokenizer and GPT from scratch.");
@@ -1067,9 +1079,9 @@ async function main(argv: string[]): Promise<void> {
     if (readOption(argv, "--config")) throw new Error("tt init uses one tunedtensor.json; put overrides in runtime/evaluation instead of --config.");
     const spec = await initLocalSpecFile({
       outputPath,
-      name: readOption(argv, "--name") ?? (engine === "foundation" ? "Foundation chat model" : "Local Tuned Tensor Spec"),
+      name: readOption(argv, "--name") ?? (engine === "foundation" ? "Foundation chat model" : engine === "decision" ? "Local decision model" : "Local Tuned Tensor Spec"),
       engine,
-      baseModel: engine === "foundation" ? undefined : (readOption(argv, "--model") ?? "Qwen/Qwen3.5-2B"),
+      baseModel: engine === "foundation" ? undefined : (readOption(argv, "--model") ?? (engine === "decision" ? undefined : "Qwen/Qwen3.5-2B")),
       force: hasFlag(argv, "--force"),
     });
     // Spark uses the same defaults; initialization creates only the core spec.
@@ -1095,6 +1107,19 @@ async function main(argv: string[]): Promise<void> {
         ok: true,
         input_path: loaded.path,
         engine: "foundation",
+        pipeline: "tt pipeline run --spec",
+      });
+      return;
+    }
+    if (loaded.kind === "decision-spec") {
+      const validation = validateBehaviorSpec(loaded);
+      if (!validation.valid) throw new Error(`Invalid decision spec:\n${validation.errors.join("\n")}`);
+      printJson({
+        ok: true,
+        input_path: loaded.path,
+        engine: "decision",
+        base_model: loaded.spec.base_model,
+        warnings: validation.warnings,
         pipeline: "tt pipeline run --spec",
       });
       return;

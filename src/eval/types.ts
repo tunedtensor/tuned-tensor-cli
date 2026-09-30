@@ -2,7 +2,7 @@ export interface LocalSpec {
   id?: string;
   name: string;
   description?: string;
-  engine?: "adapter" | "foundation";
+  engine?: "adapter" | "foundation" | "decision";
   base_model?: string;
   system_prompt: string;
   guidelines: string[];

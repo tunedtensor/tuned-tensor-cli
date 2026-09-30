@@ -8,6 +8,7 @@ export const TUNED_TENSOR_DIR = ".tuned-tensor";
 export const DEFAULT_ARTIFACT_ROOT = `${TUNED_TENSOR_DIR}/artifacts`;
 export const DEFAULT_PROJECT_STORE_ROOT = `${TUNED_TENSOR_DIR}/store`;
 export const DEFAULT_FOUNDATION_RUNS_DIR = `${TUNED_TENSOR_DIR}/foundation-runs`;
+export const DEFAULT_DECISION_RUNS_DIR = `${TUNED_TENSOR_DIR}/decision-runs`;
 
 function envHome(env: NodeJS.ProcessEnv = process.env): string {
   const home = env.HOME?.trim();
@@ -72,7 +73,7 @@ export function defaultCacheRoot(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export function pythonEnvironmentPath(
-  kind: "uv" | "uv-foundation" | "uv-serving",
+  kind: "uv" | "uv-foundation" | "uv-serving" | "uv-decision",
   hash: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {

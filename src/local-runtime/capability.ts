@@ -278,9 +278,16 @@ export function formatCapabilitySummary(report: CapabilityReport): string {
 
 export function warningsFromSnapshot(
   report: CapabilityReport,
-  target: { engine: "adapter" | "foundation"; baseModel?: string },
+  target: { engine: "adapter" | "foundation" | "decision"; baseModel?: string },
 ): string[] {
   const warnings: string[] = [];
+  if (target.engine === "decision") {
+    // Decision models are small enough for CPU or Apple MPS; CUDA only makes them faster.
+    if (!report.cuda_available) {
+      warnings.push("No CUDA GPU detected: decision training runs on CPU or Apple MPS (roughly 15 s per 8-example step on a 4-core CPU).");
+    }
+    return warnings;
+  }
   if (target.engine === "foundation") {
     for (const kind of ["train", "finetune"] as const) {
       const verdict = report.foundation[kind];

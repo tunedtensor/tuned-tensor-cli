@@ -64,6 +64,17 @@ describe("renderSpecView", () => {
     expect(view).toContain("! Small example set.");
   });
 
+  it("shows decision questions and training without describing them as LoRA", () => {
+    const view = plain(renderSpecView(input({ document: {
+      ...document, engine: "decision", base_model: "convaiinnovations/laya",
+      decision: { type: "choice", criteria: { billing: "refunds", technical: "errors" } },
+    } })));
+    expect(view).toContain("decision · typed classification");
+    expect(view).toContain("Decision question");
+    expect(view).toContain("refunds");
+    expect(view).not.toContain("adapter · LoRA");
+  });
+
   it("shows one section in full", () => {
     const examples = plain(renderSpecView(input(), { section: "examples" }));
     expect(examples.startsWith("▍EXAMPLES")).toBe(true);

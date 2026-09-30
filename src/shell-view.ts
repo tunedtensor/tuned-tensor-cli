@@ -118,6 +118,13 @@ export function describeFineTuneFit(usage: LiveUsage | undefined, context: Shell
   if (!report && usage) report = evaluateCapabilities(inventoryFromUsage(usage));
   if (!report) return { status: "unknown", text: "not checked yet", source: "run tt hardware" };
 
+  if (spec?.engine === "decision") {
+    return {
+      status: "unknown",
+      text: "decision training runs locally on CPU, MPS or CUDA",
+      source: "device selected by hyperparameters.device",
+    };
+  }
   const noCuda = !report.cuda_available;
   if (spec?.engine === "foundation") {
     const verdict = report.foundation.train;
