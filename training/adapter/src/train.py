@@ -27,6 +27,7 @@ from model_contract import (
     assert_certified_model_config,
     chat_template_kwargs,
     parse_lora_target_modules,
+    uncertified_load_kwargs,
 )
 from sft_data import IGNORE_INDEX, build_assistant_only_example
 
@@ -82,6 +83,7 @@ def assert_certified_request() -> None:
         str(requested_model),
         hp("base_model_revision"),
         "Training base model revision",
+        local_source=Path(resolve_model_source()).is_dir(),
     )
     loader = hp("model_loader", "causal_lm")
     if loader not in ("causal_lm", "image_text_to_text"):
@@ -199,6 +201,11 @@ def create_model_and_tokenizer(model_source: str) -> tuple[Any, Any, torch.dtype
         raise ValueError(f"{hp('base_model', CERTIFIED_BASE_MODEL)} tokenizer has no EOS token")
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
+    if not tokenizer.chat_template:
+        raise ValueError(
+            f"{hp('base_model', CERTIFIED_BASE_MODEL)} has no chat template; "
+            "choose an instruct or chat variant of the model"
+        )
 
     dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
     # Multimodal checkpoints whose text tower is not registered in the
@@ -212,6 +219,7 @@ def create_model_and_tokenizer(model_source: str) -> tuple[Any, Any, torch.dtype
     model = model_class.from_pretrained(
         model_source,
         **source_kwargs,
+        **uncertified_load_kwargs(str(hp("base_model", CERTIFIED_BASE_MODEL))),
         dtype=dtype,
         device_map={"": torch.cuda.current_device()},
     )

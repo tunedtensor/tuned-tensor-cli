@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -15,6 +16,10 @@ NEMOTRON_BASE_MODEL_REVISION = "ce38b6ab8b252b4b8ee7165b4605e93191cafd73"
 # Immutable Hugging Face revision reviewed and certified for Muse Glimmer.
 MUSE_GLIMMER_BASE_MODEL_REVISION = "a4e59da52a7bc87ae7251dd5545c0dd437c44b68"
 CERTIFIED_BASE_MODELS = (CERTIFIED_BASE_MODEL, NEMOTRON_BASE_MODEL, MUSE_GLIMMER_BASE_MODEL)
+# Any other Hugging Face repo may be trained as an uncertified causal LM when
+# the run pins an immutable commit. Node enforces the same contract.
+HUGGING_FACE_REPO_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}")
+COMMIT_SHA = re.compile(r"[0-9a-fA-F]{40}")
 CERTIFIED_QWEN_TEXT_CONFIG = {
     "model_type": "qwen3_5_text",
     "hidden_size": 2048,
@@ -58,6 +63,9 @@ def assert_certified_model_config(
     label: str = "base-model config",
     expected_model_id: str | None = None,
 ) -> None:
+    if expected_model_id and not is_certified_base_model(expected_model_id):
+        # No reviewed architecture exists for an uncertified model.
+        return
     model_type = _field(value, "model_type")
     architectures = _field(value, "architectures")
 
@@ -126,17 +134,30 @@ def assert_certified_model_config(
         )
 
 
+def is_certified_base_model(model_id: str) -> bool:
+    return model_id in CERTIFIED_BASE_MODELS
+
+
 def assert_certified_base_model(model_id: str, label: str = "base model") -> None:
-    if model_id not in CERTIFIED_BASE_MODELS:
-        supported = ", ".join(CERTIFIED_BASE_MODELS)
-        raise ValueError(f"{label} must be one of {supported}; got {model_id!r}")
+    """Accept a certified model or an uncertified Hugging Face repo id."""
+    if is_certified_base_model(model_id) or HUGGING_FACE_REPO_ID.fullmatch(model_id):
+        return
+    supported = ", ".join(CERTIFIED_BASE_MODELS)
+    raise ValueError(f"{label} must be one of {supported} or a Hugging Face repo id; got {model_id!r}")
 
 
-def assert_certified_base_model_revision(base_model: str, revision: str | None, label: str = "base model revision") -> None:
+def assert_certified_base_model_revision(
+    base_model: str,
+    revision: str | None,
+    label: str = "base model revision",
+    *,
+    local_source: bool = False,
+) -> None:
     """Require the certified immutable revision for pinned training models.
 
     Qwen, Nemotron, and Muse Glimmer loads are bound here; local snapshot
-    contents are additionally verified by the Node runtime.
+    contents are additionally verified by the Node runtime. An uncertified
+    model must pin a commit SHA unless it loads from a local directory.
     """
     expected = {
         CERTIFIED_BASE_MODEL: QWEN_BASE_MODEL_REVISION,
@@ -144,6 +165,13 @@ def assert_certified_base_model_revision(base_model: str, revision: str | None, 
         MUSE_GLIMMER_BASE_MODEL: MUSE_GLIMMER_BASE_MODEL_REVISION,
     }.get(base_model)
     if expected is None:
+        if revision is None and local_source:
+            return
+        if revision is None or not COMMIT_SHA.fullmatch(str(revision)):
+            raise ValueError(
+                f"{label} must be a 40-character commit SHA for uncertified base model {base_model}; "
+                f"got {revision!r}"
+            )
         return
     if revision is None:
         raise ValueError(f"{label} is required for {base_model}")
@@ -167,3 +195,8 @@ def chat_template_kwargs(model_id: str) -> dict[str, Any]:
     if model_id == NEMOTRON_BASE_MODEL:
         return {"enable_thinking": False}
     return {}
+
+
+def uncertified_load_kwargs(model_id: str) -> dict[str, Any]:
+    """Refuse pickle weights for models TT has not reviewed."""
+    return {} if is_certified_base_model(model_id) else {"use_safetensors": True}

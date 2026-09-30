@@ -53,6 +53,7 @@ import { launchProcessTraining } from "./process-training.js";
 import {
   assertUsableModelArtifact,
   defaultBaseModelRevision,
+  isCertifiedTrainingModel,
   localModelArtifactPath,
   resolveRequestedBaseModelRevision,
 } from "./model-registry.js";
@@ -578,7 +579,10 @@ async function resolveBaseModelRevision(
     // A configured directory is certified by content. Only a registry-pinned
     // model may therefore claim a revision; an arbitrary Qwen directory keeps
     // its content fingerprint but does not inherit a user-supplied repo SHA.
-    return defaultBaseModelRevision(request.spec_snapshot.base_model);
+    // An uncertified model has no registry pin, so its declared SHA is kept.
+    return isCertifiedTrainingModel(request.spec_snapshot.base_model)
+      ? defaultBaseModelRevision(request.spec_snapshot.base_model)
+      : requested;
   }
   if (requested) return requested;
   if (!request.spec_snapshot.base_model.includes("/")) {

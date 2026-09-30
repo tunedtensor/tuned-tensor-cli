@@ -11,7 +11,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from evaluate import configure_hugging_face_cache, resolve_adapter_path
-from model_contract import assert_certified_base_model_revision, assert_certified_model_config
+from model_contract import (
+    assert_certified_base_model_revision,
+    assert_certified_model_config,
+    is_certified_base_model,
+)
 
 class BearerAuthMiddleware:
     """Keep TT's auth boundary on ALL routes, including upstream admin APIs.
@@ -58,6 +62,8 @@ def build_vllm_args(model_source: str, adapter_path: str | None, temp_dir: Path)
     ]
     if os.environ.get("TT_API_KEY"):
         args += ["--middleware", "serve.BearerAuthMiddleware"]
+    if not is_certified_base_model(os.environ.get("TT_BASE_MODEL", "")):
+        args += ["--load-format", "safetensors"]
     base = os.environ["TT_BASE_MODEL"]
     # Upstream model-specific parsers, not a TT parser or model-size heuristic.
     parser = {
@@ -111,9 +117,14 @@ def build_vllm_args(model_source: str, adapter_path: str | None, temp_dir: Path)
 def prepare_model_source() -> str:
     base = os.environ["TT_BASE_MODEL"]
     revision = os.environ.get("TT_BASE_MODEL_REVISION")
-    assert_certified_base_model_revision(base, revision, "Serving base model revision")
-    configure_hugging_face_cache(os.environ.get("HF_HOME"))
     source = os.environ.get("TT_MODEL_SOURCE", base)
+    assert_certified_base_model_revision(
+        base,
+        revision,
+        "Serving base model revision",
+        local_source=source != base and Path(source).is_dir(),
+    )
+    configure_hugging_face_cache(os.environ.get("HF_HOME"))
     if not Path(source).is_dir():
         if source != base:
             raise ValueError("Explicit serving snapshot is not an existing directory.")

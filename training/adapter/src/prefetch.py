@@ -10,6 +10,7 @@ from model_contract import (
     assert_certified_base_model,
     assert_certified_base_model_revision,
     assert_certified_model_config,
+    is_certified_base_model,
 )
 
 ALLOW_PATTERNS = [
@@ -99,6 +100,10 @@ def verify_snapshot(snapshot: Path, expected_model_id: str | None = None) -> tup
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Cached snapshot has an invalid config.json: {snapshot}") from exc
 
+    if expected_model_id and not is_certified_base_model(expected_model_id):
+        if not any(path.stat().st_size > 0 for path in snapshot.glob("*.safetensors")):
+            raise ValueError("Uncertified base models require non-empty safetensors weights; pickle-only checkpoints are unsupported")
+
     weight_files = sorted(snapshot.glob("*.safetensors")) + sorted(snapshot.glob("pytorch_model*.bin"))
     index_files = sorted(snapshot.glob("*.safetensors.index.json")) + sorted(snapshot.glob("pytorch_model*.bin.index.json"))
     for index in index_files:
@@ -175,7 +180,7 @@ def main() -> None:
         revision=payload.get("revision"),
         token=os.getenv("HF_TOKEN"),
         allow_patterns=ALLOW_PATTERNS,
-        ignore_patterns=IGNORE_PATTERNS,
+        ignore_patterns=IGNORE_PATTERNS + ([] if is_certified_base_model(base_model) else ["pytorch_model*.bin"]),
         local_files_only=bool(payload.get("local_files_only", False)),
     )
     snapshot = Path(snapshot_path)
