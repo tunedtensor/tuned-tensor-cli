@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { stripVTControlCharacters } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import chalk from "chalk";
@@ -21,7 +22,10 @@ import {
   type ShellSessionIO,
 } from "../shell.js";
 import { createCommandCompleter } from "../command-catalog.js";
+import { MASCOT_WIDTH, mascotMark, renderMascot } from "../mascot.js";
 import type { ShellContext } from "../shell-context.js";
+import type { LiveUsage } from "../local-runtime/live-usage.js";
+import { terminalWidth } from "../terminal-markdown.js";
 
 describe("tokenizeShellInput", () => {
   it("parses whitespace, quotes, escapes, empty values, and joined fragments", () => {
@@ -252,8 +256,32 @@ function fakeContext(cwd: string): ShellContext {
   };
 }
 
+const liveUsage: LiveUsage = {
+  sampled_at: "2026-01-01T00:00:00.000Z",
+  cpu: { model: "Ryzen 9 7950X", cores: 16, utilization_percent: 18, load_average: [2.1, 1.8, 1.5] },
+  memory: { used_bytes: 26 * 1024 ** 3, total_bytes: 64 * 1024 ** 3 },
+  gpus: [{
+    index: 0,
+    name: "NVIDIA GeForce RTX 4090",
+    utilization_percent: 42,
+    memory_used_bytes: 6 * 1024 ** 3,
+    memory_total_bytes: 24 * 1024 ** 3,
+    temperature_c: 55,
+    unified_memory: false,
+    vendor: "nvidia",
+  }],
+};
+
+function specContext(cwd: string, spec: ShellContext["spec"]): ShellContext {
+  return {
+    ...fakeContext(cwd),
+    spec,
+    agent: { provider: "anthropic", model: "claude-sonnet-4-5" },
+  };
+}
+
 describe("renderShellBanner", () => {
-  it("shows a compact heading, context, controls, and version", () => {
+  it("shows the logo mark, the heading, context, controls, and version", () => {
     const banner = renderShellBanner({
       mode: "local",
       modeSource: "default-local",
@@ -262,32 +290,74 @@ describe("renderShellBanner", () => {
       version: "0.6.0",
     });
     const rows = banner.trimEnd().split("\n");
-    expect(rows).toHaveLength(5);
-    expect(rows[0]).toContain("tt");
+    expect(rows[1]).toContain("tt");
+    expect(rows[3]).toContain("□ ■");
     expect(banner).toContain("v0.6.0");
-    expect(banner).not.toMatch(/no spec/);
-    expect(banner).toContain("agent");
-    expect(banner).toContain("workflow model");
+    expect(banner).toContain("tt ›");
+    expect(banner).toContain("agent not configured");
+    expect(banner).toContain("workflow model model_abc123");
     expect(banner).toContain("ctrl+c stop/clear");
+    expect(banner).toContain("/system machine");
     expect(banner).toContain("Use /login tunedtensor for managed inference");
     expect(banner).toContain("Workflow commands work now");
-    expect(banner).not.toContain("Ask TT anything");
-    expect(banner).not.toContain("██");
+    expect(banner).not.toContain("MACHINE");
   });
 
-  it("asks for a prompt once a provider and model are selected", () => {
+  it("points at the spec once a provider and model are selected", () => {
     const banner = renderShellBanner({
       mode: "local",
       modeSource: "default-local",
       cwd: "/tmp/local-project",
-      context: {
-        ...fakeContext("/tmp/local-project"),
-        agent: { provider: "anthropic", model: "claude-sonnet-4-5" },
-      },
+      context: specContext("/tmp/local-project", {
+        path: "/tmp/local-project/tunedtensor.json",
+        name: "Support triage",
+        baseModel: "Qwen/Qwen3.5-2B",
+        exampleCount: 120,
+        parseError: false,
+      }),
       version: "0.6.0",
     });
+    expect(banner).toContain("spec Support triage · Qwen/Qwen3.5-2B · 120 examples");
     expect(banner).toContain("Ask TT anything. Known commands run directly.");
-    expect(banner).not.toContain("Use /model to choose");
+    expect(banner).not.toContain("Use /login tunedtensor");
+  });
+
+  it.each([
+    [undefined, /No tunedtensor\.json here yet/],
+    [{ path: "/p/tunedtensor.json", parseError: true }, /doesn't parse/],
+    [{ path: "/p/tunedtensor.json", name: "Tiny", exampleCount: 4, parseError: false }, /4 examples is a small set/],
+  ])("suggests the next step for %o", (spec, message) => {
+    const banner = renderShellBanner({
+      mode: "local",
+      modeSource: "default-local",
+      cwd: "/p",
+      context: specContext("/p", spec as ShellContext["spec"]),
+    });
+    expect(banner).toMatch(message);
+  });
+
+  it("adds live GPU, CPU and memory use with a fine-tune verdict", () => {
+    const banner = renderShellBanner({
+      mode: "local",
+      modeSource: "default-local",
+      cwd: "/p",
+      context: specContext("/p", {
+        path: "/p/tunedtensor.json",
+        name: "Tiny",
+        baseModel: "Qwen/Qwen3.5-2B",
+        exampleCount: 40,
+        parseError: false,
+      }),
+      usage: liveUsage,
+    }, 100);
+    expect(banner).toContain("MACHINE");
+    expect(banner).toMatch(/GPU\s+GeForce RTX 4090/);
+    expect(banner).toContain("42%");
+    expect(banner).toContain("VRAM 6.0/24.0 GiB");
+    expect(banner).toContain("16× Ryzen 9 7950X");
+    expect(banner).toContain("26.0/64.0 GiB");
+    expect(banner).toMatch(/LoRA Qwen3\.5-2B ready/);
+    expect(banner).toContain("quick check");
   });
 
   it("omits the version when none is provided", () => {
@@ -299,6 +369,20 @@ describe("renderShellBanner", () => {
     });
     expect(banner).toContain("tt");
     expect(banner).not.toContain("v0");
+  });
+
+  it("keeps every row within a narrow terminal", () => {
+    const banner = renderShellBanner({
+      mode: "local",
+      modeSource: "default-local",
+      cwd: "/p",
+      context: fakeContext("/p"),
+      usage: liveUsage,
+      version: "0.6.0",
+    }, 50);
+    for (const row of banner.split("\n")) {
+      expect(terminalWidth(row)).toBeLessThanOrEqual(50);
+    }
   });
 });
 
@@ -786,5 +870,102 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
 
     await session.handleLine("/login openai");
     expect(stderr.join("")).toMatch(/interactive tt session/);
+  });
+});
+
+describe("spec and machine views in the shell", () => {
+  function session(cwd: string, systemProbe?: () => Promise<LiveUsage>) {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const created = createShellSession({
+      cwd,
+      env: { HOME: cwd, TUNED_TENSOR_HOME: join(cwd, ".tt-home") },
+      io: { write: (text) => stdout.push(text), writeError: (text) => stderr.push(text), clear: vi.fn() },
+      runner: vi.fn(async () => ({ exitCode: 0 })),
+      contextProvider: async ({ cwd: directory }) => fakeContext(directory),
+      systemProbe,
+      columns: () => 100,
+    });
+    return { created, stdout, stderr };
+  }
+
+  it("renders the readable overview, a section, and highlighted JSON", async () => {
+    const root = mkdtempSync(join(tmpdir(), "tt-shell-spec-"));
+    try {
+      writeFileSync(join(root, "tunedtensor.json"), readFileSync(
+        join(import.meta.dirname, "../../examples/single-spec/adapter/tunedtensor.json"),
+        "utf8",
+      ));
+      const { created, stdout, stderr } = session(root);
+      const shell = await created;
+      await shell.handleLine("/spec");
+      await shell.handleLine("/spec examples");
+      await shell.handleLine("/spec show");
+      await shell.handleLine("/spec tunedtensor.json");
+      await shell.handleLine("/spec nonsense");
+      const [overview, examples, source, byPath] = stdout.map((text) => stripVTControlCharacters(text));
+      expect(overview).toContain("▍BEHAVIOR");
+      expect(overview).toContain("… 1 more · /spec examples shows all");
+      expect(examples).toContain("Support never replied.");
+      expect(examples).not.toContain("▍BEHAVIOR");
+      expect(source).toContain('"base_model": "Qwen/Qwen3.5-2B"');
+      expect(byPath).toContain("▍TRAINING");
+      expect(stderr.join("")).toMatch(/Usage: \/spec \[identity\|behavior/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("explains how to create a missing spec", async () => {
+    const root = mkdtempSync(join(tmpdir(), "tt-shell-nospec-"));
+    try {
+      const { created, stderr } = session(root);
+      await (await created).handleLine("/spec");
+      expect(stderr.join("")).toMatch(/No tunedtensor\.json in .*Run init, or ask TT to draft/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("samples live usage for the banner and on /system", async () => {
+    const probe = vi.fn(async () => liveUsage);
+    const { created, stdout, stderr } = session("/tmp/local-project", probe);
+    const shell = await created;
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(stripVTControlCharacters(shell.banner())).toContain("MACHINE");
+    await shell.handleLine("/system");
+    expect(probe).toHaveBeenCalledTimes(2);
+    const text = stripVTControlCharacters(stdout.join(""));
+    expect(text).toContain("CERTIFIED BASE MODELS");
+    expect(text).toMatch(/✓ Qwen\/Qwen3\.5-2B/);
+    expect(text).toContain("No full probe yet");
+    expect(stderr).toEqual([]);
+  });
+
+  it("keeps working when the probe fails or is absent", async () => {
+    const failing = session("/tmp/local-project", async () => { throw new Error("boom"); });
+    const shell = await failing.created;
+    expect(stripVTControlCharacters(shell.banner())).not.toContain("MACHINE");
+    await shell.handleLine("/system");
+    expect(failing.stderr.join("")).toMatch(/Live machine usage is unavailable/);
+  });
+});
+
+describe("the TT logo mark", () => {
+  it("draws the logo's tensor grid in color and in plain characters", () => {
+    const level = chalk.level;
+    try {
+      chalk.level = 3;
+      const mark = renderMascot();
+      expect(mark).toHaveLength(4);
+      for (const row of mark) expect(terminalWidth(row)).toBe(MASCOT_WIDTH);
+      expect(mark.join("")).toContain("\u001b[38;2;124;58;237m");
+      expect(stripVTControlCharacters(mark.join(""))).not.toMatch(/[◕o]/);
+      chalk.level = 0;
+      expect(renderMascot().slice(1).map((row) => row.trimEnd())).toEqual([" ■ □", " □ ■ □", "   □ ■"]);
+      expect(mascotMark()).toBe("▚");
+    } finally {
+      chalk.level = level;
+    }
   });
 });

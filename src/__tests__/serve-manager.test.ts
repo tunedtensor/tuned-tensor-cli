@@ -193,12 +193,21 @@ describe("ManagedModelServer", () => {
         body: "{}",
       });
 
+      // Wait for the first request to reach the model instead of assuming a
+      // fixed delay is enough on a busy runner.
+      for (let waited = 0; maxActive === 0 && waited < 3_000; waited += 10) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(maxActive).toBe(1);
+      // The second request must stay queued while the first is blocked.
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(maxActive).toBe(1);
       releaseFirst();
       await Promise.all([first, second]);
       expect(maxActive).toBe(1);
     } finally {
+      // A failed assertion must not leave the first request blocked, or stop() waits forever.
+      releaseFirst();
       await server.stop();
     }
   });

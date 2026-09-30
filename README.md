@@ -94,8 +94,12 @@ npm link
 ## Behavior spec workflow
 
 `tunedtensor.json` is the source of truth for behavior and training settings.
-Use `/spec`, `/spec diff`, `/spec validate`, and `/spec history` in the shell to
-review it without a model call. Ask the agent for changes, inspect its proposed
+In the shell, `/spec` shows a readable overview grouped into behavior,
+examples, training, evaluation and runtime sections; `/spec <section>` (for
+example `/spec examples`) shows one section in full and `/spec show` prints the
+highlighted JSON. `/spec diff`, `/spec validate`, and `/spec history` complete
+the review, all without a model call. Outside the shell, `tt spec view` and
+`tt spec <section>` print the same readable view. Ask the agent for changes, inspect its proposed
 diff, then press `y` when tt asks (or `/approve` later) to save a validated edit
 with revision history. Pipeline
 runs use the saved spec. See [the spec workflow](docs/spec-workflow.md).
@@ -226,8 +230,15 @@ that request real execution fail before the child command is dispatched. Real
 training remains available through the explicit direct `tt pipeline run` command.
 A changed workspace or spec requires a new review.
 
-Useful shell controls include `/help`, `/status`, `/context`, `/model`,
-`/login`, `/cd`, `/clear`, and `/exit`.
+Useful shell controls include `/help`, `/status`, `/context`, `/system`,
+`/model`, `/login`, `/cd`, `/clear`, and `/exit`.
+When the shell opens, the TT logo mark (drawn in the terminal) greets you with the current spec, a
+live machine panel (GPU utilization, VRAM and temperature from `nvidia-smi`,
+CPU, RAM, and free space in the model cache) and whether this machine can
+fine-tune the spec's base model, plus a suggested next step. `/system` refreshes
+that panel and lists every certified base model's verdict. Fit verdicts come
+from the same certified memory profiles as `tt hardware`; a fresh
+`tt hardware` snapshot takes precedence over the quick live check.
 The shell banner and `/context` show the inference selection (`agent
 provider/model`) separately from the workflow model. The managed alias identifies
 inference through the server-selected model. Run `/model` with no arguments to

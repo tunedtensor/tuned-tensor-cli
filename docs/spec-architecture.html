@@ -73,7 +73,7 @@
     <div class="tt-level">
       <div class="tt-unit"><button class="btn" type="button" data-component="agent" aria-pressed="false">User intent → agent</button><small class="text-small">get_local_spec → field patch</small></div>
       <div class="tt-unit"><button class="btn" type="button" data-component="approval" aria-pressed="false">Diff → /approve</button><small class="text-small">validate → atomic save → history</small></div>
-      <div class="tt-unit"><button class="btn" type="button" data-component="review" aria-pressed="false">/spec review</button><small class="text-small">show · diff · validate · history</small></div>
+      <div class="tt-unit"><button class="btn" type="button" data-component="review" aria-pressed="false">/spec review</button><small class="text-small">overview · sections · show · diff · validate · history</small></div>
     </div>
     <div class="tt-arrow text-small">↕ inspect the recipe · save only reviewed edits</div>
     <div class="tt-recipe tt-unit">
@@ -182,7 +182,7 @@
       "src/local-runtime/local-project.ts",
       "src/pipeline.ts"
     ],
-    "example": "/spec\n/spec diff\n/spec validate\n/spec history\n\n# Outside the TT shell:\ntt spec show --json"
+    "example": "/spec\n/spec examples\n/spec diff\n/spec validate\n/spec history\n\n# Outside the TT shell:\ntt spec view\ntt spec show --json"
   },
   "config": {
     "title": "Spec runtime and evaluation",
