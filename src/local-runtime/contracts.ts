@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { pipelineDocumentSchema, isFoundationPipeline, parsePipeline } from "@tuned-tensor/pipeline-contract";
 import { DEFAULT_ARTIFACT_ROOT } from "../paths.js";
-import { canonicalizeTrainingModel } from "./model-registry.js";
+import { canonicalizeTrainingModel, isCertifiedTrainingModel, uncertifiedRevisionError } from "./model-registry.js";
 import { DECISION_MODELS, canonicalizeDecisionModel, isDecisionModel } from "./decision-models.js";
 
 /**
@@ -93,6 +93,21 @@ export const fineTuneHyperparametersSchema = z.object({
   base_model_revision: baseModelRevisionSchema.optional(),
 }).strict();
 
+/** Uncertified base models must pin the exact Hugging Face commit they train. */
+function requirePinnedUncertifiedModel(
+  spec: { base_model: string; hyperparameters?: { base_model_revision?: string } }
+    | { spec_snapshot: { base_model: string }; hyperparameters?: { base_model_revision?: string } },
+  context: z.RefinementCtx,
+): void {
+  const baseModel = "spec_snapshot" in spec ? spec.spec_snapshot.base_model : spec.base_model;
+  if (isCertifiedTrainingModel(baseModel) || spec.hyperparameters?.base_model_revision) return;
+  context.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ["hyperparameters", "base_model_revision"],
+    message: uncertifiedRevisionError(baseModel).message,
+  });
+}
+
 export const fineTuneRunRequestSchema = z.object({
   run_id: z.string().uuid(),
   user_id: z.string().min(1),
@@ -102,6 +117,7 @@ export const fineTuneRunRequestSchema = z.object({
   hyperparameters: fineTuneHyperparametersSchema.default({ n_epochs: 1 }),
   dataset_prebuilt: datasetPrebuiltSchema.optional(),
 }).strict().superRefine((request, context) => {
+  requirePinnedUncertifiedModel(request, context);
   if (request.spec_snapshot.examples.length === 0 && !request.dataset_prebuilt) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -339,7 +355,7 @@ export const localAdapterSpecFileSchema = specSnapshotSchema.extend({
   id: z.string().uuid().optional(),
   hyperparameters: fineTuneHyperparametersSchema.optional(),
   dataset_prebuilt: datasetPrebuiltSchema.optional(),
-}).strict();
+}).strict().superRefine(requirePinnedUncertifiedModel);
 
 /**
  * One typed question a decision model answers per input. Example outputs are

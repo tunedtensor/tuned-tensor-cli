@@ -276,6 +276,21 @@ Three local engines share that document version:
 - **Adapter** (default): LoRA SFT on a certified Hugging Face checkpoint.
   Runs through `tt pipeline run`. Uses `train` / `evaluate` / `compare` with
   `evaluate.with.evaluator: "behavior"`.
+  Certified models (`Qwen/Qwen3.5-2B`, Nemotron 3.5 Lightning, Muse Glimmer)
+  have a reviewed revision, architecture, and memory profile. Any other
+  Hugging Face text model can be trained as **uncertified** by pinning its
+  commit; it loads as a causal LM with safetensors weights, no remote code,
+  and generic LoRA defaults (override them in `hyperparameters`):
+
+  ```json
+  {
+    "base_model": "mistralai/Mistral-7B-Instruct-v0.3",
+    "hyperparameters": { "base_model_revision": "<40-char commit SHA>" }
+  }
+  ```
+
+  Pick an instruct/chat variant (the trainer needs a chat template) and check
+  hardware fit with `tt doctor`, since TT has no memory profile for it.
 - **Foundation**: from-scratch tokenizer + GPT. Also runs through
   `tt pipeline run`. Uses
   `tokenize` / `pretrain` / `finetune` / optional `rl` plus `bpb`, `chat`, and

@@ -17,8 +17,12 @@ const FolderName = Type.String({
   description: "One new folder name directly beneath the current workspace",
 });
 const LocalBaseModel = Type.String({
-  type: "string",
-  enum: [...TRAINING_MODELS.map((model) => model.id), ...DECISION_MODELS.map((model) => model.id)],
+  minLength: 3,
+  maxLength: 193,
+  pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$",
+  description: `Hugging Face repo id. Certified adapter models: ${TRAINING_MODELS.map((model) => model.id).join(", ")}. `
+    + `Decision models: ${DECISION_MODELS.map((model) => model.id).join(", ")}. `
+    + "Other adapter repos require hyperparameters.base_model_revision (40-character commit SHA).",
 });
 const NonEmptyText = Type.String({ minLength: 1, maxLength: 1_000 });
 

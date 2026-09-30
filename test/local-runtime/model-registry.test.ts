@@ -11,6 +11,7 @@ import {
   assertUsableModelArtifact,
   canonicalizeTrainingModel,
   defaultBaseModelRevision,
+  isCertifiedTrainingModel,
   resolveModelLoader,
   resolveRequestedBaseModelRevision,
   resolveTrainingModel,
@@ -298,4 +299,42 @@ test("a LoRA artifact requires both adapter weights and configuration", async ()
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("any Hugging Face repo trains as an uncertified causal LM only with a pinned revision", () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const model = resolveTrainingModel(" mistralai/Mistral-7B-Instruct-v0.3 ");
+  assert.equal(model.id, "mistralai/Mistral-7B-Instruct-v0.3");
+  assert.equal(model.family, "uncertified");
+  assert.equal(model.modelLoader, "causal_lm");
+  assert.equal(model.defaultRevision, undefined);
+  assert.equal(isCertifiedTrainingModel(model.id), false);
+  assert.equal(isCertifiedTrainingModel("qwen/qwen3.5-2b"), true);
+  assert.equal(defaultBaseModelRevision(model.id), undefined);
+  assert.throws(
+    () => resolveRequestedBaseModelRevision(model.id),
+    /not a TT-certified base model.*base_model_revision/,
+  );
+  assert.equal(resolveRequestedBaseModelRevision(model.id, sha), sha);
+  // No reviewed architecture exists to compare an uncertified config against.
+  assert.doesNotThrow(() => assertCertifiedBaseModelConfig({ model_type: "mistral" }, "config", model.id));
+  assert.throws(() => assertCertifiedBaseModelConfig({ model_type: "mistral" }), /not a certified/);
+  assert.throws(() => resolveTrainingModel("not a repo"), /Unsupported base model/);
+});
+
+test("an uncertified spec is valid only once it pins base_model_revision", async () => {
+  const { localBehaviorSpecFileSchema } = await import("../../src/local-runtime/contracts.js");
+  const spec = {
+    name: "custom",
+    base_model: "mistralai/Mistral-7B-Instruct-v0.3",
+    examples: [{ input: "a", output: "b" }],
+  };
+  const missing = localBehaviorSpecFileSchema.safeParse(spec);
+  assert.equal(missing.success, false);
+  assert.match(JSON.stringify(missing.error?.issues), /base_model_revision/);
+  const pinned = localBehaviorSpecFileSchema.safeParse({
+    ...spec,
+    hyperparameters: { base_model_revision: "0123456789ABCDEF0123456789abcdef01234567" },
+  });
+  assert.equal(pinned.success, true, JSON.stringify(pinned.error?.issues));
 });

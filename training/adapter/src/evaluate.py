@@ -10,12 +10,12 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from model_contract import (
-    CERTIFIED_BASE_MODELS,
     CERTIFIED_BASE_MODEL,
     assert_certified_base_model,
     assert_certified_base_model_revision,
     assert_certified_model_config,
     chat_template_kwargs,
+    uncertified_load_kwargs,
 )
 
 MAX_ARCHIVE_MEMBERS = 20_000
@@ -145,10 +145,12 @@ def resolve_device(device: str) -> str:
     return device
 
 
-def _assert_certified_model_source(base_model: str) -> None:
-    if not Path(base_model).exists() and base_model not in CERTIFIED_BASE_MODELS:
+def _assert_certified_model_source(base_model: str, model_source: str) -> None:
+    # A hub source must be the requested model; certified or not, it is
+    # checked by assert_certified_base_model.
+    if not Path(model_source).exists() and model_source != base_model:
         raise ValueError(
-            f"The bundled evaluator does not certify {base_model!r}"
+            f"The bundled evaluator does not certify {model_source!r}"
         )
 
 
@@ -160,9 +162,14 @@ def load_text_model(
     base_model = str(payload["base_model"])
     model_source = str(payload.get("model_source", base_model))
     assert_certified_base_model(base_model, "Evaluation base model")
-    _assert_certified_model_source(model_source)
+    _assert_certified_model_source(base_model, model_source)
     revision = payload.get("base_model_revision")
-    assert_certified_base_model_revision(base_model, revision, "Evaluation base model revision")
+    assert_certified_base_model_revision(
+        base_model,
+        revision,
+        "Evaluation base model revision",
+        local_source=Path(model_source).is_dir(),
+    )
     device = resolve_device(str(payload.get("device", "cuda")))
     token = os.getenv("HF_TOKEN")
     source_kwargs: dict[str, Any] = {
@@ -184,7 +191,7 @@ def load_text_model(
     if device == "cuda":
         dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
 
-    model_kwargs: dict[str, Any] = dict(source_kwargs)
+    model_kwargs: dict[str, Any] = {**source_kwargs, **uncertified_load_kwargs(base_model)}
     if dtype is not None:
         model_kwargs["dtype"] = dtype
     if device == "cuda":

@@ -124,7 +124,7 @@ describe("local spec workspace", () => {
     await expect(createLocalSpecProject(
       workspace,
       "safe-spec",
-      { ...spec, base_model: "unsupported/model" },
+      { ...spec, base_model: "not a repo id" },
       prepared.workspaceFingerprint,
     )).rejects.toThrow(/canonical tunedtensor\.json schema/i);
     expect(existsSync(join(workspace, "safe-spec"))).toBe(false);
