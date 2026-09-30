@@ -2,7 +2,7 @@ import chalk from "chalk";
 import { evaluateCapabilities, type CapabilityReport, type CapabilityVerdict } from "./local-runtime/capability.js";
 import type { HostInventory } from "./local-runtime/host-inventory.js";
 import type { LiveGpuUsage, LiveUsage } from "./local-runtime/live-usage.js";
-import { renderMascot, mascotSays, MASCOT_WIDTH, type MascotMood } from "./mascot.js";
+import { renderMascot, mascotSays, MASCOT_WIDTH } from "./mascot.js";
 import type { ShellContext } from "./shell-context.js";
 import { sanitizeTerminalText, terminalWidth, wrapTerminalLine } from "./terminal-markdown.js";
 import { hintLines, truncateText } from "./spec-view.js";
@@ -305,39 +305,28 @@ function agentLabel(context: ShellContext): string | undefined {
   return `${agent.provider}/${agent.model}`;
 }
 
-interface Tip {
-  mood: MascotMood;
-  text: string;
-}
-
 /** Tess's opening line: the single most useful next step. */
-export function bannerTip(input: BannerInput): Tip {
+export function bannerTip(input: BannerInput): string {
   const { context, usage } = input;
   const agent = agentLabel(context);
   if (!agent) {
-    return {
-      mood: "sleepy",
-      text: "Use /login tunedtensor for managed inference, or /model for your own provider. Workflow commands work now.",
-    };
+    return "Use /login tunedtensor for managed inference, or /model for your own provider. Workflow commands work now.";
   }
   if (!context.spec) {
-    return { mood: "happy", text: "No tunedtensor.json here yet. Describe the model you want and I'll draft a spec, or run init." };
+    return "No tunedtensor.json here yet. Describe the model you want and I'll draft a spec, or run init.";
   }
   if (context.spec.parseError) {
-    return { mood: "worried", text: "tunedtensor.json doesn't parse. /spec show points at the problem." };
+    return "tunedtensor.json doesn't parse. /spec show points at the problem.";
   }
   const busy = usage?.gpus.find((gpu) => (gpu.utilization_percent ?? 0) >= 85);
   if (busy) {
-    return { mood: "worried", text: `${busy.name} is ${busy.utilization_percent}% busy; training now may be slow.` };
+    return `${busy.name} is ${busy.utilization_percent}% busy; training now may be slow.`;
   }
   const examples = context.spec.exampleCount ?? 0;
   if (examples < 20) {
-    return {
-      mood: "thinking",
-      text: `${examples} example${examples === 1 ? "" : "s"} is a small set. Ask me to draft more, or /spec examples to review them.`,
-    };
+    return `${examples} example${examples === 1 ? "" : "s"} is a small set. Ask me to draft more, or /spec examples to review them.`;
   }
-  return { mood: "excited", text: "Ask TT anything. Known commands run directly." };
+  return "Ask TT anything. Known commands run directly.";
 }
 
 function specLine(context: ShellContext): string {
@@ -361,7 +350,7 @@ export function renderBanner(input: BannerInput): string {
     specLine(context),
     chalk.dim(`agent ${agentLabel(context) ?? "not configured"} · workflow model ${input.activeModel}`),
   ];
-  const mascot = renderMascot(tip.mood);
+  const mascot = renderMascot();
   const textWidth = width - MASCOT_WIDTH - 1;
   // Bottom-align the heading so it sits beside the cube's face.
   const offset = mascot.length - heading.length;
@@ -374,9 +363,9 @@ export function renderBanner(input: BannerInput): string {
     lines.push("", ...renderMachinePanel(input.usage, context, { columns: input.columns }));
   }
   // Wrap Tess's line so continuation rows hang under the message text.
-  const prefix = mascotSays("", tip.mood);
+  const prefix = mascotSays("");
   const hang = terminalWidth(prefix);
-  const wrapped = wrapTerminalLine(tip.text, Math.max(20, width - hang));
+  const wrapped = wrapTerminalLine(tip, Math.max(20, width - hang));
   lines.push("", `${prefix}${wrapped[0]}`, ...wrapped.slice(1).map((line) => `${" ".repeat(hang)}${line}`));
   lines.push(...hintLines([
     "/spec review",

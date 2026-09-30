@@ -22,7 +22,7 @@ import {
   type ShellSessionIO,
 } from "../shell.js";
 import { createCommandCompleter } from "../command-catalog.js";
-import { MASCOT_WIDTH, mascotFace, renderMascot } from "../mascot.js";
+import { MASCOT_WIDTH, mascotMark, renderMascot } from "../mascot.js";
 import type { ShellContext } from "../shell-context.js";
 import type { LiveUsage } from "../local-runtime/live-usage.js";
 import { terminalWidth } from "../terminal-markdown.js";
@@ -290,8 +290,8 @@ describe("renderShellBanner", () => {
       version: "0.6.0",
     });
     const rows = banner.trimEnd().split("\n");
-    expect(rows[0]).toContain("┌──────┐");
     expect(rows[1]).toContain("tt");
+    expect(rows[3]).toContain("□ ■");
     expect(banner).toContain("v0.6.0");
     expect(banner).toContain("Tess");
     expect(banner).toContain("agent not configured");
@@ -951,21 +951,19 @@ describe("spec and machine views in the shell", () => {
   });
 });
 
-describe("Tess the tensor cube", () => {
-  it("draws a shaded 3D cube in color and an outline without color", () => {
+describe("Tess, the TT mark", () => {
+  it("draws the logo's tensor grid in color and in plain characters", () => {
     const level = chalk.level;
     try {
       chalk.level = 3;
-      const cube = renderMascot("happy");
-      expect(cube).toHaveLength(4);
-      expect(cube.join("")).toContain("\u001b[48;2;139;92;246m");
-      for (const row of cube) expect(terminalWidth(row)).toBeLessThanOrEqual(MASCOT_WIDTH);
-      expect(stripVTControlCharacters(cube[1]!)).toContain("◕ ◕");
+      const mark = renderMascot();
+      expect(mark).toHaveLength(4);
+      for (const row of mark) expect(terminalWidth(row)).toBe(MASCOT_WIDTH);
+      expect(mark.join("")).toContain("\u001b[38;2;124;58;237m");
+      expect(stripVTControlCharacters(mark.join(""))).not.toMatch(/[◕o]/);
       chalk.level = 0;
-      const outline = renderMascot("sleepy");
-      expect(outline).toHaveLength(4);
-      expect(outline[2]).toContain("-  -");
-      expect(mascotFace("happy")).toBe("[◕◕]");
+      expect(renderMascot().slice(1).map((row) => row.trimEnd())).toEqual([" ■ □", " □ ■ □", "   □ ■"]);
+      expect(mascotMark()).toBe("▚");
     } finally {
       chalk.level = level;
     }
