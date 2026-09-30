@@ -96,6 +96,10 @@ function canonicalLabel(labels: string[], output: string): string {
 async function readPredictions(path: string, ids: string[], labels: string[]): Promise<Prediction[]> {
   const rows = (await readFile(path, "utf8")).split("\n").filter((line) => line.trim())
     .map((line) => JSON.parse(line) as Prediction);
+  if (rows.length !== ids.length || new Set(rows.map((row) => row.id)).size !== rows.length) {
+    throw new Error(`Decision predictions must contain exactly one row per evaluation ID: ${path}`);
+  }
+  for (const row of rows) validatePrediction(row, labels);
   const byId = new Map(rows.map((row) => [row.id, row]));
   return ids.map((id) => {
     const row = byId.get(id);
@@ -103,6 +107,26 @@ async function readPredictions(path: string, ids: string[], labels: string[]): P
     if (!labels.includes(row.prediction)) throw new Error(`Decision prediction for ${id} is not a label: ${row.prediction}`);
     return row;
   });
+}
+
+/** Reject malformed distributions instead of turning them into plausible metrics. */
+function validatePrediction(row: Prediction, labels: string[]): void {
+  const values = row?.probabilities;
+  if (!values || Object.keys(values).length !== labels.length
+    || labels.some((label) => !Object.hasOwn(values, label)
+      || !Number.isFinite(values[label]) || values[label]! < 0 || values[label]! > 1)) {
+    throw new Error("Decision probabilities must contain a finite probability for every label.");
+  }
+  const sum = labels.reduce((total, label) => total + values[label]!, 0);
+  const maximum = Math.max(...labels.map((label) => values[label]!));
+  // Python rounds each probability to six decimal places (up to 32 labels).
+  const tolerance = 0.00002;
+  if (Math.abs(sum - 1) > tolerance || !labels.includes(row.prediction)
+    || Math.abs(values[row.prediction]! - maximum) > tolerance
+    || !Number.isFinite(row.confidence) || Math.abs(row.confidence - maximum) > tolerance
+    || !Number.isFinite(row.latency_ms) || row.latency_ms < 0) {
+    throw new Error("Decision prediction must have normalized probabilities, an argmax label, matching confidence and nonnegative latency.");
+  }
 }
 
 /** Join predictions to trusted references and score them in the shared report shape. */
@@ -115,6 +139,10 @@ export function scoreDecisionPredictions(args: {
   outputPath: string;
   sampleSeed: number;
 }): { report: EvalReport; metrics: DecisionMetrics } {
+  if (args.predictions.length !== args.examples.length) {
+    throw new Error("Decision prediction count must match the evaluation examples.");
+  }
+  for (const prediction of args.predictions) validatePrediction(prediction, args.labels);
   const perLabel: DecisionMetrics["per_label"] = Object.fromEntries(
     args.labels.map((label) => [label, { support: 0, correct: 0, recall: 0 }]),
   );

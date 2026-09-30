@@ -199,6 +199,43 @@ describe("decision pipeline runner", () => {
     })).rejects.toThrow(/already exists/);
   });
 
+  it.each<{ probabilities?: Record<string, number>; prediction?: string; confidence?: number; latency_ms?: number }>([
+    { probabilities: { no: -0.1, yes: 1.1 } },
+    { probabilities: { no: 0.2, yes: 0.2 } },
+    { probabilities: { yes: 1 } },
+    { probabilities: { no: Number.NaN, yes: 1 } },
+    { prediction: "no" },
+    { confidence: 0.1 },
+    { latency_ms: -1 },
+  ])("rejects malformed model output: %j", (override) => {
+    expect(() => scoreDecisionPredictions({
+      kind: "baseline", modelId: "m", labels: ["no", "yes"],
+      examples: [{ input: "a", output: "yes" }],
+      predictions: [{ id: "0", prediction: "yes", probabilities: { no: 0.2, yes: 0.8 },
+        confidence: 0.8, latency_ms: 1, ...override }],
+      outputPath: "/tmp/report.json", sampleSeed: 1,
+    })).toThrow(/Decision/);
+  });
+
+  it("rejects duplicate evaluation IDs even when every expected ID is present", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tt-decision-"));
+    dirs.push(dir);
+    const spec = decisionSpec();
+    const truth = new Map(spec.examples.map((example) => [example.input, example.output.toLowerCase()]));
+    const spawn = mockSpawn([], truth);
+    await expect(runDecisionPipeline({
+      spec, plan: createExecutionPlan(canonicalPipeline("local")), specPath: join(dir, "tunedtensor.json"),
+      spawnStep: async (args) => {
+        await spawn(args);
+        if (args.entrypoint === "evaluate.py") {
+          const config = JSON.parse(await readFile(args.configPath, "utf8"));
+          const output = await readFile(config.output_path, "utf8");
+          await writeFile(config.output_path, output + output.split("\n")[0] + "\n");
+        }
+      },
+    })).rejects.toThrow(/exactly one row per evaluation ID/);
+  });
+
   it("scores log-loss and Brier against the expected label", () => {
     const { report, metrics } = scoreDecisionPredictions({
       kind: "baseline",
