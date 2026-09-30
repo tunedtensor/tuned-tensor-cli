@@ -103,8 +103,8 @@ train/model/           the tuned checkpoint
 compare/comparison.json
 ```
 
-On a 4-core CPU a step of 8 examples takes about 10 seconds, so 120 examples
-for 3 epochs trains in under 10 minutes. The tuned checkpoint is about 1.7 GB
+On a 4-core CPU a step of 8 examples takes about 15 seconds, so 120 examples
+for 3 epochs trains in about 12 minutes. The tuned checkpoint is about 1.7 GB
 because weights are saved in float32; small fine-tuning updates would be lost
 in bfloat16.
 

@@ -76,6 +76,9 @@ def save_checkpoint(model, source: Path, output: Path, cfg: dict[str, Any], prov
     tuned["temperature"] = [1.0, 1.0, 1.0]
     tuned["tuned_tensor"] = provenance
     (output / "rl_agent_config.json").write_text(json.dumps(tuned, indent=2) + "\n", encoding="utf-8")
+    # Copied tokenizer/encoder files keep the cache's modes; keep the whole checkpoint owner-only.
+    for path in output.rglob("*"):
+        path.chmod(0o700 if path.is_dir() else 0o600)
 
 
 def main() -> None:

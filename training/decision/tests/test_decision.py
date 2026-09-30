@@ -122,6 +122,7 @@ class TrainEvaluateTests(unittest.TestCase):
             self.assertEqual(config["tuned_tensor"]["labels"], ["billing", "technical"])
             self.assertTrue((tuned / "tokenizer" / "tokenizer.json").is_file())
             self.assertTrue((tuned / "encoder" / "config.json").is_file())
+            self.assertEqual((tuned / "tokenizer" / "tokenizer.json").stat().st_mode & 0o077, 0)
 
             run("evaluate.py", {
                 "model": str(tuned), "question": QUESTION, "inputs_path": str(root / "inputs.jsonl"),
