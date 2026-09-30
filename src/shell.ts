@@ -2,6 +2,16 @@ import chalk from "chalk";
 import { sanitizeTerminalText, terminalWidth } from "./terminal-markdown.js";
 import { reviewSpec } from "./commands/spec.js";
 import { inspectLocalSpec } from "./spec-workspace.js";
+import {
+  SPEC_SECTIONS,
+  highlightSpecDiff,
+  renderSpecSource,
+  renderSpecView,
+  resolveSpecSection,
+} from "./spec-view.js";
+import { renderBanner, renderMachinePanel } from "./shell-view.js";
+import { mascotFarewell } from "./mascot.js";
+import { sampleLiveUsage, type LiveUsage } from "./local-runtime/live-usage.js";
 import type { AgentAction } from "./agent-client.js";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -249,6 +259,7 @@ export type SlashCommandName =
   | "help"
   | "status"
   | "context"
+  | "system"
   | "model"
   | "login"
   | "clear"
@@ -265,6 +276,7 @@ const SLASH_NAMES = new Set([
   "help",
   "status",
   "context",
+  "system",
   "model",
   "login",
   "clear",
@@ -375,6 +387,10 @@ export interface CreateShellSessionOptions {
   contextProvider?: ShellContextProvider;
   version?: string;
   agentModelRuntime?: () => Promise<AgentModelRuntime>;
+  /** Samples live GPU, CPU and memory use for the banner and /system. */
+  systemProbe?: () => Promise<LiveUsage>;
+  /** Current terminal width, for layouts that adapt to it. */
+  columns?: () => number | undefined;
 }
 
 export interface ShellSessionSnapshot {
@@ -383,6 +399,7 @@ export interface ShellSessionSnapshot {
   cwd: string;
   context: ShellContext;
   version?: string;
+  usage?: LiveUsage;
 }
 
 export type ShellLineAction = "continue" | "exit";
@@ -431,6 +448,8 @@ function inputColorCodes(): {
     text: "\u001b[38;2;245;243;255m",
   };
 }
+
+const SPEC_USAGE = `Usage: /spec [${SPEC_SECTIONS.join("|")}|show|diff|validate|history] [path/to/tunedtensor.json]`;
 
 /** Label width used by formatShellStatus/formatShellContext. */
 const DETAIL_LABEL_WIDTH = 15;
@@ -500,6 +519,11 @@ function helpText(mode: WorkflowMode, query?: string, palette = false): string {
       lines.push(`  ${accent(command.path.padEnd(22))} ${command.description}`);
     }
     lines.push(`  ${accent("?".padEnd(22))} Alias for /help.`);
+    lines.push("");
+    lines.push(chalk.bold("Behavior spec"));
+    lines.push(`  ${accent("/spec".padEnd(22))} Readable overview of tunedtensor.json.`);
+    lines.push(`  ${accent("/spec <section>".padEnd(22))} One section in full: ${SPEC_SECTIONS.join(", ")}.`);
+    lines.push(`  ${accent("/spec show".padEnd(22))} The raw JSON, highlighted.`);
     lines.push(chalk.dim(
       "\nKnown TT commands execute directly; other text goes to the agent. Prefix a command with : to make the intent explicit.",
     ));
@@ -511,33 +535,14 @@ function activeModelLabel(snapshot: ShellSessionSnapshot): string {
   return snapshot.context.local.activeModelId ?? "base";
 }
 
-function agentModelLabel(context: ShellContext): string {
-  const agent = context.agent;
-  if (!agent?.provider && !agent?.model) return "not configured";
-  return [agent.provider, agent.model].filter(Boolean).join("/") || "not configured";
-}
-
-export function renderShellBanner(snapshot: ShellSessionSnapshot): string {
-  const heading = snapshot.version
-    ? `${accent.bold("tt")} ${chalk.dim(`v${snapshot.version}`)}`
-    : accent.bold("tt");
-  const configured = Boolean(
-    snapshot.context.agent?.provider && snapshot.context.agent?.model,
-  );
-  const lines = [
-    heading,
-    chalk.dim(
-      `agent ${agentModelLabel(snapshot.context)} · workflow model ${activeModelLabel(snapshot)}`,
-    ),
-    chalk.dim("/spec review · ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete"),
-    "",
-    chalk.dim(
-      configured
-        ? "Ask TT anything. Known commands run directly."
-        : "Use /login tunedtensor for managed inference, or /model for your own provider. Workflow commands work now.",
-    ),
-  ];
-  return `${lines.join("\n")}\n\n`;
+export function renderShellBanner(snapshot: ShellSessionSnapshot, columns?: number): string {
+  return renderBanner({
+    version: snapshot.version,
+    context: snapshot.context,
+    activeModel: activeModelLabel(snapshot),
+    usage: snapshot.usage,
+    columns,
+  });
 }
 
 export function renderShellPrompt(): string {
@@ -588,6 +593,7 @@ export class TunedTensorShellSession {
   private readonly modeSource: TargetSource = "default-local";
   private cwd: string;
   private context: ShellContext;
+  private usage: LiveUsage | undefined;
 
   private constructor(
     private readonly runner: ShellCommandRunner,
@@ -597,6 +603,8 @@ export class TunedTensorShellSession {
     private readonly contextProvider: ShellContextProvider,
     private readonly version: string | undefined,
     private readonly agentModelRuntime: (() => Promise<AgentModelRuntime>) | undefined,
+    private readonly systemProbe: (() => Promise<LiveUsage>) | undefined,
+    private readonly columns: () => number | undefined,
     initialContext: ShellContext,
   ) {
     this.cwd = initialContext.cwd;
@@ -611,7 +619,7 @@ export class TunedTensorShellSession {
     const contextProvider = options.contextProvider
       ?? ((input) => discoverShellContext(input));
     const initialContext = await contextProvider({ cwd, env });
-    return new TunedTensorShellSession(
+    const session = new TunedTensorShellSession(
       options.runner,
       options.io,
       options.agent,
@@ -619,8 +627,23 @@ export class TunedTensorShellSession {
       contextProvider,
       options.version,
       options.agentModelRuntime,
+      options.systemProbe,
+      options.columns ?? (() => undefined),
       initialContext,
     );
+    await session.sampleSystem();
+    return session;
+  }
+
+  /** Refresh live machine usage; a failed probe only hides the panel. */
+  private async sampleSystem(): Promise<LiveUsage | undefined> {
+    if (!this.systemProbe) return undefined;
+    try {
+      this.usage = await this.systemProbe();
+    } catch {
+      this.usage = undefined;
+    }
+    return this.usage;
   }
 
   interruptAgent(): boolean {
@@ -634,6 +657,7 @@ export class TunedTensorShellSession {
       cwd: this.cwd,
       context: this.context,
       version: this.version,
+      usage: this.usage,
     };
   }
 
@@ -642,7 +666,18 @@ export class TunedTensorShellSession {
   }
 
   banner(): string {
-    return renderShellBanner(this.snapshot());
+    return renderShellBanner(this.snapshot(), this.columns());
+  }
+
+  private async inspectSpecForView(path: string) {
+    try {
+      return await inspectLocalSpec(this.cwd, path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new ShellParseError(`No ${path} in ${this.cwd}. Run init, or ask TT to draft a behavior spec.`);
+      }
+      throw error;
+    }
   }
 
   private async refreshContext(): Promise<void> {
@@ -763,8 +798,21 @@ export class TunedTensorShellSession {
   private async handleSlash(command: ParsedSlashCommand): Promise<ShellLineAction> {
     switch (command.name) {
       case "spec": {
-        if (command.args.length > 2) throw new ShellParseError("Usage: /spec [show|diff|validate|history] [path/to/tunedtensor.json]");
-        const [operation = "show", path = "tunedtensor.json"] = command.args;
+        if (command.args.length > 2) throw new ShellParseError(SPEC_USAGE);
+        let [operation = "view", path = "tunedtensor.json"] = command.args;
+        // `/spec feedback/tunedtensor.json` views a nested spec.
+        if (command.args.length === 1 && /(^|\/)tunedtensor\.json$/.test(operation)) {
+          [operation, path] = ["view", operation];
+        }
+        const section = resolveSpecSection(operation);
+        if (section || operation === "view" || operation === "show") {
+          const spec = await this.inspectSpecForView(path);
+          this.io.write(operation === "show"
+            ? renderSpecSource(spec)
+            : renderSpecView(spec, { section, columns: this.columns() }));
+          return "continue";
+        }
+        if (!["diff", "validate", "history"].includes(operation)) throw new ShellParseError(SPEC_USAGE);
         if (operation === "diff") {
           const current = await inspectLocalSpec(this.cwd, path);
           const pending = this.agent?.snapshot?.().pendingActions.filter(action => {
@@ -776,12 +824,21 @@ export class TunedTensorShellSession {
               const preview = action.preview as { diff?: string };
               const input = action.arguments as { expected_sha256?: string };
               const text = `Pending edit ${action.id.slice(0, 8)}${input.expected_sha256 !== current.sha256 ? " (stale; prepare again)" : ""}\n${preview.diff}\n`;
-              this.io.write(sanitizeTerminalText(text));
+              this.io.write(highlightSpecDiff(sanitizeTerminalText(text)));
             }
             return "continue";
           }
         }
-        this.io.write(`${sanitizeTerminalText((await reviewSpec(this.cwd, operation, path)).text)}\n`);
+        const text = sanitizeTerminalText((await reviewSpec(this.cwd, operation, path)).text);
+        this.io.write(`${operation === "diff" ? highlightSpecDiff(text) : text}\n`);
+        return "continue";
+      }
+      case "system": {
+        assertNoArgs("system", command.args);
+        const usage = await this.sampleSystem();
+        if (!usage) throw new ShellParseError("Live machine usage is unavailable in this session.");
+        await this.refreshContext();
+        this.writeLines(renderMachinePanel(usage, this.context, { columns: this.columns(), detailed: true }));
         return "continue";
       }
       case "palette":
@@ -987,6 +1044,7 @@ export interface InteractiveShellOptions {
   requireTTY?: boolean;
   version?: string;
   agentModelRuntime?: () => Promise<AgentModelRuntime>;
+  systemProbe?: () => Promise<LiveUsage>;
 }
 
 function streamIsTTY(stream: NodeJS.ReadableStream | NodeJS.WritableStream): boolean {
@@ -1127,6 +1185,8 @@ export async function startInteractiveShell(
     env: options.env,
     version: options.version,
     agentModelRuntime: options.agentModelRuntime,
+    systemProbe: options.systemProbe ?? (() => sampleLiveUsage({ env: { ...process.env, ...options.env } })),
+    columns: () => (output as NodeJS.WritableStream & { columns?: number }).columns,
   });
   const completer = createCommandCompleter(() => session.snapshot().mode);
   readline = createInterface({
@@ -1184,6 +1244,7 @@ export async function startInteractiveShell(
   } finally {
     output.write(resetShellPromptStyle());
     readline.close();
+    output.write(`\n${mascotFarewell()}\n`);
   }
 }
 
