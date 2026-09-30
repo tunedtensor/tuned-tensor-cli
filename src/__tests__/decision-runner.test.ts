@@ -236,6 +236,17 @@ describe("decision pipeline runner", () => {
     })).rejects.toThrow(/exactly one row per evaluation ID/);
   });
 
+  it("accepts the rounding error in Laya's four-decimal score probabilities", () => {
+    const result = scoreDecisionPredictions({
+      kind: "baseline", modelId: "m", labels: ["0", "1", "2"],
+      examples: [{ input: "a", output: "0" }],
+      predictions: [{ id: "0", prediction: "0", probabilities: { "0": 0.607, "1": 0.3548, "2": 0.0381 },
+        confidence: 0.607, latency_ms: 1 }],
+      outputPath: "/tmp/report.json", sampleSeed: 1,
+    });
+    expect(result.metrics.accuracy).toBe(1);
+  });
+
   it("scores log-loss and Brier against the expected label", () => {
     const { report, metrics } = scoreDecisionPredictions({
       kind: "baseline",

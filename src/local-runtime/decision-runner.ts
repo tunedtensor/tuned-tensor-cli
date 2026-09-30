@@ -119,9 +119,10 @@ function validatePrediction(row: Prediction, labels: string[]): void {
   }
   const sum = labels.reduce((total, label) => total + values[label]!, 0);
   const maximum = Math.max(...labels.map((label) => values[label]!));
-  // Python rounds each probability to six decimal places (up to 32 labels).
+  // Laya rounds each probability to four decimal places before Python receives it.
+  const sumTolerance = labels.length * 0.00005 + 1e-8;
   const tolerance = 0.00002;
-  if (Math.abs(sum - 1) > tolerance || !labels.includes(row.prediction)
+  if (Math.abs(sum - 1) > sumTolerance || !labels.includes(row.prediction)
     || Math.abs(values[row.prediction]! - maximum) > tolerance
     || !Number.isFinite(row.confidence) || Math.abs(row.confidence - maximum) > tolerance
     || !Number.isFinite(row.latency_ms) || row.latency_ms < 0) {
