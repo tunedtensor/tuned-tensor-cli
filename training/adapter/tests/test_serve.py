@@ -13,6 +13,23 @@ import serve
 
 class UpstreamLaunchTests(unittest.TestCase):
 
+    def test_wrapped_template_uses_original_content_format(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp)
+            native = "{% for message in messages %}{{ 'text:' + message.content }}{% endfor %}"
+            (source / "chat_template.jinja").write_text(native)
+            for content_format in ("string", "openai"):
+                detector = Mock(return_value=content_format)
+                with patch.dict(os.environ, {"TT_BASE_MODEL": "example/model", "TT_MODEL_NAME": "base", "TT_SYSTEM_PROMPT": "Owner instructions"}, clear=True):
+                    args = serve.build_vllm_args(str(source), None, source)
+                with patch.dict(sys.modules, {"vllm.renderers.hf": SimpleNamespace(_detect_content_format=detector)}):
+                    serve.pin_native_content_format(args, str(source))
+                detector.assert_called_once_with(native, default="string")
+                self.assertEqual(args[args.index("--chat-template-content-format") + 1], content_format)
+                self.assertEqual(args[args.index("--load-format") + 1], "safetensors")
+
     def test_auth_covers_upstream_admin_routes_not_only_v1(self):
         import asyncio
         calls = []

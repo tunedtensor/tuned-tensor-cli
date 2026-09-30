@@ -42,6 +42,27 @@ class BearerAuthMiddleware:
         await self.app(scope, receive, send)
 
 
+def native_chat_template(model_source: str) -> str:
+    source = Path(model_source)
+    template_file = source / "chat_template.jinja"
+    template = (template_file.read_text(encoding="utf-8") if template_file.is_file()
+                else json.loads((source / "tokenizer_config.json").read_text())["chat_template"])
+    if not isinstance(template, str):
+        raise ValueError("Serving requires an unambiguous string chat template.")
+    return template
+
+
+def pin_native_content_format(args: list[str], model_source: str) -> None:
+    if "--chat-template" not in args:
+        return
+    # The wrapper handles system content parts, which confuses upstream's AST
+    # detection for string-only native templates. Detect the ORIGINAL template
+    # using the detector from our pinned vLLM runtime, then pin that format.
+    from vllm.renderers.hf import _detect_content_format
+    content_format = _detect_content_format(native_chat_template(model_source), default="string")
+    args += ["--chat-template-content-format", content_format]
+
+
 def build_vllm_args(model_source: str, adapter_path: str | None, temp_dir: Path) -> list[str]:
     args = [
         "serve", model_source,
@@ -87,14 +108,7 @@ def build_vllm_args(model_source: str, adapter_path: str | None, temp_dir: Path)
                  "path": adapter_path, "base_model_name": base_name})]
     prompt = os.environ.get("TT_SYSTEM_PROMPT", "").strip()
     if prompt:
-        source = Path(model_source)
-        template_file = source / "chat_template.jinja"
-        if template_file.is_file():
-            template = template_file.read_text(encoding="utf-8")
-        else:
-            template = json.loads((source / "tokenizer_config.json").read_text())["chat_template"]
-        if not isinstance(template, str):
-            raise ValueError("Serving requires an unambiguous string chat template.")
+        template = native_chat_template(model_source)
         # Literal data, never prompt text interpolated as Jinja source. Preserve
         # tool calls/results verbatim while merging leading system context.
         prefix = "{%- set tt = namespace(system=" + json.dumps(prompt) + ", history=[]) -%}"
@@ -154,6 +168,7 @@ def run_server() -> None:
             model_source = prepare_model_source()
             adapter = resolve_adapter_path(os.environ.get("TT_MODEL_ARTIFACT"), Path(temp))
         args = build_vllm_args(model_source, adapter, Path(temp))
+        pin_native_content_format(args, model_source)
         from vllm.entrypoints.cli.main import main
         previous = sys.argv
         try:
