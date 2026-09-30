@@ -150,6 +150,7 @@ function renderInit(value: Record<string, unknown>): void {
     ["Path", text(value.path)],
     ["Name", text(value.name)],
     ["ID", text(value.id)],
+    ["Engine", text(value.engine)],
     ["Base model", text(value.base_model)],
     ["Config", text(value.config_path)],
   ]);
@@ -159,6 +160,7 @@ function renderValidate(value: Record<string, unknown>): void {
   printSuccess("Local behavior spec is valid");
   printDetail([
     ["Input", text(value.input_path)],
+    ["Engine", text(value.engine)],
     ["Config", text(value.config_path)],
     ["Spec", text(value.behavior_spec_id)],
     ["Base model", text(value.base_model)],

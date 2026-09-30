@@ -8,16 +8,22 @@ import {
   DEFAULT_PROJECT_STORE_ROOT,
 } from "../paths.js";
 import {
+  decisionLabels,
   fineTuneRunRequestSchema,
+  isDecisionSpecFile,
   isFoundationSpecFile,
   localAdapterSpecFileSchema,
   localBehaviorSpecFileSchema,
+  localDecisionSpecFileSchema,
   localFoundationSpecFileSchema,
   type FineTuneRunRequest,
   type LocalAdapterSpecFile,
   type LocalBehaviorSpecFile,
+  type LocalDecisionSpecFile,
   type LocalFoundationSpecFile,
 } from "./contracts.js";
+import { buildSystemMessage } from "./dataset.js";
+import { DEFAULT_DECISION_MODEL } from "./decision-models.js";
 import { checkConstraints } from "../eval/rules.js";
 
 export const DEFAULT_LOCAL_SPEC_PATH = "tunedtensor.json";
@@ -25,7 +31,7 @@ export const DEFAULT_LOCAL_SPEC_PATH = "tunedtensor.json";
 export interface CreateLocalSpecArgs {
   name: string;
   baseModel?: string;
-  engine?: "adapter" | "foundation";
+  engine?: "adapter" | "foundation" | "decision";
   outputPath: string;
   force?: boolean;
 }
@@ -45,7 +51,8 @@ export interface RunRequestFromSpecOptions {
 export type LocalRunInput =
   | { kind: "request"; path: string; request: FineTuneRunRequest }
   | { kind: "spec"; path: string; request: FineTuneRunRequest; spec: LocalAdapterSpecFile }
-  | { kind: "foundation-spec"; path: string; spec: LocalFoundationSpecFile };
+  | { kind: "foundation-spec"; path: string; spec: LocalFoundationSpecFile }
+  | { kind: "decision-spec"; path: string; spec: LocalDecisionSpecFile };
 
 function resolveLocalReference(value: unknown, baseDirectory: string): unknown {
   if (typeof value !== "string" || !value || isAbsolute(value) || /^[a-z][a-z0-9+.-]*:/i.test(value)) {
@@ -148,6 +155,34 @@ export async function initLocalSpecFile(args: CreateLocalSpecArgs): Promise<Loca
     return spec;
   }
 
+  if (args.engine === "decision") {
+    const spec = localDecisionSpecFileSchema.parse({
+      engine: "decision",
+      id: randomUUID(),
+      name: args.name,
+      description: "Typed decision model: one labelled answer per input.",
+      system_prompt: "Describe the decision this local model should make.",
+      guidelines: [],
+      constraints: [],
+      base_model: args.baseModel ?? DEFAULT_DECISION_MODEL,
+      decision: {
+        type: "choice",
+        criteria: {
+          first_label: "Replace this with what the first label means.",
+          second_label: "Replace this with what the second label means.",
+        },
+      },
+      examples: [
+        { input: "Replace this with a representative input.", output: "first_label" },
+        { input: "Replace this with a different input.", output: "second_label" },
+      ],
+      hyperparameters: { n_epochs: 3 },
+    });
+    await mkdir(dirname(args.outputPath), { recursive: true });
+    await writeFile(args.outputPath, `${JSON.stringify(spec, null, 2)}\n`, "utf8");
+    return spec;
+  }
+
   if (!args.baseModel) {
     throw new Error("Adapter specs require --model.");
   }
@@ -207,7 +242,7 @@ function placeholderIssues(
   examples: Array<{ input: string; output: string }>,
 ): string[] {
   const issues: string[] = [];
-  if (/describe the behavior this local model should learn/i.test(systemPrompt)) {
+  if (/describe the (behavior|decision) this local model should (learn|make)/i.test(systemPrompt)) {
     issues.push("system_prompt still contains the generated placeholder");
   }
   examples.forEach((example, index) => {
@@ -233,6 +268,17 @@ export function foundationPlaceholderIssues(spec: LocalFoundationSpecFile): stri
   return placeholderIssues(spec.system_prompt, spec.examples);
 }
 
+export function decisionPlaceholderIssues(spec: LocalDecisionSpecFile): string[] {
+  const issues = placeholderIssues(spec.system_prompt, spec.examples);
+  const descriptions = spec.decision.type === "noul"
+    ? Object.values(spec.decision.criteria ?? {})
+    : Object.values(spec.decision.criteria);
+  if (descriptions.some((value) => /replace this with/i.test(value ?? ""))) {
+    issues.push("decision.criteria still contains generated placeholder text");
+  }
+  return issues;
+}
+
 export function assertFoundationSpecReady(spec: LocalFoundationSpecFile): void {
   const issues = foundationPlaceholderIssues(spec);
   if (issues.length > 0) {
@@ -244,9 +290,9 @@ export function runRequestFromLocalSpec(
   spec: LocalBehaviorSpecFile,
   options: RunRequestFromSpecOptions = {},
 ): FineTuneRunRequest {
-  if (isFoundationSpecFile(spec)) {
+  if (isFoundationSpecFile(spec) || isDecisionSpecFile(spec)) {
     throw new Error(
-      "Foundation specs cannot be converted into a LoRA run request. Use `tt pipeline run --spec`.",
+      `${isFoundationSpecFile(spec) ? "Foundation" : "Decision"} specs cannot be converted into a LoRA run request. Use \`tt pipeline run --spec\`.`,
     );
   }
   const {
@@ -304,6 +350,9 @@ export function parseLocalRunInput(
   if (isFoundationSpecFile(spec)) {
     return { kind: "foundation-spec", path, spec };
   }
+  if (isDecisionSpecFile(spec)) {
+    return { kind: "decision-spec", path, spec };
+  }
   return {
     kind: "spec",
     path,
@@ -344,7 +393,9 @@ export function validateBehaviorSpec(input: LocalRunInput): SpecValidation {
   const { spec } = input;
   const placeholders = input.kind === "foundation-spec"
     ? foundationPlaceholderIssues(input.spec)
-    : generatedPlaceholderIssues(input.request);
+    : input.kind === "decision-spec"
+      ? decisionPlaceholderIssues(input.spec)
+      : generatedPlaceholderIssues(input.request);
   if (placeholders.length) {
     errors.push(`Edit the generated behavior spec before training: ${placeholders.join("; ")}.`);
   }
@@ -357,6 +408,29 @@ export function validateBehaviorSpec(input: LocalRunInput): SpecValidation {
     );
     if (input.spec.foundation.rl_steps > 0 && nonNumericOutput) {
       errors.push("Foundation RL requires numeric expected outputs in every example.");
+    }
+  }
+  if (input.kind === "decision-spec") {
+    const labels = decisionLabels(input.spec.decision);
+    const normalized = new Map(labels.map((label) => [label.trim().toLowerCase(), label]));
+    if (normalized.size !== labels.length) {
+      errors.push("decision labels must stay distinct ignoring case and surrounding spaces.");
+    }
+    const counts = new Map<string, number>();
+    for (const [index, example] of spec.examples.entries()) {
+      const label = normalized.get(example.output.trim().toLowerCase());
+      if (!label) {
+        errors.push(`examples[${index}].output must be one of the decision labels: ${labels.join(", ")}.`);
+      } else {
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+      }
+    }
+    const missing = labels.filter((label) => !counts.has(label));
+    if (missing.length && spec.examples.length) {
+      warnings.push(`No examples use decision label(s) ${missing.join(", ")}; the tuned model learns those only from their descriptions.`);
+    }
+    if (buildSystemMessage(spec).length > 600) {
+      warnings.push("The compiled decision instruction exceeds 600 characters; the decision model reads about 190 tokens of instruction and options, so later text may be truncated.");
     }
   }
   for (const key of ["name", "system_prompt"] as const) {

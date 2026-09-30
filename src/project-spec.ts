@@ -20,6 +20,7 @@ export const LOCAL_ONLY_SPEC_KEYS = [
   "dataset_prebuilt",
   "engine",
   "foundation",
+  "decision",
   "evaluation",
   "runtime",
   "pipeline",
@@ -100,7 +101,8 @@ export function projectCloudSpec(
 export function projectLocalSpec(
   raw: Record<string, unknown>,
 ): ProjectSpecProjection {
-  return projectSpec(raw, LOCAL_SPEC_KEY_SET, canonicalizeSpecBaseModel);
+  // Decision checkpoints are validated by the decision-model registry, not the LLM list.
+  return projectSpec(raw, LOCAL_SPEC_KEY_SET, raw.engine === "decision" ? (body) => body : canonicalizeSpecBaseModel);
 }
 
 export function hasLocalOnlySpecFields(

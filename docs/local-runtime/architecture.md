@@ -44,7 +44,7 @@ The local adapter runtime excludes:
 The next model or method should arrive with its own locked dependencies,
 resource defaults, data contract, and real CUDA acceptance test.
 
-TT bundles two local training methods:
+TT bundles three local training methods:
 
 - **Adapter** (`training/adapter`): certified Transformers checkpoints and
   PEFT LoRA SFT. Driven by `tt pipeline run`.
@@ -54,6 +54,11 @@ TT bundles two local training methods:
   and the CPU unit tests do not. The current runtime is single-process and
   rejects `nproc_per_node` values above 1 and unsupported steps such as
   `compare` before creating run artifacts.
+
+- **Decision** (`training/decision`): fine-tunes a pinned typed decision
+  model (`convaiinnovations/laya`) on labelled examples. Driven by
+  `tt pipeline run` from a decision `tunedtensor.json`. Runs on CPU, Apple MPS
+  or CUDA; see [decision.md](decision.md).
 
 The foundation engine is a readable single-GPU trainer inspired by nanochat,
 not a port of nanochat's distributed or compute-optimal training stack. It can

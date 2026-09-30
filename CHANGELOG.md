@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- Decision engine: fine-tune a typed decision model (`convaiinnovations/laya`,
+  pinned revision) as a local classifier, router or yes/no gate. A spec with
+  `engine: "decision"` defines one `choice`, `noul` or `score` question and
+  labelled examples. `tt pipeline run` evaluates the base model, fine-tunes it,
+  evaluates the tuned model on the same held-out examples and compares them,
+  reporting accuracy, log-loss, Brier score and per-label recall. It runs on
+  CPU, Apple MPS or CUDA; the tuned directory loads with `laya.load()`.
+  `tt init --engine decision` creates a starter spec.
+
 ## [0.20.0] - 2026-09-27
 
 ### Added

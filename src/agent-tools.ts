@@ -19,6 +19,7 @@ import {
 import { assessHardware } from "./local-runtime/hardware.js";
 import { readHardwareSnapshot } from "./local-runtime/hardware-snapshot.js";
 import { warningsFromSnapshot } from "./local-runtime/capability.js";
+import { DECISION_MODELS } from "./local-runtime/decision-models.js";
 import { inspectLocalSpec, prepareSpecUpdate } from "./spec-workspace.js";
 import { prepareLocalPipelineAction } from "./local-pipeline-action.js";
 
@@ -430,8 +431,8 @@ export function createTunedTensorTools(
         });
       },
     ),
-    define("describe_pipeline", "Describe pipeline", "Describe the built-in adapter or foundation workflow and exact TT commands. This never executes anything.", Type.Object({
-      engine: Type.Optional(Type.Union([Type.Literal("adapter"), Type.Literal("foundation")])),
+    define("describe_pipeline", "Describe pipeline", "Describe the built-in adapter, foundation or decision workflow and exact TT commands. A decision spec fine-tunes a small typed decision model (e.g. convaiinnovations/laya) that returns a calibrated probability per label instead of generated text; use it for classification, routing, triage and yes/no or score gates. This never executes anything.", Type.Object({
+      engine: Type.Optional(Type.Union([Type.Literal("adapter"), Type.Literal("foundation"), Type.Literal("decision")])),
       target: Type.Optional(Type.Union([Type.Literal("local"), Type.Literal("cloud")])),
     }, { additionalProperties: false }), async (p) => {
       const engine = p.engine ?? "adapter";
@@ -454,6 +455,24 @@ export function createTunedTensorTools(
         },
         note: "Configure runtime.gpu in tunedtensor.json with provider aws, instanceId, SSH user and optional AWS profile/region/identityFile. The instance must already be running and reachable with a verified SSH host key. AWS profile lookup and SSH access are separate; no TT token is required. GPU processes use it automatically; orchestration, scoring and artifacts stay local. Hardware tools inspect only the laptop; doctor checks the configured instance. The user manages AWS quota, costs and shutdown. Keep the laptop running until outputs return. Hosted training is retired.",
       } : undefined;
+      if (engine === "decision") {
+        return {
+          version: 1,
+          engine,
+          scope: { execution: "local", devices: ["cpu", "mps", "cuda"] },
+          canonical: canonicalPipeline("local"),
+          models: DECISION_MODELS.map((model) => ({ id: model.id, revision: model.revision, parameters: model.parameters, license: model.license })),
+          spec: "engine \"decision\", base_model, decision {type: choice|noul|score, criteria}; example outputs are labels (choice keys, true/false, or score level indices). system_prompt, guidelines and constraints become the question instructions.",
+          commands: {
+            init: "tt init --engine decision",
+            validate: "tt validate",
+            dry_run: "tt pipeline run --dry-run --spec tunedtensor.json",
+            run: "tt pipeline run --spec tunedtensor.json",
+          },
+          note: "Runs locally on CPU, Apple MPS or CUDA; runtime.gpu (AWS) is not used. The tuned model directory loads in Python with laya.load(<model_dir>).",
+          ...(host ? { host } : {}),
+        };
+      }
       if (engine === "foundation") {
         const foundation = {
           version: 1,
@@ -564,7 +583,7 @@ export function createTunedTensorTools(
     define(
       "prepare_update_local_spec",
       "Prepare behavior spec edit",
-      "Prepare a reviewed edit of the existing local spec using the SHA-256 from get_local_spec. Use add_examples to append examples without resending existing ones. Other arrays and pipeline replace whole fields; hyperparameters and foundation settings merge by key. Runtime and evaluation objects merge recursively; null removes optional settings. Preserve unrelated fields. No write until /approve.",
+      "Prepare a reviewed edit of the existing local spec using the SHA-256 from get_local_spec. Use add_examples to append examples without resending existing ones. Other arrays, the decision question and pipeline replace whole fields; hyperparameters and foundation settings merge by key. Runtime and evaluation objects merge recursively; null removes optional settings. Preserve unrelated fields. No write until /approve.",
       Type.Object({
         spec_path: Type.Optional(Type.String({ maxLength: 1000 })),
         expected_sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
@@ -585,6 +604,7 @@ export function createTunedTensorTools(
           }, { additionalProperties: false }), { minItems: 1 })),
           hyperparameters: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
           foundation: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+          decision: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
           runtime: Type.Optional(Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Null()])),
           evaluation: Type.Optional(Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Null()])),
           pipeline: Type.Optional(Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Null()])),

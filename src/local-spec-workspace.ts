@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { TRAINING_MODELS } from "./local-runtime/model-registry.js";
+import { DECISION_MODELS } from "./local-runtime/decision-models.js";
 
 import { parseLocalRunInput } from "./local-runtime/local-project.js";
 import { pipelineForRunInput } from "./pipeline.js";
@@ -17,7 +18,7 @@ const FolderName = Type.String({
 });
 const LocalBaseModel = Type.String({
   type: "string",
-  enum: TRAINING_MODELS.map((model) => model.id),
+  enum: [...TRAINING_MODELS.map((model) => model.id), ...DECISION_MODELS.map((model) => model.id)],
 });
 const NonEmptyText = Type.String({ minLength: 1, maxLength: 1_000 });
 
@@ -25,7 +26,8 @@ export const LocalProjectSpecSchema = Type.Object({
   name: Type.String({ minLength: 1, maxLength: 255 }),
   description: Type.Optional(Type.String({ maxLength: 5_000 })),
   base_model: Type.Optional(LocalBaseModel),
-  engine: Type.Optional(Type.Union([Type.Literal("adapter"), Type.Literal("foundation")])),
+  engine: Type.Optional(Type.Union([Type.Literal("adapter"), Type.Literal("foundation"), Type.Literal("decision")])),
+  decision: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   hyperparameters: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   foundation: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   dataset_prebuilt: Type.Optional(Type.Record(Type.String(), Type.Unknown())),

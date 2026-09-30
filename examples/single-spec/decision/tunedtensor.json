@@ -1,0 +1,630 @@
+{
+  "engine": "decision",
+  "id": "3c9b2f1e-5a7d-4e8b-9c1f-2d6a8e4b7f30",
+  "name": "Card support triage",
+  "description": "Route card-support messages to one queue. Examples are a subset of PolyAI BANKING77 (CC BY 4.0, https://github.com/PolyAI-LDN/task-specific-datasets).",
+  "system_prompt": "Which card-support queue should handle this customer message?",
+  "guidelines": [
+    "Choose the queue for the customer's main problem."
+  ],
+  "constraints": [],
+  "base_model": "convaiinnovations/laya",
+  "decision": {
+    "type": "choice",
+    "criteria": {
+      "card_arrival": "new card has not arrived or asking about delivery status",
+      "card_not_working": "card is physically broken or does not work at all",
+      "lost_or_stolen": "customer lost their card or it was stolen",
+      "payment_declined": "a card payment was declined or rejected",
+      "unrecognised_payment": "customer does not recognise a card payment on their statement",
+      "compromised_card": "card details may have been exposed, hacked or used fraudulently"
+    }
+  },
+  "examples": [
+    {
+      "input": "My card was lost on vacation, I don't know where it is. Can you help me take care of this immediately?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "Am I able to track a card that has already been sent?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "There is a card payment I'm not familiar with.",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "I believe that my card has been stolen!",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "Why can't I use my card?",
+      "output": "card_not_working"
+    },
+    {
+      "input": "I know there's money in my account, why did my account decline me?",
+      "output": "payment_declined"
+    },
+    {
+      "input": "I see a strange payment in my account.",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "I just got an email in confirming my purchase with my card. I login to the mobile app on the card and found out there are several purchase were made without me aware of it. Evidently someone had stole my card information and made these fraudulent purchase. I need the transaction to be reverse and have my card suspended.",
+      "output": "compromised_card"
+    },
+    {
+      "input": "Someone might have had access to my card.",
+      "output": "compromised_card"
+    },
+    {
+      "input": "Today I used my card at a restaurant and it was declined. Why?",
+      "output": "card_not_working"
+    },
+    {
+      "input": "I think that the card is stolen.  What are my next steps?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "My card was working but now it doesn't.",
+      "output": "card_not_working"
+    },
+    {
+      "input": "My payment was declined",
+      "output": "payment_declined"
+    },
+    {
+      "input": "My card is missing.  Please help.",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "How do I check security settings on my card?",
+      "output": "card_not_working"
+    },
+    {
+      "input": "How do I track the card you sent me?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "My card has been stolen. I reported it with the police, but I need to report it with you as well.",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "I still haven't received my card after two weeks, is it lost?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "My card payment is being declined and I've tried several times.",
+      "output": "payment_declined"
+    },
+    {
+      "input": "I need clarity on why my card is not working.",
+      "output": "card_not_working"
+    },
+    {
+      "input": "How do I replace a stolen card?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "Do you have info about the card on delivery?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "I can't get the card itself to work.",
+      "output": "card_not_working"
+    },
+    {
+      "input": "My card appears to have never arrived?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "Why won't my card accept any transactions?",
+      "output": "card_not_working"
+    },
+    {
+      "input": "i didnt do this charge",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "My card payment doesn't work.",
+      "output": "payment_declined"
+    },
+    {
+      "input": "I have lost my card! What is my next step?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "I was out today looking forward to paying with my new card, but the payment just kept getting declined. This is really sad, what's going on?",
+      "output": "payment_declined"
+    },
+    {
+      "input": "What do I do if my card is stolen?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "I can't use my card because it is not working.",
+      "output": "card_not_working"
+    },
+    {
+      "input": "I didn't make these transactions. Is someone else using my card?",
+      "output": "compromised_card"
+    },
+    {
+      "input": "How do I find out how or where this transaction on my account came from?",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "i dont recognise some of these transactions, i think someone has my card details",
+      "output": "compromised_card"
+    },
+    {
+      "input": "My card was refused",
+      "output": "payment_declined"
+    },
+    {
+      "input": "My card was supposed to arrive, but hasn't?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "What to do if my card has been used without my permission?",
+      "output": "compromised_card"
+    },
+    {
+      "input": "I did not make this payment that I see in the App.",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "I'm noticing a payment/purchase at a company that I don't recognise.",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "If I ordered my new card last week, how much longer should I wait to receive it?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "I tried to pay with my card and it didn't work",
+      "output": "payment_declined"
+    },
+    {
+      "input": "My card info was stolen, what do I do?",
+      "output": "compromised_card"
+    },
+    {
+      "input": "I'm checking the app and I see a payment that's not mine.",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "Someone might be using my card.  What should I do?",
+      "output": "compromised_card"
+    },
+    {
+      "input": "I didn't do a payment and I have it now.",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "Can you help me track my card?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "2 weeks ago I ordered my new card.  It isn't here.  What should I do?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "Could you assist me in finding my lost card?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "Can you track my card for me?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "Why has my card been declined?",
+      "output": "payment_declined"
+    },
+    {
+      "input": "How long does it take for me to get my new card?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "I tried to use my card today in the restaurant but it didn't work and just got declined. What's wrong?",
+      "output": "card_not_working"
+    },
+    {
+      "input": "Why is there a payment I didn't do?",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "My card doesn't seem to work anymore",
+      "output": "card_not_working"
+    },
+    {
+      "input": "Somebody used my card without my knowledge!",
+      "output": "compromised_card"
+    },
+    {
+      "input": "What's wrong with my card? The clerk at the grocery store said it was declined.",
+      "output": "card_not_working"
+    },
+    {
+      "input": "How can I periodically check the delivery of the card you sent?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "my statement contains an unknown payment",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "Why is there a random payment in my statement?",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "I can't find my card! Can you help?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "My statement shows charges for things I never purchased. Were my account details stolen?",
+      "output": "compromised_card"
+    },
+    {
+      "input": "Someone stole my card!",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "I'm not recognizing the card payment.",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "I didn't make this payment!",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "Will I have to wait much longer for my new card to arrive?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "I just got my new card and tried using it and it was declined?",
+      "output": "payment_declined"
+    },
+    {
+      "input": "How do I track the card you sent to me?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "Someone besides me might be using my card.",
+      "output": "compromised_card"
+    },
+    {
+      "input": "My card was stolen. What do I need to do?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "Someone has been using my card. There are unfamiliar transactions on there. Can you freeze the card to keep this from happening?",
+      "output": "compromised_card"
+    },
+    {
+      "input": "How can I tell if someone else is using my card?",
+      "output": "compromised_card"
+    },
+    {
+      "input": "I think my card has been compromised in some way.",
+      "output": "compromised_card"
+    },
+    {
+      "input": "What to do if my physical card is not working?",
+      "output": "card_not_working"
+    },
+    {
+      "input": "My card no longer works.",
+      "output": "card_not_working"
+    },
+    {
+      "input": "My card was declined at a restaurant today and I am not sure why.",
+      "output": "card_not_working"
+    },
+    {
+      "input": "There's a payment that isn't mine on my app",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "How do I fix a broken card?",
+      "output": "card_not_working"
+    },
+    {
+      "input": "How can I report that my card was stolen? I made a police report first.",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "I think my wallet fell out on the Tube today! I realized as soon as I got to my desk. How do I cut off the card?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "I need to track the card sent to me.",
+      "output": "card_arrival"
+    },
+    {
+      "input": "Please tell me how you can stop unauthorized payments from being made on my card since on this bill I see that this has happened. There are transactions that I never made from a place I've never been to.",
+      "output": "compromised_card"
+    },
+    {
+      "input": "My payment card was declined - could you tell me why?",
+      "output": "payment_declined"
+    },
+    {
+      "input": "My card payment wasn't accepted.",
+      "output": "payment_declined"
+    },
+    {
+      "input": "I need to order a new card as my other one was stolen.",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "I have an unusual payment in my statement",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "my payment was rejected",
+      "output": "payment_declined"
+    },
+    {
+      "input": "My card isn't here yet.",
+      "output": "card_arrival"
+    },
+    {
+      "input": "Tell me why my card payment has been declined.",
+      "output": "payment_declined"
+    },
+    {
+      "input": "What do I do if my card was stolen.",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "Can you help me retrieve my card?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "There is a payment made with my card that I don't recognize at all.",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "Can I track the card that was just sent to me?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "My card doesn't seem to work.",
+      "output": "card_not_working"
+    },
+    {
+      "input": "Do you know the reason why my card payment was declined?",
+      "output": "payment_declined"
+    },
+    {
+      "input": "Can you provide information for freezing my card immediately?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "How do I deactivate a stolen card?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "I think my card has been used by somebody else since I was never in the little town where some transactions on this bill have come from. Please stop this right away.",
+      "output": "compromised_card"
+    },
+    {
+      "input": "card is being used by someone else",
+      "output": "compromised_card"
+    },
+    {
+      "input": "There is a strange card payment I don't recognise.",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "Help.  My card is broken.",
+      "output": "card_not_working"
+    },
+    {
+      "input": "My payment has been declined several times.  Can you help me?",
+      "output": "payment_declined"
+    },
+    {
+      "input": "How can I check on the delivery status of my card?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "My card hasn't been working when I try to use it.",
+      "output": "card_not_working"
+    },
+    {
+      "input": "I can't find my card!  What should I do?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "I need to report a stolen card",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "I tried using my card at multiple vendors and now it's not working.",
+      "output": "card_not_working"
+    },
+    {
+      "input": "Can you tell me why I can't make any transactions?",
+      "output": "card_not_working"
+    },
+    {
+      "input": "What's the tracking on the card you sent?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "Please help to explain to me why my new card was declined when I tried to use it at my grocery store this morning to pay for the items I needed.  I tried three times to use it and it kept being declined.  I was very embarrassed standing there trying to buy my groceries.",
+      "output": "payment_declined"
+    },
+    {
+      "input": "I think someone may be using my card.",
+      "output": "compromised_card"
+    },
+    {
+      "input": "There are a few transaction that I don't recognize, I think someone managed to get my card details and use it.",
+      "output": "compromised_card"
+    },
+    {
+      "input": "Someone must have found my card details as I don't recognize these transactions.",
+      "output": "compromised_card"
+    },
+    {
+      "input": "My card has been compromised. I see a bunch of online shopping charges that I didn't make. I need to freeze it immediately.",
+      "output": "compromised_card"
+    },
+    {
+      "input": "I don't have my card after 1 week. What are my next steps?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "Why is there an unknown card payment?",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "What do I need to do to get my new card which I have requested 2 weeks ago?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "What is this card payment, I do not recognize it.",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "I can't seem to use my card. Can you help?",
+      "output": "card_not_working"
+    },
+    {
+      "input": "How do I report possible fraudulent activity on my account?",
+      "output": "compromised_card"
+    },
+    {
+      "input": "I think my card is stolen!",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "Someone might have access to my card!  There are some strange payments showing up on my account.  What do I do?",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "I wasn't able to use my card today when I went out for lunch. Wondering why that is?",
+      "output": "card_not_working"
+    },
+    {
+      "input": "Will I be able to track the card that was sent to me?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "Why did my card payment not work?",
+      "output": "payment_declined"
+    },
+    {
+      "input": "There was a purchase on my card recently to a name that I don't recognize at all. What can be done about this? I need my money back.",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "Please help.  The card won't work.",
+      "output": "card_not_working"
+    },
+    {
+      "input": "I think someone else is using my card.",
+      "output": "compromised_card"
+    },
+    {
+      "input": "It's been a week since you sent my card and I still don't have it.",
+      "output": "card_arrival"
+    },
+    {
+      "input": "My card payment was not successful.",
+      "output": "payment_declined"
+    },
+    {
+      "input": "What can I do if I lost my card?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "What should I do if I think my card was stolen?",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "I have not received my card and it's been a week, what do I do?",
+      "output": "card_arrival"
+    },
+    {
+      "input": "I think someone stole my card because I can't find it.",
+      "output": "lost_or_stolen"
+    },
+    {
+      "input": "What steps can I take if someone else is using my card?",
+      "output": "compromised_card"
+    },
+    {
+      "input": "i dont recognize a charge on my card",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "A shop I go to didn't let me pay.",
+      "output": "payment_declined"
+    },
+    {
+      "input": "My payment has been declined!! What's going on, I thought everything was alright and working well?",
+      "output": "payment_declined"
+    },
+    {
+      "input": "I think someone stole my card number and brought stuff in different places that I have never been to. I need to suspend any further purchase on my credit card.",
+      "output": "compromised_card"
+    },
+    {
+      "input": "Explain the payment that was declined!",
+      "output": "payment_declined"
+    },
+    {
+      "input": "Is my card frozen?",
+      "output": "card_not_working"
+    },
+    {
+      "input": "When I tried to pay in a store my card din't work",
+      "output": "payment_declined"
+    },
+    {
+      "input": "Why was my new card declined?",
+      "output": "payment_declined"
+    },
+    {
+      "input": "I've tried using my card multiple times and it keeps getting declined.",
+      "output": "payment_declined"
+    },
+    {
+      "input": "Hi something is going on with the app.  I see some payments I didn't make?",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "I need help with understanding why my card is not working.",
+      "output": "card_not_working"
+    },
+    {
+      "input": "my payment was rejected, do you know why?",
+      "output": "payment_declined"
+    },
+    {
+      "input": "There's a card payment I didn't make",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "There is a fraudulent payment!",
+      "output": "unrecognised_payment"
+    },
+    {
+      "input": "I suspect someone used my card.",
+      "output": "compromised_card"
+    },
+    {
+      "input": "My card hasn't arrived yet. What do I do?",
+      "output": "card_arrival"
+    }
+  ],
+  "hyperparameters": {
+    "n_epochs": 3,
+    "batch_size": 8,
+    "device": "auto"
+  }
+}

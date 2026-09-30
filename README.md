@@ -260,7 +260,7 @@ optional `gpu` configuration moves its GPU processes to your AWS instance.
 The portable document contract lives in `@tuned-tensor/pipeline-contract`. The
 CLI adds execution planning (step selection) on top of it.
 
-Two local engines share that document version:
+Three local engines share that document version:
 
 - **Adapter** (default): LoRA SFT on a certified Hugging Face checkpoint.
   Runs through `tt pipeline run`. Uses `train` / `evaluate` / `compare` with
@@ -270,8 +270,15 @@ Two local engines share that document version:
   `tokenize` / `pretrain` / `finetune` / optional `rl` plus `bpb`, `chat`, and
   `inference` evaluators. Requires a foundation `tunedtensor.json`
   (`engine: "foundation"`, at least two examples, no `base_model`).
+- **Decision**: fine-tunes a small typed decision model
+  (`convaiinnovations/laya`, 421M) that answers one choice, yes/no or score
+  question per input with a probability per label, instead of generating text.
+  Uses the adapter vocabulary (`train` / `evaluate` / `compare`) and runs on
+  CPU, Apple MPS or CUDA. Requires `engine: "decision"` and a `decision`
+  question; example outputs are labels. See
+  [Decision models](docs/local-runtime/decision.md).
 
-Both engines are spec-driven. `system_prompt`, `guidelines`, and `constraints`
+All engines are spec-driven. `system_prompt`, `guidelines`, and `constraints`
 are compiled into one canonical system instruction, and `examples` supply the
 demonstrated behavior. Adapter training, foundation tokenizer/pretraining,
 chat SFT, optional RL, and evaluation all receive that same compiled

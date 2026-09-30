@@ -10,7 +10,7 @@ import { pipelineForRunInput } from "./pipeline.js";
 const MAX_BYTES = 200_000;
 const EDIT_KEYS = new Set([
   "name", "description", "system_prompt", "guidelines", "constraints", "examples",
-  "base_model", "hyperparameters", "foundation", "dataset_prebuilt", "runtime", "evaluation", "pipeline", "add_examples",
+  "base_model", "hyperparameters", "foundation", "decision", "dataset_prebuilt", "runtime", "evaluation", "pipeline", "add_examples",
 ]);
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

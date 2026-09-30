@@ -22,6 +22,7 @@ import { runLocalPipeline, type LocalPipeline } from "../local-runtime/orchestra
 import { resolveProjectConfig } from "../local-runtime/project-workflow.js";
 import { migrateProjectWorkflow } from "../local-runtime/project-migration.js";
 import { runFoundationPipeline } from "../local-runtime/foundation-runner.js";
+import { runDecisionPipeline } from "../local-runtime/decision-runner.js";
 import { warningsFromSnapshot } from "../local-runtime/capability.js";
 import { readHardwareSnapshot } from "../local-runtime/hardware-snapshot.js";
 
@@ -72,9 +73,14 @@ function resolvePipelineDocument(options: { file?: string; spec: string }, specR
   const spec = {
     path: specPath,
     sha256: specHash(source),
-    engine: input.kind === "foundation-spec" ? "foundation" : "adapter",
+    engine: specEngine(input),
   };
   return { document, input, spec };
+}
+
+function specEngine(input: LocalRunInput): "adapter" | "foundation" | "decision" {
+  if (input.kind === "foundation-spec") return "foundation";
+  return input.kind === "decision-spec" ? "decision" : "adapter";
 }
 
 function outputPlan(plan: unknown, hostWarnings: string[] = []): void {
@@ -94,11 +100,32 @@ function outputPlan(plan: unknown, hostWarnings: string[] = []): void {
 async function hostWarningsForPipeline(document: Pipeline, input?: LocalRunInput): Promise<string[]> {
   const snapshot = await readHardwareSnapshot();
   if (!snapshot) return [];
+  if (input?.kind === "decision-spec") return warningsFromSnapshot(snapshot.capabilities, { engine: "decision" });
   const engine = isFoundationPipeline(parsePipeline(document)) ? "foundation" : "adapter";
   const baseModel = input && input.kind !== "foundation-spec"
     ? input.request.spec_snapshot.base_model
     : undefined;
   return warningsFromSnapshot(snapshot.capabilities, { engine, baseModel });
+}
+
+function percent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function printDecisionSummary(result: Awaited<ReturnType<typeof runDecisionPipeline>>): void {
+  for (const step of result.steps) {
+    if (step.decision_metrics) {
+      const metrics = step.decision_metrics;
+      console.log(`${step.id.padEnd(12)} accuracy ${percent(metrics.accuracy)}  log-loss ${metrics.log_loss.toFixed(3)}  brier ${metrics.brier.toFixed(3)}  (${step.report?.total ?? 0} held-out)`);
+    }
+    if (step.comparison) {
+      const comparison = step.comparison;
+      const sign = (value: number) => (value >= 0 ? "+" : "");
+      console.log(`${step.id.padEnd(12)} accuracy ${sign(comparison.pass_rate_delta)}${percent(comparison.pass_rate_delta)}  log-loss ${sign(comparison.log_loss_delta)}${comparison.log_loss_delta.toFixed(3)}  improved ${comparison.improvements}, regressed ${comparison.regressions}`);
+    }
+  }
+  if (result.model_dir) console.log(`Tuned decision model: ${result.model_dir}`);
+  printSuccess(`Decision pipeline completed. Report: ${result.report_path}`);
 }
 
 export function registerPipelineCommands(parent: Command): void {
@@ -197,7 +224,7 @@ export function registerPipelineCommands(parent: Command): void {
     .option("-f, --file <path>", "Explicit pipeline recipe (default: derive from behavior spec)")
     .option("--spec <path>", "Local behavior spec", DEFAULT_SPEC_FILE)
     .option("--config <path>", "Local runtime config")
-    .option("--output <path>", "Foundation run directory (must not already exist)")
+    .option("--output <path>", "Foundation or decision run directory (must not already exist)")
     .option("--resume <path>", "Resume a foundation run directory")
     .option("--only <ids>", "Comma-separated step IDs to include")
     .option("--skip <ids>", "Comma-separated step IDs to omit")
@@ -243,8 +270,21 @@ export function registerPipelineCommands(parent: Command): void {
         printSuccess(`Foundation pipeline completed. Report: ${result.report_path}`);
         return;
       }
+      if (input.kind === "decision-spec") {
+        if (options.resume) throw new Error("--resume is only valid for foundation pipelines.");
+        const result = await runDecisionPipeline({
+          spec: input.spec,
+          plan,
+          specPath: resolve(options.spec),
+          ...(options.output ? { outputDir: resolve(options.output) } : {}),
+          onProgress: isJsonMode() ? undefined : (message) => console.error(message),
+        });
+        if (isJsonMode()) return printJson({ ...result, spec });
+        printDecisionSummary(result);
+        return;
+      }
       if (options.output || options.resume) {
-        throw new Error("--output and --resume are only valid for foundation pipelines.");
+        throw new Error("--output is only valid for foundation and decision pipelines; --resume only for foundation.");
       }
       const localPipeline: LocalPipeline = {
         version: 1,
