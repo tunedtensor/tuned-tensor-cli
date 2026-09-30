@@ -1,12 +1,12 @@
 import chalk from "chalk";
 
 /**
- * Tess, the TT mark: the Tuned Tensor logo's 3×3 tensor grid, with a purple
+ * The TT mark: the Tuned Tensor logo's 3×3 tensor grid, with a purple
  * diagonal (light to dark) flanked by slate tiles. Each tile is 2×2
  * half-block pixels with a one-pixel gap, so the mark stays square in a
  * terminal. Terminals without color get a plain-character version.
  */
-export const MASCOT_NAME = "Tess";
+export const MASCOT_NAME = "tt";
 export const MASCOT_WIDTH = 11;
 
 const PALETTE: Record<string, string> = {
@@ -60,7 +60,7 @@ export function mascotMark(): string {
   return `${chalk.hex(PALETTE.a!)("▀")}${chalk.hex(PALETTE.c!)("▄")}`;
 }
 
-/** Tess saying something, prefixed with the mark and name. */
+/** tt saying something, prefixed with the mark and name. */
 export function mascotSays(message: string): string {
   return `${mascotMark()} ${chalk.hex(PALETTE.b!).bold(MASCOT_NAME)} ${chalk.dim("›")} ${message}`;
 }
@@ -68,7 +68,7 @@ export function mascotSays(message: string): string {
 const FAREWELLS = [
   "See you next epoch.",
   "Bye! Your checkpoints are safe with me.",
-  "Going dormant. Wake me with tt.",
+  "Run tt to pick up where you left off.",
 ];
 
 export function mascotFarewell(seed = Date.now()): string {

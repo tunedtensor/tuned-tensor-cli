@@ -305,7 +305,7 @@ function agentLabel(context: ShellContext): string | undefined {
   return `${agent.provider}/${agent.model}`;
 }
 
-/** Tess's opening line: the single most useful next step. */
+/** The banner's opening line: the single most useful next step. */
 export function bannerTip(input: BannerInput): string {
   const { context, usage } = input;
   const agent = agentLabel(context);
@@ -362,7 +362,7 @@ export function renderBanner(input: BannerInput): string {
   if (input.usage) {
     lines.push("", ...renderMachinePanel(input.usage, context, { columns: input.columns }));
   }
-  // Wrap Tess's line so continuation rows hang under the message text.
+  // Wrap the tip so continuation rows hang under the message text.
   const prefix = mascotSays("");
   const hang = terminalWidth(prefix);
   const wrapped = wrapTerminalLine(tip, Math.max(20, width - hang));

@@ -281,7 +281,7 @@ function specContext(cwd: string, spec: ShellContext["spec"]): ShellContext {
 }
 
 describe("renderShellBanner", () => {
-  it("shows Tess, the heading, context, controls, and version", () => {
+  it("shows the logo mark, the heading, context, controls, and version", () => {
     const banner = renderShellBanner({
       mode: "local",
       modeSource: "default-local",
@@ -293,7 +293,7 @@ describe("renderShellBanner", () => {
     expect(rows[1]).toContain("tt");
     expect(rows[3]).toContain("□ ■");
     expect(banner).toContain("v0.6.0");
-    expect(banner).toContain("Tess");
+    expect(banner).toContain("tt ›");
     expect(banner).toContain("agent not configured");
     expect(banner).toContain("workflow model model_abc123");
     expect(banner).toContain("ctrl+c stop/clear");
@@ -326,7 +326,7 @@ describe("renderShellBanner", () => {
     [undefined, /No tunedtensor\.json here yet/],
     [{ path: "/p/tunedtensor.json", parseError: true }, /doesn't parse/],
     [{ path: "/p/tunedtensor.json", name: "Tiny", exampleCount: 4, parseError: false }, /4 examples is a small set/],
-  ])("lets Tess suggest the next step for %o", (spec, message) => {
+  ])("suggests the next step for %o", (spec, message) => {
     const banner = renderShellBanner({
       mode: "local",
       modeSource: "default-local",
@@ -951,7 +951,7 @@ describe("spec and machine views in the shell", () => {
   });
 });
 
-describe("Tess, the TT mark", () => {
+describe("the TT logo mark", () => {
   it("draws the logo's tensor grid in color and in plain characters", () => {
     const level = chalk.level;
     try {

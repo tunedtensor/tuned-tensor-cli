@@ -9,7 +9,7 @@
   machine can fine-tune the spec's base model. `/system` refreshes it and lists
   the verdict for every certified base model. Verdicts use the certified memory
   profiles; a fresh `tt hardware` snapshot takes precedence.
-- Meet Tess, the TT logo mark drawn in the terminal. Tess opens the shell
+- Draw the TT logo mark in the shell banner. The banner opens
   with the most useful next step (log in, create or fix the spec, add
   examples, or a busy-GPU warning), marks the agent's thinking indicator, and
   says goodbye on exit.
