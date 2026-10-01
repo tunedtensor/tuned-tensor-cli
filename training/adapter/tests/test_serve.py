@@ -22,13 +22,44 @@ class UpstreamLaunchTests(unittest.TestCase):
             (source / "chat_template.jinja").write_text(native)
             for content_format in ("string", "openai"):
                 detector = Mock(return_value=content_format)
-                with patch.dict(os.environ, {"TT_BASE_MODEL": "example/model", "TT_MODEL_NAME": "base", "TT_SYSTEM_PROMPT": "Owner instructions"}, clear=True):
-                    args = serve.build_vllm_args(str(source), None, source)
                 with patch.dict(sys.modules, {"vllm.renderers.hf": SimpleNamespace(_detect_content_format=detector)}):
+                    with patch.dict(os.environ, {"TT_BASE_MODEL": "example/model", "TT_MODEL_NAME": "base", "TT_SYSTEM_PROMPT": "Owner instructions"}, clear=True):
+                        args = serve.build_vllm_args(str(source), None, source)
+                    detector.assert_called_once_with(native, default="string")
+                    detector.reset_mock()
                     serve.pin_native_content_format(args, str(source))
                 detector.assert_called_once_with(native, default="string")
                 self.assertEqual(args[args.index("--chat-template-content-format") + 1], content_format)
                 self.assertEqual(args[args.index("--load-format") + 1], "safetensors")
+
+    def test_native_templates_render_owner_and_client_context(self):
+        from jinja2 import Environment
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        templates = {
+            "string": "{% for message in messages %}{{ message.role }}:{{ message.content }}|{% endfor %}",
+            "openai": "{% for message in messages %}{{ message.role }}:{% for part in message.content %}{% if part.type == 'text' %}{{ part.text }}{% endif %}{% endfor %}|{% endfor %}",
+        }
+        owner = 'Owner: {{ dangerous }} "quoted"'
+        for content_format, native in templates.items():
+            for client_parts in (False, True):
+                with self.subTest(content_format=content_format, client_parts=client_parts), tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    (root / "chat_template.jinja").write_text(native)
+                    detector = Mock(return_value=content_format)
+                    with patch.dict(sys.modules, {"vllm.renderers.hf": SimpleNamespace(_detect_content_format=detector)}), patch.dict(os.environ, {
+                        "TT_BASE_MODEL": "example/model", "TT_MODEL_NAME": "base", "TT_SYSTEM_PROMPT": owner,
+                    }, clear=True):
+                        args = serve.build_vllm_args(str(root), None, root)
+                        serve.pin_native_content_format(args, str(root))
+                    client = [{"type": "text", "text": "First context"}, {"type": "text", "text": "Second context"}] if client_parts else "First context\n\nSecond context"
+                    user = [{"type": "text", "text": "HELLO"}] if content_format == "openai" else "HELLO"
+                    history = [{"role": "system", "content": client}, {"role": "user", "content": user}]
+                    wrapped = Path(args[args.index("--chat-template") + 1]).read_text()
+                    rendered = Environment().from_string(wrapped).render(messages=history)
+                    self.assertEqual(rendered, "system:" + owner + "\n\nFirst context\n\nSecond context|user:HELLO|")
+                    self.assertEqual(args[args.index("--chat-template-content-format") + 1], content_format)
+                    self.assertEqual((root / "chat_template.jinja").read_text(), native)
 
     def test_auth_covers_upstream_admin_routes_not_only_v1(self):
         import asyncio
@@ -114,6 +145,8 @@ class UpstreamLaunchTests(unittest.TestCase):
 
     def test_owner_prompt_is_literal_and_tool_history_is_preserved(self):
         import json
+        from types import SimpleNamespace
+        from unittest.mock import Mock
         try:
             from jinja2 import Environment
         except ImportError:
@@ -125,7 +158,7 @@ class UpstreamLaunchTests(unittest.TestCase):
             original = "{{ messages | tojson }}"
             (source / "chat_template.jinja").write_text(original)
             owner = 'Owner: {{ dangerous }} "quoted"'
-            with patch.dict(os.environ, {"TT_BASE_MODEL": "Qwen/Qwen3.5-2B", "TT_MODEL_NAME": "base", "TT_SYSTEM_PROMPT": owner}, clear=True):
+            with patch.dict(sys.modules, {"vllm.renderers.hf": SimpleNamespace(_detect_content_format=Mock(return_value="string"))}), patch.dict(os.environ, {"TT_BASE_MODEL": "Qwen/Qwen3.5-2B", "TT_MODEL_NAME": "base", "TT_SYSTEM_PROMPT": owner}, clear=True):
                 args = serve.build_vllm_args(str(source), None, root)
             template = Path(args[args.index("--chat-template") + 1]).read_text()
             history = [{"role": "system", "content": "Client context"}, {"role": "user", "content": "hi"},
