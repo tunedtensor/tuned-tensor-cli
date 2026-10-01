@@ -109,6 +109,8 @@ def build_vllm_args(model_source: str, adapter_path: str | None, temp_dir: Path)
     prompt = os.environ.get("TT_SYSTEM_PROMPT", "").strip()
     if prompt:
         template = native_chat_template(model_source)
+        from vllm.renderers.hf import _detect_content_format
+        content_format = _detect_content_format(template, default="string")
         # Literal data, never prompt text interpolated as Jinja source. Preserve
         # tool calls/results verbatim while merging leading system context.
         prefix = "{%- set tt = namespace(system=" + json.dumps(prompt) + ", history=[]) -%}"
@@ -121,7 +123,9 @@ def build_vllm_args(model_source: str, adapter_path: str | None, temp_dir: Path)
         prefix += "{%- set tt.system = tt.system + '\\n\\n' + part.text -%}"
         prefix += "{%- endif -%}{%- endfor -%}{%- endif -%}"
         prefix += "{%- else -%}{%- set tt.history = tt.history + [message] -%}{%- endif -%}{%- endfor -%}"
-        prefix += "{%- set messages = [{'role': 'system', 'content': tt.system}] + tt.history -%}"
+        # Match the ORIGINAL native template's expected content representation.
+        system_content = "[{'type': 'text', 'text': tt.system}]" if content_format == "openai" else "tt.system"
+        prefix += "{%- set messages = [{'role': 'system', 'content': " + system_content + "}] + tt.history -%}"
         path = temp_dir / "chat-template.jinja"
         path.write_text(prefix + template, encoding="utf-8")
         args += ["--chat-template", str(path)]
