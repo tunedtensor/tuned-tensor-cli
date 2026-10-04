@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { cpuUtilization, parseNvidiaUsage, sampleLiveUsage, tidyCpuModel, type LiveUsage } from "../local-runtime/live-usage.js";
-import { describeFineTuneFit, inventoryFromUsage, usageBar } from "../shell-view.js";
+import { armCpuModel, cpuUtilization, parseNvidiaUsage, sampleLiveUsage, tidyCpuModel, type LiveUsage } from "../local-runtime/live-usage.js";
+import { describeFineTuneFit, inventoryFromUsage, renderMachinePanel, usageBar } from "../shell-view.js";
 import type { ShellContext } from "../shell-context.js";
 import { stripVTControlCharacters } from "node:util";
 
@@ -61,6 +61,13 @@ describe("live CPU sampling", () => {
     expect(tidyCpuModel("Apple M3 Max")).toBe("Apple M3 Max");
   });
 
+  it("names Arm cores from /proc/cpuinfo", () => {
+    const core = (part: string) => `processor\t: 0\nCPU implementer\t: 0x41\nCPU architecture: 8\nCPU part\t: ${part}\n`;
+    expect(armCpuModel([core("0xd85"), core("0xd85"), core("0xd87")].join("\n"))).toBe("Cortex-X925 + Cortex-A725");
+    expect(armCpuModel(core("0xfff"))).toBeUndefined();
+    expect(armCpuModel("processor\t: 0\nmodel name\t: Intel Xeon\n")).toBeUndefined();
+  });
+
   it("samples this machine without a GPU tool", async () => {
     const sample = await sampleLiveUsage({ env: { PATH: "/nonexistent" }, cpuSampleMs: 10, platform: "linux" });
     expect(sample.cpu.cores).toBeGreaterThan(0);
@@ -107,7 +114,8 @@ describe("describeFineTuneFit", () => {
     const spark = { ...usage([gb10!]), memory: { used_bytes: 18 * GIB, total_bytes: 119 * GIB } };
     const fit = describeFineTuneFit(spark, context());
     expect(fit.status).toBe("ready");
-    expect(fit.text).toContain("LoRA ready for");
+    expect(fit.text).toContain("LoRA ready for");    const panel = stripVTControlCharacters(renderMachinePanel(spark, context(), { columns: 120 }).join("\n"));
+    expect(panel).toContain("unified with system RAM");
   });
 
   it("builds a quick inventory with free VRAM", () => {
