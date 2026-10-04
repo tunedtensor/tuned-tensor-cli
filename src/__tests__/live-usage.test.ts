@@ -102,6 +102,14 @@ describe("describeFineTuneFit", () => {
     expect(describeFineTuneFit(undefined, context())).toMatchObject({ status: "unknown" });
   });
 
+  it("uses system RAM when nvidia-smi reports no memory on a unified GB10", () => {
+    const [gb10] = parseNvidiaUsage("0, NVIDIA GB10, 0, [N/A], [N/A], 40\n");
+    const spark = { ...usage([gb10!]), memory: { used_bytes: 18 * GIB, total_bytes: 119 * GIB } };
+    const fit = describeFineTuneFit(spark, context());
+    expect(fit.status).toBe("ready");
+    expect(fit.text).toContain("LoRA ready for");
+  });
+
   it("builds a quick inventory with free VRAM", () => {
     expect(inventoryFromUsage(usage([gpu24])).gpus[0]).toMatchObject({ memory_free_bytes: 23 * GIB });
   });
