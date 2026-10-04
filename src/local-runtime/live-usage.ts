@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { statfs } from "node:fs/promises";
 import { cpus, freemem, homedir, loadavg, totalmem } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -141,6 +142,44 @@ export function tidyCpuModel(model: string): string {
     .trim() || "CPU";
 }
 
+/** Arm Ltd. (implementer 0x41) core names by MIDR part number. */
+const ARM_CORES: Record<string, string> = {
+  "0xd03": "Cortex-A53", "0xd05": "Cortex-A55", "0xd08": "Cortex-A72", "0xd0b": "Cortex-A76",
+  "0xd0c": "Neoverse-N1", "0xd40": "Neoverse-V1", "0xd41": "Cortex-A78", "0xd44": "Cortex-X1",
+  "0xd47": "Cortex-A710", "0xd48": "Cortex-X2", "0xd49": "Neoverse-N2", "0xd4d": "Cortex-A715",
+  "0xd4e": "Cortex-X3", "0xd4f": "Neoverse-V2", "0xd80": "Cortex-A520", "0xd81": "Cortex-A720",
+  "0xd82": "Cortex-X4", "0xd84": "Neoverse-V3", "0xd85": "Cortex-X925", "0xd87": "Cortex-A725",
+  "0xd8e": "Neoverse-N3",
+};
+
+/**
+ * Name the cores in an Arm Linux `/proc/cpuinfo`, which lists implementer and
+ * part IDs instead of a "model name" (so Node reports "unknown"). Big.LITTLE
+ * parts are joined, e.g. "Cortex-X925 + Cortex-A725" on GB10.
+ */
+export function armCpuModel(cpuinfo: string): string | undefined {
+  const names: string[] = [];
+  let implementer: string | undefined;
+  for (const line of cpuinfo.split(/\r?\n/)) {
+    const [key, value] = line.split(":").map((item) => item.trim().toLowerCase());
+    if (key === "cpu implementer") implementer = value;
+    if (key !== "cpu part" || !value) continue;
+    const name = implementer === "0x41" ? ARM_CORES[value] : undefined;
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names.length > 0 ? names.join(" + ") : undefined;
+}
+
+function cpuModel(reported: string | undefined, platform: NodeJS.Platform, arch: string): string {
+  const model = tidyCpuModel(reported ?? "");
+  if (platform !== "linux" || !/^(?:unknown|CPU)$/i.test(model)) return model;
+  try {
+    return armCpuModel(readFileSync("/proc/cpuinfo", "utf8")) ?? (arch === "arm64" ? "Arm CPU" : model);
+  } catch {
+    return arch === "arm64" ? "Arm CPU" : model;
+  }
+}
+
 async function modelCacheDisk(env: NodeJS.ProcessEnv): Promise<LiveUsage["disk"]> {
   const path = resolve(env.HF_HOME?.trim() || join(homedir(), ".cache", "huggingface"));
   // The cache may not exist yet; report the filesystem it would land on.
@@ -185,7 +224,7 @@ export async function sampleLiveUsage(options: SampleLiveUsageOptions = {}): Pro
   ]);
   const after = cpuTimes();
   const list = cpus();
-  const model = tidyCpuModel(list[0]?.model ?? "");
+  const model = cpuModel(list[0]?.model, platform, arch);
   const total = totalmem();
   const apple = nvidia.gpus.length === 0 ? appleGpu(model, platform, arch) : undefined;
   const [one, five, fifteen] = loadavg();

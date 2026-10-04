@@ -103,6 +103,11 @@ function trainingGpu(inventory: HostInventory): HostGpu | undefined {
     if (!listed.memory_total_bytes && inventory.python?.total_memory_bytes) {
       return { ...listed, memory_total_bytes: inventory.python.total_memory_bytes };
     }
+    // nvidia-smi reports memory.total as [N/A] on unified-memory GPUs (GB10 /
+    // DGX Spark); the GPU's pool is system RAM.
+    if (!listed.memory_total_bytes && (listed.unified_memory || isUnifiedGpuName(listed.name))) {
+      return { ...listed, memory_total_bytes: inventory.os.total_memory_bytes, unified_memory: true };
+    }
     return listed;
   }
   if (inventory.python?.cuda_device) {

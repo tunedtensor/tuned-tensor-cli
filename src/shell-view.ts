@@ -191,6 +191,8 @@ function gpuDetail(gpu: LiveGpuUsage): string {
     parts.push(used === undefined
       ? `${formatGiB(gpu.memory_total_bytes)} GiB VRAM`
       : `VRAM ${formatGiB(used)}/${formatGiB(gpu.memory_total_bytes)} GiB`);
+  } else if (gpu.unified_memory) {
+    parts.push("unified with system RAM");
   }
   if (gpu.temperature_c !== undefined) parts.push(`${Math.round(gpu.temperature_c)}°C`);
   return parts.join("  ");

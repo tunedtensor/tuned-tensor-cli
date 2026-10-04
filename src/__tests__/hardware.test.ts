@@ -96,6 +96,21 @@ describe("hardware capability verdicts", () => {
     })).toEqual([]);
   });
 
+  it("falls back to system RAM when nvidia-smi reports no GB10 memory", () => {
+    const gb10 = { index: 0, name: "NVIDIA GB10", unified_memory: true };
+    const quick = evaluateCapabilities(inventory({ nvidia_smi: { ok: true, message: "" }, gpus: [gb10] }));
+    expect(quick.gpu?.memory_total_bytes).toBe(gib(128));
+    expect(quick.adapters.some((item) => item.finetune.status === "ready")).toBe(true);
+
+    const probed = evaluateCapabilities(inventory({
+      quick: false,
+      nvidia_smi: { ok: true, message: "" },
+      gpus: [gb10],
+      python: { ok: true, message: "ok", cuda_available: true, total_memory_bytes: gib(119) },
+    }));
+    expect(probed.gpu?.memory_total_bytes).toBe(gib(119));
+  });
+
   it("formats a missing snapshot as a status hint", () => {
     expect(formatHostStatusLine(undefined)).toContain("tt hardware");
   });
