@@ -106,6 +106,9 @@ def verify_snapshot(snapshot: Path, expected_model_id: str | None = None) -> tup
 
     weight_files = sorted(snapshot.glob("*.safetensors")) + sorted(snapshot.glob("pytorch_model*.bin"))
     index_files = sorted(snapshot.glob("*.safetensors.index.json")) + sorted(snapshot.glob("pytorch_model*.bin.index.json"))
+    # Keep lexical snapshot names: normal HF file symlinks target sibling blobs.
+    files = [path for path in snapshot.rglob("*") if path.is_file()]
+    inventory = set(files)
     for index in index_files:
         try:
             weight_map = json.loads(index.read_text(encoding="utf-8")).get("weight_map", {})
@@ -113,8 +116,13 @@ def verify_snapshot(snapshot: Path, expected_model_id: str | None = None) -> tup
             raise ValueError(f"Cached snapshot has an invalid weight index: {index}") from exc
         if not isinstance(weight_map, dict) or not weight_map:
             raise ValueError(f"Cached snapshot has an empty weight index: {index}")
-        for name in set(weight_map.values()):
-            if not isinstance(name, str) or not (snapshot / name).is_file():
+        for name in weight_map.values():
+            if (not isinstance(name, str) or not name
+                    or re.match(r"^(?:[A-Za-z]:|[/\\])", name)
+                    or ".." in re.split(r"[/\\]", name)):
+                raise ValueError("Cached snapshot has an invalid indexed weight shard path")
+            shard = snapshot / name
+            if shard not in inventory or shard.stat().st_size == 0:
                 raise ValueError(f"Cached snapshot is missing an indexed weight shard: {name}")
     if not weight_files:
         raise ValueError(f"Cached snapshot contains no Transformers model weights: {snapshot}")
@@ -134,7 +142,6 @@ def verify_snapshot(snapshot: Path, expected_model_id: str | None = None) -> tup
     if not tokenizer_config.is_file() or not any(path.is_file() and path.stat().st_size > 0 for path in vocabulary):
         raise ValueError(f"Cached snapshot is missing tokenizer metadata or vocabulary files: {snapshot}")
 
-    files = [path for path in snapshot.rglob("*") if path.is_file()]
     verified_blobs = 0
     for path in files:
         blob = path.resolve()

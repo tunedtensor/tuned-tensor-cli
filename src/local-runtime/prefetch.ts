@@ -384,13 +384,19 @@ export async function verifyLocalBaseModel(
   if (!await required("tokenizer_config.json") || !(await Promise.all(vocabNames.map(required))).some(Boolean)) {
     throw new Error(`Local base-model directory is missing tokenizer metadata or vocabulary: ${path}`);
   }
+  // Inventory lexical names, not realpaths: HF file symlinks target sibling blobs.
+  const inventory = new Set(nonEmpty.map((file) => resolve(file.path)));
   for (const file of files.filter((candidate) => candidate.path.endsWith(".index.json"))) {
     const parsed = JSON.parse(await readFile(file.path, "utf8")) as { weight_map?: unknown };
     if (!parsed.weight_map || typeof parsed.weight_map !== "object" || Array.isArray(parsed.weight_map)) {
       throw new Error(`Local base-model weight index is invalid: ${file.path}`);
     }
     for (const shard of new Set(Object.values(parsed.weight_map as Record<string, unknown>))) {
-      if (typeof shard !== "string" || !await required(shard)) {
+      if (typeof shard !== "string" || !shard || /^(?:[A-Za-z]:|[/\\])/.test(shard)
+        || shard.split(/[/\\]/).includes("..")) {
+        throw new Error("Local base-model weight index has an invalid indexed weight shard path");
+      }
+      if (!inventory.has(resolve(path, shard)) || !await required(shard)) {
         throw new Error(`Local base-model directory is missing indexed weight shard: ${String(shard)}`);
       }
     }

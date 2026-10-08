@@ -39,6 +39,38 @@ const certifiedConfig = {
 };
 const certifiedConfigJson = JSON.stringify(certifiedConfig);
 
+test("indexed shards are contained and inventoried while HF blob symlinks remain valid", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-shard-containment-"));
+  try {
+    const snapshot = join(root, "snapshots", "revision");
+    await mkdir(snapshot, { recursive: true });
+    await Promise.all([
+      writeFile(join(snapshot, "config.json"), certifiedConfigJson),
+      writeFile(join(snapshot, "tokenizer_config.json"), "{}"),
+      writeFile(join(snapshot, "tokenizer.json"), "{}"),
+      writeFile(join(snapshot, "model.safetensors"), "weights"),
+      writeFile(join(root, "snapshots", "outside.safetensors"), "outside"),
+      writeFile(join(snapshot, "empty.safetensors"), ""),
+    ]);
+    const index = join(snapshot, "model.safetensors.index.json");
+    for (const name of ["../outside.safetensors", join(root, "snapshots", "outside.safetensors"),
+      "nested/../../outside.safetensors", "C:\\outside.safetensors", "..\\outside.safetensors",
+      "nested/../model.safetensors", "missing.safetensors", "empty.safetensors", "", null, []]) {
+      await writeFile(index, JSON.stringify({ weight_map: { tensor: name } }));
+      await assert.rejects(verifyLocalBaseModel(snapshot), /indexed weight shard/, String(name));
+    }
+    await mkdir(join(root, "blobs"));
+    await writeFile(join(root, "blobs", "shard"), "shard");
+    await mkdir(join(snapshot, "nested"));
+    await symlink("../../../blobs/shard", join(snapshot, "nested", "shard.safetensors"));
+    await writeFile(index, JSON.stringify({ weight_map: { tensor: "nested/shard.safetensors" } }));
+    const report = await verifyLocalBaseModel(snapshot);
+    assert.equal(report.fileCount, 7);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 const request = fineTuneRunRequestSchema.parse({
   run_id: "11111111-1111-4111-8111-111111111111",
   user_id: "local-user",
