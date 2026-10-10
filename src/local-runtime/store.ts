@@ -3,7 +3,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { defaultStoreRoot } from "../paths.js";
 import type { FineTuneRunRequest, RunReport, SpecSnapshot, TrainingReport } from "./contracts.js";
-import { chainEvent, sha256File, withAppendLock } from "./audit.js";
+import { chainEvent, parseJsonlTolerant, readJsonlTail, sha256File, withAppendLock } from "./audit.js";
 
 export type LocalRunStatus =
   | "queued"
@@ -114,6 +114,8 @@ export interface LocalStore {
   listRuns(): Promise<LocalRunState[]>;
   getRun(id: string): Promise<LocalRunState>;
   getRunEvents(id: string): Promise<LocalRunEvent[]>;
+  /** Events plus the number of lines an interrupted write left unreadable. */
+  getRunEventLog(id: string): Promise<{ events: LocalRunEvent[]; unreadable_lines: number }>;
   getRunReport(id: string): Promise<RunReport>;
   /** Existing report files for a run: the artifact copy and the store copy. */
   getRunReportPaths(id: string): Promise<string[]>;
@@ -383,6 +385,14 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
     return record;
   }
 
+  async function readRunEventLog(id: string): Promise<{ events: LocalRunEvent[]; unreadable_lines: number }> {
+    const state = await getRun(id);
+    const path = runEventsPath(state.id);
+    if (!await exists(path)) return { events: [], unreadable_lines: 0 };
+    const parsed = parseJsonlTolerant<LocalRunEvent>(await readFile(path, "utf8"));
+    return { events: parsed.rows, unreadable_lines: parsed.unreadable };
+  }
+
   async function appendRunEvent(
     state: LocalRunState,
     event: Omit<LocalRunEvent, "id" | "run_id" | "occurred_at" | "seq" | "prev_hash" | "hash">,
@@ -391,7 +401,12 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
     await ensurePrivateDirectory(dirname(path));
     // Serialize appends across processes so each event links to the last one.
     const row = await withAppendLock(`${path}.lock`, async () => {
-      const previous = (await readJsonl<LocalRunEvent>(path)).at(-1);
+      // Link to the newest chained event; an older TT process may append unchained ones.
+      const { partial } = await readJsonlTail<LocalRunEvent>(path);
+      const { last: previous } = await readJsonlTail<LocalRunEvent>(path, (row) => typeof row.hash === "string");
+      // Terminate a line an interrupted write left open, so this event starts
+      // on its own line; the torn fragment stays visible to `tt runs audit`.
+      if (partial) await appendFile(path, "\n", { encoding: "utf8", mode: 0o600 });
       const chained = chainEvent({
         id: randomUUID(),
         run_id: state.id,
@@ -746,18 +761,25 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
     getRun,
 
     async getRunEvents(id) {
-      const state = await getRun(id);
-      return readJsonl<LocalRunEvent>(runEventsPath(state.id));
+      return (await readRunEventLog(id)).events;
     },
+
+    getRunEventLog: readRunEventLog,
 
     async getRunReportPaths(id) {
       const state = await getRun(id);
-      const candidates = [
-        ...(state.report_path ? [resolve(state.report_path)] : []),
-        runReportPath(state.id),
-      ];
+      const candidates: string[] = [];
+      // Same containment rule as getRunReport: only the store or the run's artifacts.
+      if (state.report_path) {
+        const reportPath = resolve(state.report_path);
+        const allowedRoots = [resolvedRoot, ...(state.artifact_dir ? [resolve(state.artifact_dir)] : [])];
+        if (allowedRoots.some((allowed) => isPathInside(allowed, reportPath))) candidates.push(reportPath);
+      }
+      candidates.push(runReportPath(state.id));
       const existing: string[] = [];
-      for (const path of new Set(candidates)) if (await exists(path)) existing.push(path);
+      for (const path of new Set(candidates)) {
+        if ((await lstat(path).catch(() => null))?.isFile()) existing.push(path);
+      }
       return existing;
     },
 

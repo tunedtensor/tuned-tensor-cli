@@ -160,6 +160,7 @@ export function registerPublishCommand(parent: Command) {
     .option("-u, --base-url <url>", "API base URL")
     .option("-y, --yes", "Skip confirmation prompt")
     .option("--dry-run", "Show what would be published without uploading")
+    .option("--allow-unverified", "Publish evidence that cannot be fully verified (older TT versions, unreadable events)")
     .action(async (runId: string | undefined, cmdOpts) => {
       const inherited = parent.optsWithGlobals() as ClientOpts;
       const opts: ClientOpts = {
@@ -236,8 +237,16 @@ export function registerPublishCommand(parent: Command) {
           "Prompts and model outputs from the run report will be uploaded to your Tuned Tensor account.",
         );
         if (audit.verdict !== "verified") {
-          printWarning(`Run evidence is incomplete: ${audit.findings.join(" ")}`);
+          printWarning(`Run evidence is unverified: ${audit.findings.join(" ")}`);
         }
+      }
+
+      if (audit.verdict !== "verified" && !cmdOpts.allowUnverified && !cmdOpts.dryRun) {
+        throw new Error(
+          `Run ${run.id} evidence cannot be fully verified: ${audit.findings.join(" ")} `
+          + "Review it with `tt runs audit`, then pass --allow-unverified to publish it anyway; "
+          + "the dashboard will show it as unverified.",
+        );
       }
 
       if (cmdOpts.dryRun) {

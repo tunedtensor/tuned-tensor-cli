@@ -494,9 +494,13 @@ tt runs audit <run-id>
 `tt runs audit` checks the event chain and re-hashes the report, then prints
 the stage timeline with durations and the provenance. Its verdict is
 `verified`, `incomplete` (older TT versions or unfinished runs) or `tampered`.
-`tampered` exits with code 2 and names the edited event or file. `tt publish`
-runs the same audit, refuses tampered evidence, and uploads the audit summary
-with the report. The chain makes edits evident; it is not a signature, so
+`tampered` exits with code 2 and names the edited event or file; removing the
+completion event or emptying the log also counts as tampering.
+
+`tt publish` runs the same audit and uploads the summary with the report. It
+refuses tampered evidence. It also stops on unverifiable evidence, such as runs
+from older TT versions or logs with unreadable lines, unless you pass
+`--allow-unverified`. The chain makes edits evident; it is not a signature, so
 anyone with write access to the store can rewrite the whole log.
 
 Serving still runs on the machine executing `tt serve` and requires a local

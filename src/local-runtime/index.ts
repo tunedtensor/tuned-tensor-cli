@@ -8,6 +8,7 @@ import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { compareRuns } from "./compare.js";
 import { auditRun } from "./audit.js";
+import { createRunConsoleReporter } from "./console-reporter.js";
 import { assertArtifactManifest } from "./artifacts.js";
 import { fineTuneRunRequestSchema, isDecisionSpecFile, isFoundationSpecFile, localBehaviorSpecFileSchema, localRunnerConfigSchema, type FineTuneRunRequest, type LocalRunnerConfig, type SpecSnapshot } from "./contracts.js";
 import { buildSystemMessage } from "./dataset.js";
@@ -36,10 +37,11 @@ import {
   assertLocalRunInputReady,
   initLocalSpecFile,
   loadLocalRunInput,
+  specHash,
   type LocalRunInput,
   validateBehaviorSpec,
 } from "./local-project.js";
-import { sanitizeLogLine, type LocalRunProgressEvent, type LocalRunReporter } from "./run-reporter.js";
+import type { LocalRunReporter } from "./run-reporter.js";
 import { activateModel, getActiveModel, rollbackActiveModel } from "./active-model.js";
 import { localRuntimePackageRoot } from "./package-root.js";
 
@@ -478,47 +480,9 @@ function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
-function shortValue(value: unknown): string | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (Array.isArray(value)) return `[${value.length} items]`;
-  return null;
-}
-
-function formatEvent(event: LocalRunProgressEvent): string {
-  const detailText = Object.entries(event.details ?? {})
-    .filter(([key]) => key !== "metrics")
-    .map(([key, value]) => {
-      const formatted = key === "command" && Array.isArray(value)
-        ? value.join(" ")
-        : shortValue(value);
-      return formatted ? `${key}=${formatted}` : null;
-    })
-    .filter((value): value is string => Boolean(value))
-    .slice(0, 5)
-    .join(" ");
-  return sanitizeLogLine(`[tt] ${event.stage}: ${event.message}${detailText ? ` (${detailText})` : ""}`);
-}
-
 function createConsoleReporter(options: { verbose: boolean; quiet: boolean }): LocalRunReporter | undefined {
   if (options.quiet) return undefined;
-  let lastLogLine = "";
-  return {
-    verbose: options.verbose,
-    onEvent(event) {
-      process.stderr.write(`${formatEvent(event)}\n`);
-    },
-    onLog(log) {
-      const line = sanitizeLogLine(`[tt] ${log.stage}${log.stream ? ` ${log.stream}` : ""}: ${log.message}`);
-      // tqdm redraws the same progress line several times per step; collapse
-      // consecutive duplicates so --verbose output stays readable.
-      if (line === lastLogLine) return;
-      lastLogLine = line;
-      process.stderr.write(`${line}\n`);
-    },
-  };
+  return createRunConsoleReporter({ verbose: options.verbose });
 }
 
 async function verifyStoredModel(model: LocalModelRecord, config: LocalRunnerConfig): Promise<{
@@ -1192,12 +1156,18 @@ async function main(argv: string[]): Promise<void> {
         },
       });
     }
+    // `tt` may hand us a temporary projection of the spec (cloud-only keys
+    // removed); its path and bytes are not the user's file, so record only the
+    // spec snapshot digest in that case.
+    const specFile = /^\..+\.tt-local-/.test(basename(input.path))
+      ? undefined
+      : { path: input.path, sha256: specHash(await readFile(input.path, "utf8")) };
     if (input.spec.pipeline) {
-      const result = await runLocalPipeline({ request, config, reporter, pipeline: pipelineForRunInput(input) as LocalPipeline, projectSpec: input.spec });
+      const result = await runLocalPipeline({ request, config, reporter, pipeline: pipelineForRunInput(input) as LocalPipeline, projectSpec: input.spec, specFile });
       printJson(result);
       return;
     }
-    const result = await runLocalFineTune({ request, config, reporter });
+    const result = await runLocalFineTune({ request, config, reporter, specFile });
     printJson({
       status: result.report.status,
       run_id: result.report.run_id,

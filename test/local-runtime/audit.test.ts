@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -31,7 +31,7 @@ test("canonical JSON sorts keys at every level and drops undefined", () => {
 test("a chained log verifies and every kind of tampering is located", () => {
   const events = chain(4);
   assert.deepEqual(verifyEventChain(events), {
-    status: "verified", events: 4, chained_events: 4, legacy_events: 0, head_hash: events[3]!.hash,
+    status: "verified", events: 4, chained_events: 4, legacy_events: 0, unchained_after_chain: 0, head_hash: events[3]!.hash,
   });
   const edited = events.map((event, index) => index === 1 ? { ...event, message: "rewritten" } : event);
   assert.match(verifyEventChain(edited).break!.reason, /was edited/);
@@ -44,7 +44,13 @@ test("a chained log verifies and every kind of tampering is located", () => {
   const rehashed = [...events];
   rehashed[1] = chainEvent({ stage: "stage-1", message: "forged", occurred_at: events[1]!.occurred_at as string }, events[0]);
   assert.match(verifyEventChain(rehashed).break!.reason, /previous-event hash/);
-  assert.equal(verifyEventChain([...events, { stage: "x", message: "unchained" }]).status, "broken");
+  const mixed = verifyEventChain([...events, { stage: "x", message: "unchained" }]);
+  assert.equal(mixed.status, "mixed");
+  assert.equal(mixed.unchained_after_chain, 1);
+  // A chained event may follow an unchained one written by an older TT process.
+  const resumed = [...events, { stage: "x", message: "old worker" }];
+  resumed.push(chainEvent({ stage: "y", message: "new" }, events.at(-1)));
+  assert.equal(verifyEventChain(resumed).status, "mixed");
   assert.equal(verifyEventChain([]).status, "empty");
 });
 
@@ -72,7 +78,7 @@ test("the timeline turns events into timed stages", () => {
   ]);
 });
 
-test("the append lock serializes writers and recovers a stale lock", async () => {
+test("the append lock serializes writers and reclaims a crashed owner's lock at once", async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-audit-lock-"));
   try {
     const lock = join(root, "events.lock");
@@ -85,11 +91,45 @@ test("the append lock serializes writers and recovers a stale lock", async () =>
     for (let index = 0; index < order.length; index += 2) {
       assert.equal(order[index]!.replace("start", "end"), order[index + 1]);
     }
+    // A lock whose owner process is gone is reclaimed without waiting.
+    await mkdir(lock);
+    await writeFile(join(lock, "owner.json"), JSON.stringify({ token: "dead", pid: 2 ** 22 + 12345, host: hostname() }));
+    const started = Date.now();
+    assert.equal(await withAppendLock(lock, async () => "recovered", { timeoutMs: 2_000 }), "recovered");
+    assert.ok(Date.now() - started < 1_000);
+    await assert.rejects(stat(lock), { code: "ENOENT" });
+    // A live owner is waited for, never broken.
+    await mkdir(lock);
+    await writeFile(join(lock, "owner.json"), JSON.stringify({ token: "live", pid: process.pid, host: hostname() }));
+    await assert.rejects(withAppendLock(lock, async () => "stolen", { timeoutMs: 200 }), /Timed out/);
+    assert.equal(JSON.parse(await readFile(join(lock, "owner.json"), "utf8")).token, "live");
+    // An owner record that never got written counts as abandoned after a grace period.
+    await rm(lock, { recursive: true });
     await mkdir(lock);
     const old = new Date(Date.now() - 60_000);
     await utimes(lock, old, old);
-    assert.equal(await withAppendLock(lock, async () => "recovered"), "recovered");
-    await assert.rejects(stat(lock), { code: "ENOENT" });
+    assert.equal(await withAppendLock(lock, async () => "ownerless", { timeoutMs: 2_000 }), "ownerless");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("an interrupted write does not block later events or hide them from the audit", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-audit-torn-"));
+  try {
+    const store = createLocalStore(join(root, "store"));
+    const request = runFixture("77777777-7777-4777-8777-777777777777");
+    await store.startRun({ request, artifactDir: join(root, "artifacts") });
+    const path = join(root, "store", "runs", request.run_id, "progress.jsonl");
+    await writeFile(path, `${await readFile(path, "utf8")}{"id":"torn","stag`);
+    await store.updateRun({ runId: request.run_id, status: "training", stage: "training", message: "after crash" });
+    const log = await store.getRunEventLog(request.run_id);
+    assert.equal(log.unreadable_lines, 1);
+    assert.deepEqual(log.events.map((event) => event.stage), ["queued", "training"]);
+    assert.equal(verifyEventChain(log.events as unknown as Array<Record<string, unknown>>).status, "verified");
+    const audit = await auditRun(store, request.run_id);
+    assert.match(audit.findings.join(" "), /1 event line\(s\) are unreadable/);
+    assert.notEqual(audit.verdict, "tampered");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -175,6 +215,24 @@ test("a completed run records provenance and its audit detects report edits", as
     ]);
     assert.deepEqual(audit.provenance, provenance);
 
+    assert.equal(audit.artifact_manifest.file?.matches_recorded, true);
+    const eventsPath = join(config.storeRoot, "runs", request.run_id, "progress.jsonl");
+    const eventsText = await readFile(eventsPath, "utf8");
+    // Dropping the completion event (and its digests) is truncation, not an old version.
+    await writeFile(eventsPath, `${eventsText.trim().split("\n").slice(0, -1).join("\n")}\n`);
+    const truncated = await auditRun(store, request.run_id);
+    assert.equal(truncated.verdict, "tampered");
+    assert.match(truncated.findings.join(" "), /log was truncated/);
+    await writeFile(eventsPath, "");
+    assert.equal((await auditRun(store, request.run_id)).verdict, "tampered");
+    await writeFile(eventsPath, eventsText);
+    const manifestPath = audit.artifact_manifest.file!.path;
+    const manifest = await readFile(manifestPath, "utf8");
+    await writeFile(manifestPath, `${manifest} `);
+    assert.match((await auditRun(store, request.run_id)).findings.join(" "), /Artifact manifest .* changed/);
+    await writeFile(manifestPath, manifest);
+    assert.equal((await auditRun(store, request.run_id)).verdict, "verified");
+
     const reportPath = audit.report.files[0]!.path;
     const original = await readFile(reportPath, "utf8");
     await writeFile(reportPath, original.replace('"status": "completed"', '"status": "completed" '));
@@ -194,7 +252,7 @@ test("an unfinished or legacy run is incomplete rather than verified", async () 
     await store.startRun({ request, artifactDir: join(root, "artifacts") });
     const audit = await auditRun(store, request.run_id);
     assert.equal(audit.verdict, "incomplete");
-    assert.match(audit.findings.join(" "), /only completed runs have a recorded report digest/);
+    assert.match(audit.findings.join(" "), /only completed runs have recorded report digests/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -205,9 +263,9 @@ test("live pipeline output shows elapsed time, hides process logs unless verbose
   const lines: string[] = [];
   const quiet = createRunConsoleReporter({ write: (text) => lines.push(text), now: () => clock });
   clock = 3_725_000;
-  void quiet.onEvent?.({ stage: "training", status: "running", message: "Training adapter.", details: { log_path: "/x/train.log", huge: "y".repeat(500), nested: { a: 1 } } });
+  void quiet.onEvent?.({ stage: "training", status: "running", message: "Training adapter.", details: { log_path: "/x/train.log", metrics: 1, command: ["uv", "run"], nested: { a: 1 } } });
   assert.equal(quiet.verbose, false);
-  assert.deepEqual(lines, ["[tt] +01:02:05 training: Training adapter. (log_path=/x/train.log)\n"]);
+  assert.deepEqual(lines, ["[tt] +01:02:05 training: Training adapter. (log_path=/x/train.log command=uv run)\n"]);
   const verbose = createRunConsoleReporter({ write: (text) => lines.push(text), now: () => clock, verbose: true });
   assert.equal(verbose.verbose, true);
   void verbose.onLog?.({ stage: "training", stream: "stderr", message: "step 1 token=abc secret=hunter2" });

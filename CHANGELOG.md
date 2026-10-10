@@ -19,9 +19,9 @@
 
 ### Changed
 
-- `tt publish` audits the run first. It refuses evidence that fails
-  verification, warns when evidence is incomplete, and uploads the audit
-  summary with the report.
+- `tt publish` audits the run first and uploads the audit summary with the
+  report. It refuses tampered evidence. Unverifiable evidence (runs from older
+  TT versions, unreadable event lines) needs `--allow-unverified`.
 
 ## [0.21.0] - 2026-09-30
 

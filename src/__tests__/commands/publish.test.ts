@@ -164,6 +164,11 @@ function writeStoreFixture() {
     join(STORE_ROOT, "runs", RUN_ID, "run-report.json"),
     JSON.stringify(report),
   );
+  const legacyEvents = (runId: string) => ["queued", "completed"].map((stage) => JSON.stringify({
+    id: `${runId}-${stage}`, run_id: runId, stage, status: stage, message: stage, occurred_at: "2026-08-18T10:00:00.000Z",
+  })).join("\n") + "\n";
+  writeFileSync(join(STORE_ROOT, "runs", RUN_ID, "progress.jsonl"), legacyEvents(RUN_ID));
+  writeFileSync(join(STORE_ROOT, "runs", OLDER_RUN_ID, "progress.jsonl"), legacyEvents(OLDER_RUN_ID));
 
   writeFileSync(
     join(STORE_ROOT, "runs", OLDER_RUN_ID, "state.json"),
@@ -232,7 +237,7 @@ describe("publish command", () => {
     const childKey = `tt_${"b".repeat(48)}`;
     await buildProgram().parseAsync([
       "node", "tt", "--api-key", FAKE_KEY, "--base-url", "https://parent.example",
-      "publish", "--yes",
+      "publish", "--yes", "--allow-unverified",
       ...(childOverride ? ["--api-key", childKey, "--base-url", "https://child.example"] : []),
     ]);
     expect(client.post).toHaveBeenCalledWith("/publish/runs", expect.anything(), {
@@ -254,7 +259,7 @@ describe("publish command", () => {
     });
 
     const program = buildProgram();
-    await program.parseAsync(["node", "tt", "publish", "--yes"]);
+    await program.parseAsync(["node", "tt", "publish", "--yes", "--allow-unverified"]);
 
     expect(client.post).toHaveBeenCalledWith(
       "/publish/runs",
@@ -274,12 +279,15 @@ describe("publish command", () => {
 
   it("attaches the run audit to the published evidence", async () => {
     vi.mocked(client.post).mockResolvedValue({ data: { id: "hosted-run", spec_id: "hosted-spec", run_number: 1 } });
-    await buildProgram().parseAsync(["node", "tt", "publish", "--yes"]);
+    // The fixture predates event chaining: unverifiable, so publishing needs an explicit opt-in.
+    await expect(buildProgram().parseAsync(["node", "tt", "publish", "--yes"]))
+      .rejects.toThrow(/cannot be fully verified.*--allow-unverified/);
+    expect(client.post).not.toHaveBeenCalled();
+    await buildProgram().parseAsync(["node", "tt", "publish", "--yes", "--allow-unverified"]);
     const payload = vi.mocked(client.post).mock.calls[0]![1] as { report: { audit: Record<string, unknown> } };
-    // The fixture predates event chaining: publishable, but marked incomplete.
     expect(payload.report.audit).toMatchObject({
       verdict: "incomplete",
-      event_chain: { status: "empty", events: 0, head_hash: null },
+      event_chain: { status: "legacy", events: 2, head_hash: null },
       report_sha256: null,
     });
   });
@@ -324,6 +332,7 @@ describe("publish command", () => {
       "publish",
       OLDER_RUN_ID.slice(0, 8),
       "--yes",
+      "--allow-unverified",
     ]);
 
     expect(client.post).toHaveBeenCalledWith(

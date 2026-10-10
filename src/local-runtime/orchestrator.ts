@@ -1946,6 +1946,7 @@ export async function runLocalFineTune(input: {
   request: FineTuneRunRequest;
   config: LocalRunnerConfig;
   reporter?: LocalRunReporter;
+  specFile?: SpecFileIdentity;
 }): Promise<LocalRunResult> {
   const result = await runLocalPipeline({ ...input, pipeline: canonicalLocalPipeline() });
   if (!result.report || !result.reportPath) {
