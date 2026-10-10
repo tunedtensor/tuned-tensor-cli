@@ -42,6 +42,9 @@
 
 ### Fixed
 
+- Keep indexed model shards within the verified cache inventory.
+- Correct the GB10 / DGX Spark hardware panel.
+- Preserve owner instructions in serving content-parts templates.
 - Regenerate altered converted dataset files from their verified Hugging Face
   source instead of reusing changed training data.
 - Skip incomplete mapped records consistently, including the first row, while
