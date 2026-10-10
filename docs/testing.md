@@ -84,8 +84,9 @@ Managed inference consumes TT usage allowance; BYO calls use the selected
 provider's billing. The runner uses the normal model-runtime initialization,
 including its saved configuration normalization and any provider credential refresh.
 
-Six synthetic cases cover spec review, a reviewed spec edit, an adapter preview, a foundation preview,
-an invalid spec, and an honest handoff for report inspection and serving.
+Eight synthetic cases cover spec review, a reviewed spec edit, an adapter preview, a foundation preview,
+an invalid spec, an honest handoff for report inspection and serving, a configured
+Hugging Face dataset download handoff, and foundation dataset compatibility.
 Assertions check tool use, sealed proposal contents, requested execution mode,
 pipeline stages and settings, persisted state, and lack of workspace changes.
 They do not compare exact prose or ask a judge model to approve another model.
@@ -101,8 +102,9 @@ cancellation causes a hard failure after a five-second grace period.
 JSON lines include the selected model/thinking, individual assertions,
 responses, tool/proposal evidence, request counts, and elapsed time. Known
 provider/environment secrets are redacted. Any failed automated assertion or
-provider failure exits nonzero. The serving-handoff case also requires a
-person to check command correctness and that the answer invents no results.
+provider failure exits nonzero. The spec-review, serving-handoff and dataset-handoff cases also require a
+person to check factual accuracy, command correctness and that the answer invents
+no results or unsupported engine capabilities.
 An automated pass is not a completed human review.
 
 For a release decision, run the same cases three times on both the current
@@ -185,7 +187,7 @@ The local agent currently has no local report-reading, activation, or serving to
 It can prepare dry-run previews of training and evaluation pipelines; users
 must run explicit shell commands for real training, local report inspection,
 and serving. Cloud report tools are available when signed in, but this suite
-exercises the local workflow with cloud tools disabled. The live handoff case
+exercises the local workflow with cloud tools disabled. The live serving handoff case
 documents that limitation; it does not certify the full chat-to-serving promise.
 When those tools ship, replace the handoff with a multi-turn scenario that
 assesses an actual report and serves the exact reviewed artifact.

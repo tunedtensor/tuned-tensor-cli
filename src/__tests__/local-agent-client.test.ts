@@ -185,6 +185,8 @@ describe("local agent conversation client", () => {
     expect(created[0]?.systemPrompt).toContain("search_hugging_face");
     expect(created[0]?.systemPrompt).toMatch(/models or datasets/i);
     expect(created[0]?.systemPrompt).toMatch(/Hugging Face.*never include secrets or private data/is);
+    expect(created[0]?.systemPrompt).toContain("tt datasets prefetch tunedtensor.json");
+    expect(created[0]?.systemPrompt).toContain("writes and previews require the user's approval");
     expect(created[0]?.systemPrompt).toContain("inspect_training_source");
     expect(created[0]?.systemPrompt).toMatch(/observed behavior.*inferred rationale/is);
     expect(created[0]?.systemPrompt).toContain("examine_hardware");
