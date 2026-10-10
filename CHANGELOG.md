@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.22.0] - 2026-10-10
 
 ### Added
 
@@ -15,6 +15,19 @@
 - Download progress for models and datasets: an in-place bar with transfer
   rate and ETA on terminals, and a line every 10% or 30 seconds in logs.
 
+- `tt runs audit <run-id>` verifies a run's record and shows its stage
+  timeline with durations and its provenance. The verdict is `verified`,
+  `incomplete` or `tampered` (exit code 2).
+- Run events are hash-chained, and the completion event records the report's
+  SHA-256, so editing, deleting or reordering events, or editing the report
+  after completion, is detected.
+- Run reports include a `provenance` block: software versions and the Python
+  lockfile digest, execution target, spec file and snapshot digests, base model
+  revision and fingerprint, data digests, evaluation split and seed,
+  hyperparameters and training exit code.
+- `tt pipeline run` prints live stage progress with elapsed time. Use
+  `--verbose` for process logs and `--quiet` to hide output.
+
 ### Changed
 
 - Model and dataset prefetch resolve the revision to one commit before
@@ -22,6 +35,24 @@
   (`TT_HF_DOWNLOAD_MAX_ATTEMPTS`, default 10) and keep completed files, so a
   rerun resumes long downloads. huggingface_hub's own progress bars are
   disabled because they flooded captured logs.
+
+- `tt publish` audits the run first and uploads the audit summary with the
+  report. It refuses tampered evidence. Unverifiable evidence (runs from older
+  TT versions, unreadable event lines) needs `--allow-unverified`.
+
+### Fixed
+
+- Keep indexed model shards within the verified cache inventory.
+- Correct the GB10 / DGX Spark hardware panel.
+- Preserve owner instructions in serving content-parts templates.
+- Regenerate altered converted dataset files from their verified Hugging Face
+  source instead of reusing changed training data.
+- Skip incomplete mapped records consistently, including the first row, while
+  retaining diagnostics for unknown column names.
+- Treat non-object JSON event lines as unreadable evidence instead of crashing
+  later event appends or audit inspection.
+- Preserve download progress in the shared elapsed-time run reporter and honor
+  quiet mode during pipeline dataset downloads.
 
 ## [0.21.0] - 2026-09-30
 

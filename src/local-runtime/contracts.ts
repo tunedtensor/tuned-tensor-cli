@@ -306,6 +306,61 @@ export const trainingReportSchema = z.object({
   command: z.array(z.string()).optional(),
 }).strict();
 
+/**
+ * What produced a run, recorded once in the report so it travels with
+ * `tt publish`: software and host, execution target, exact inputs (spec,
+ * base model, data) by digest, and the training configuration.
+ */
+export const runProvenanceSchema = z.object({
+  schema_version: z.literal(1),
+  recorded_at: z.string(),
+  software: z.object({
+    tt_version: z.string(),
+    node_version: z.string(),
+    platform: z.string(),
+    arch: z.string(),
+    runtime_fingerprint: z.string(),
+    python_lock_sha256: z.string().nullable(),
+  }).strict(),
+  execution: z.object({
+    target: z.enum(["local", "aws"]),
+    training_backend: z.string(),
+    instance_id: z.string().optional(),
+    region: z.string().optional(),
+  }).strict(),
+  spec: z.object({
+    behavior_spec_id: z.string(),
+    run_number: z.number().int(),
+    snapshot_sha256: z.string(),
+    system_prompt_sha256: z.string(),
+    file_path: z.string().optional(),
+    file_sha256: z.string().optional(),
+  }).strict(),
+  base_model: z.object({
+    id: z.string(),
+    revision: z.string().nullable(),
+    fingerprint: z.string().nullable(),
+  }).strict(),
+  data: z.object({
+    prebuilt: z.boolean(),
+    format: z.string().nullable(),
+    file_sha256: z.record(z.string(), z.string()),
+    compiled_training_sha256: z.string().nullable(),
+    training_examples: z.number().int().nonnegative().nullable(),
+    eval_split: z.string(),
+    eval_sample_seed: z.number().int(),
+    eval_examples_total: z.number().int().nonnegative(),
+    eval_examples_used: z.number().int().nonnegative(),
+  }).strict(),
+  training: z.object({
+    hyperparameters: z.record(z.string(), z.unknown()),
+    exit_code: z.number().int().nullable(),
+    log_uri: z.string(),
+  }).strict(),
+  /** Hash over request, runtime, preparation config and input digests. */
+  source_fingerprint: z.string(),
+}).strict();
+
 export const runReportSchema = z.object({
   run_id: z.string().uuid(),
   behavior_spec_id: z.string().uuid(),
@@ -331,6 +386,7 @@ export const runReportSchema = z.object({
     failures: z.array(z.string()),
   }).strict().optional(),
   training: trainingReportSchema,
+  provenance: runProvenanceSchema.optional(),
   artifact_uris: z.object({
     dataset: z.string(),
     baseline_eval: z.string(),
@@ -555,4 +611,5 @@ export type EvalReport = z.infer<typeof evalReportSchema>;
 export type ComparisonReport = z.infer<typeof comparisonReportSchema>;
 export type TrainingReport = z.infer<typeof trainingReportSchema>;
 export type RunReport = z.infer<typeof runReportSchema>;
+export type RunProvenance = z.infer<typeof runProvenanceSchema>;
 export type LocalRunnerConfig = z.infer<typeof localRunnerConfigSchema>;

@@ -516,6 +516,41 @@ tt pipeline run --spec tunedtensor.json # downloads automatically if still missi
   SHA-256s and conversion counts in `run_metadata.dataset_source`.
 - Gated datasets use `HF_TOKEN`, as model downloads do.
 
+### Run records and audit
+
+`tt pipeline run` prints each stage live with the time since the run started.
+`--verbose` adds training and evaluation process output, and `--quiet` hides
+both. Full logs stay in the run directory either way.
+
+Every run report has a `provenance` block recording what produced it:
+
+- TT, Node and platform versions, and the digest of the locked Python runtime;
+- where training ran (local, or the AWS instance and region);
+- the spec file and snapshot digests;
+- the base model id, revision and content fingerprint;
+- every dataset file's SHA-256, the compiled training data digest, and the
+  evaluation split and seed;
+- the hyperparameters and the training exit code.
+
+The run's event log is hash-chained: each event records the previous event's
+hash. When a run completes, TT records the report's SHA-256.
+
+```bash
+tt runs audit <run-id>
+```
+
+`tt runs audit` checks the event chain and re-hashes the report, then prints
+the stage timeline with durations and the provenance. Its verdict is
+`verified`, `incomplete` (older TT versions or unfinished runs) or `tampered`.
+`tampered` exits with code 2 and names the edited event or file; removing the
+completion event or emptying the log also counts as tampering.
+
+`tt publish` runs the same audit and uploads the summary with the report. It
+refuses tampered evidence. It also stops on unverifiable evidence, such as runs
+from older TT versions or logs with unreadable lines, unless you pass
+`--allow-unverified`. The chain makes edits evident; it is not a signature, so
+anyone with write access to the store can rewrite the whole log.
+
 Serving still runs on the machine executing `tt serve` and requires a local
 Linux/CUDA GPU, even when training used AWS:
 

@@ -7,6 +7,8 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { compareRuns } from "./compare.js";
+import { auditRun } from "./audit.js";
+import { createRunConsoleReporter } from "./console-reporter.js";
 import { assertArtifactManifest } from "./artifacts.js";
 import { fineTuneRunRequestSchema, isDecisionSpecFile, isFoundationSpecFile, localBehaviorSpecFileSchema, localRunnerConfigSchema, type FineTuneRunRequest, type LocalRunnerConfig, type SpecSnapshot } from "./contracts.js";
 import { buildSystemMessage } from "./dataset.js";
@@ -29,7 +31,6 @@ import {
 } from "./model-server.js";
 import { prefetchBaseModel } from "./prefetch.js";
 import { DatasetNotDownloadedError, ensureDatasetCached, huggingFaceDataset, prefetchHuggingFaceDataset } from "./dataset-prefetch.js";
-import { createProgressRenderer, progressColumns, progressTty } from "./progress-bar.js";
 import { createLocalStore, type LocalModelRecord, type LocalStore } from "./store.js";
 import {
   DEFAULT_LOCAL_SPEC_PATH,
@@ -37,10 +38,11 @@ import {
   assertLocalRunInputReady,
   initLocalSpecFile,
   loadLocalRunInput,
+  specHash,
   type LocalRunInput,
   validateBehaviorSpec,
 } from "./local-project.js";
-import { sanitizeLogLine, type LocalRunProgressEvent, type LocalRunReporter } from "./run-reporter.js";
+import type { LocalRunReporter } from "./run-reporter.js";
 import { activateModel, getActiveModel, rollbackActiveModel } from "./active-model.js";
 import { localRuntimePackageRoot } from "./package-root.js";
 
@@ -107,7 +109,7 @@ Commands:
   validate [tunedtensor.json] [--config local-runner.json]
   run [tunedtensor.json] [--config local-runner.json] [--dry-run] [--verbose] [--quiet]
   serve <model-id|active|base|foundation> [--config local-runner.json] [--host 127.0.0.1] [--port 8000]
-  runs list|get|events|report|compare [args] [--config local-runner.json]
+  runs list|get|events|report|compare|audit [args] [--config local-runner.json]
   models list|get|verify|prefetch|verify-base|active|activate|rollback|serve [args] [--config local-runner.json]
   datasets prefetch|verify [tunedtensor.json]
 
@@ -245,6 +247,7 @@ const COMMAND_GROUPS: Record<string, CliCommandGroup> = {
       get: { usage: "tt runs get <run-id> [--config path]", description: "Get a local run.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs get requires <run-id>" },
       events: { usage: "tt runs events <run-id> [--config path]", description: "List run events.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs events requires <run-id>" },
       report: { usage: "tt runs report <run-id> [--config path]", description: "Show the baseline-vs-tuned report, including deltas and regressions.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs report requires <run-id>" },
+      audit: { usage: "tt runs audit <run-id> [--config path]", description: "Verify the run's event chain and report digest, and show its timeline and provenance.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs audit requires <run-id>" },
       compare: { usage: "tt runs compare <run-id-a> <run-id-b> [--config path]", description: "Compare two run reports.", options: [CONFIG_OPTION], minPositionals: 2, maxPositionals: 2, missingPositionalsMessage: "runs compare requires <run-id-a> <run-id-b>" },
     },
   },
@@ -497,57 +500,9 @@ function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
-function shortValue(value: unknown): string | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (Array.isArray(value)) return `[${value.length} items]`;
-  return null;
-}
-
-function formatEvent(event: LocalRunProgressEvent): string {
-  const detailText = Object.entries(event.details ?? {})
-    .filter(([key]) => key !== "metrics")
-    .map(([key, value]) => {
-      const formatted = key === "command" && Array.isArray(value)
-        ? value.join(" ")
-        : shortValue(value);
-      return formatted ? `${key}=${formatted}` : null;
-    })
-    .filter((value): value is string => Boolean(value))
-    .slice(0, 5)
-    .join(" ");
-  return sanitizeLogLine(`[tt] ${event.stage}: ${event.message}${detailText ? ` (${detailText})` : ""}`);
-}
-
 function createConsoleReporter(options: { verbose: boolean; quiet: boolean }): LocalRunReporter | undefined {
   if (options.quiet) return undefined;
-  let lastLogLine = "";
-  const progress = createProgressRenderer({
-    write: (text) => process.stderr.write(text),
-    tty: progressTty(),
-    columns: progressColumns(),
-  });
-  return {
-    verbose: options.verbose,
-    onEvent(event) {
-      progress.interrupt();
-      process.stderr.write(`${formatEvent(event)}\n`);
-    },
-    onLog(log) {
-      const line = sanitizeLogLine(`[tt] ${log.stage}${log.stream ? ` ${log.stream}` : ""}: ${log.message}`);
-      // tqdm redraws the same progress line several times per step; collapse
-      // consecutive duplicates so --verbose output stays readable.
-      if (line === lastLogLine) return;
-      lastLogLine = line;
-      progress.interrupt();
-      process.stderr.write(`${line}\n`);
-    },
-    onProgress(update) {
-      progress.update(update);
-    },
-  };
+  return createRunConsoleReporter({ verbose: options.verbose });
 }
 
 async function verifyStoredModel(model: LocalModelRecord, config: LocalRunnerConfig): Promise<{
@@ -1246,12 +1201,18 @@ async function main(argv: string[]): Promise<void> {
         },
       });
     }
+    // `tt` may hand us a temporary projection of the spec (cloud-only keys
+    // removed); its path and bytes are not the user's file, so record only the
+    // spec snapshot digest in that case.
+    const specFile = /^\..+\.tt-local-/.test(basename(input.path))
+      ? undefined
+      : { path: input.path, sha256: specHash(await readFile(input.path, "utf8")) };
     if (input.spec.pipeline) {
-      const result = await runLocalPipeline({ request, config, reporter, pipeline: pipelineForRunInput(input) as LocalPipeline, projectSpec: input.spec });
+      const result = await runLocalPipeline({ request, config, reporter, pipeline: pipelineForRunInput(input) as LocalPipeline, projectSpec: input.spec, specFile });
       printJson(result);
       return;
     }
-    const result = await runLocalFineTune({ request, config, reporter });
+    const result = await runLocalFineTune({ request, config, reporter, specFile });
     printJson({
       status: result.report.status,
       run_id: result.report.run_id,
@@ -1300,6 +1261,14 @@ async function main(argv: string[]): Promise<void> {
       const id = cli.positionals[0];
       if (!id) throw new Error("runs report requires <run-id>");
       return printJson(await store.getRunReport(id));
+    }
+    if (subcommand === "audit") {
+      const id = cli.positionals[0];
+      if (!id) throw new Error("runs audit requires <run-id>");
+      const audit = await auditRun(store, id);
+      printJson(audit);
+      if (audit.verdict === "tampered") process.exitCode = 2;
+      return;
     }
     if (subcommand === "compare") {
       const idA = cli.positionals[0];

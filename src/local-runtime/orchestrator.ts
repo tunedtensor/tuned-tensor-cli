@@ -24,6 +24,7 @@ import {
   evalReportSchema,
   fineTuneRunRequestSchema,
   localRunnerConfigSchema,
+  runProvenanceSchema,
   runReportSchema,
   trainingReportSchema,
   type BehaviorSpecExample,
@@ -31,6 +32,7 @@ import {
   type EvalSplit,
   type FineTuneRunRequest,
   type LocalRunnerConfig,
+  type RunProvenance,
   type RunReport,
   type TrainingReport,
 } from "./contracts.js";
@@ -1564,6 +1566,68 @@ async function runCandidateStage(args: {
   return report;
 }
 
+export interface SpecFileIdentity {
+  path: string;
+  sha256: string;
+}
+
+async function buildRunProvenance(args: {
+  prepared: PreparedRun;
+  config: LocalRunnerConfig;
+  training: TrainingReport;
+  recordedAt: string;
+  specFile?: SpecFileIdentity;
+}): Promise<RunProvenance> {
+  const { metadata, request } = args.prepared;
+  const gpu = args.config.gpu;
+  return runProvenanceSchema.parse({
+    schema_version: 1,
+    recorded_at: args.recordedAt,
+    software: {
+      tt_version: await packageVersion(),
+      node_version: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      runtime_fingerprint: metadata.runtime_fingerprint,
+      python_lock_sha256: await hashFileIfPresent(resolve(packageRoot, "training/adapter/uv.lock")),
+    },
+    execution: {
+      target: gpu ? "aws" : "local",
+      training_backend: args.training.provider,
+      ...(gpu ? { instance_id: gpu.instanceId, ...(gpu.region ? { region: gpu.region } : {}) } : {}),
+    },
+    spec: {
+      behavior_spec_id: request.behavior_spec_id,
+      run_number: request.run_number,
+      snapshot_sha256: hashJson(request.spec_snapshot),
+      system_prompt_sha256: metadata.system_prompt_sha256,
+      ...(args.specFile ? { file_path: args.specFile.path, file_sha256: args.specFile.sha256 } : {}),
+    },
+    base_model: {
+      id: request.spec_snapshot.base_model,
+      revision: metadata.base_model_revision,
+      fingerprint: metadata.base_model_fingerprint,
+    },
+    data: {
+      prebuilt: metadata.dataset_prebuilt,
+      format: metadata.dataset_format,
+      file_sha256: metadata.dataset_fingerprints,
+      compiled_training_sha256: await hashFileIfPresent(args.prepared.artifacts.trainingJsonl),
+      training_examples: metadata.training_example_count,
+      eval_split: metadata.eval_split,
+      eval_sample_seed: metadata.eval_sample_seed,
+      eval_examples_total: metadata.eval_examples_total,
+      eval_examples_used: metadata.eval_examples_used,
+    },
+    training: {
+      hyperparameters: request.hyperparameters,
+      exit_code: args.training.exit_code,
+      log_uri: args.training.log_uri,
+    },
+    source_fingerprint: metadata.source_fingerprint,
+  });
+}
+
 async function runReportStage(args: {
   prepared: PreparedRun;
   config: LocalRunnerConfig;
@@ -1571,6 +1635,7 @@ async function runReportStage(args: {
   reporter?: LocalRunReporter;
   startedAt: string;
   startedPerf: number;
+  specFile?: SpecFileIdentity;
 }): Promise<RunReport> {
   if (!await pathExists(args.prepared.artifacts.baselineEvalJson)) {
     throw new Error("Run reporting requires baseline-eval.json.");
@@ -1669,6 +1734,13 @@ async function runReportStage(args: {
   }
   const completedAt = new Date().toISOString();
   const duration = elapsed(args.startedPerf);
+  const provenance = await buildRunProvenance({
+    prepared: args.prepared,
+    config: args.config,
+    training,
+    recordedAt: completedAt,
+    specFile: args.specFile,
+  });
   const report = runReportSchema.parse({
     run_id: args.prepared.request.run_id,
     behavior_spec_id: args.prepared.request.behavior_spec_id,
@@ -1682,6 +1754,7 @@ async function runReportStage(args: {
     comparison,
     general_regression: generalRegression,
     training,
+    provenance,
     artifact_uris: {
       dataset: fileUri(args.prepared.artifacts.trainingJsonl),
       baseline_eval: fileUri(args.prepared.artifacts.baselineEvalJson),
@@ -1746,6 +1819,8 @@ export async function runLocalPipeline(input: {
   pipeline: LocalPipeline;
   projectSpec?: import("./contracts.js").LocalBehaviorSpecFile;
   reporter?: LocalRunReporter;
+  /** The spec file this run was planned from, recorded in provenance. */
+  specFile?: SpecFileIdentity;
 }): Promise<LocalPipelineResult> {
   const pipeline = validateLocalPipeline(input.pipeline);
   const validated = await validateLocalFineTuneInput({
@@ -1827,6 +1902,7 @@ export async function runLocalPipeline(input: {
           reporter: input.reporter,
           startedAt,
           startedPerf,
+          specFile: input.specFile,
         });
         return { request: input.request, pipeline, status: "completed", outputs, report, reportPath: artifacts.runReportJson, artifactDir: artifacts.runDir };
       }
@@ -1876,6 +1952,7 @@ export async function runLocalFineTune(input: {
   request: FineTuneRunRequest;
   config: LocalRunnerConfig;
   reporter?: LocalRunReporter;
+  specFile?: SpecFileIdentity;
 }): Promise<LocalRunResult> {
   const result = await runLocalPipeline({ ...input, pipeline: canonicalLocalPipeline() });
   if (!result.report || !result.reportPath) {

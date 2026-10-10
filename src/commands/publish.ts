@@ -9,6 +9,7 @@ import { stdin as defaultStdin, stdout as defaultStdout } from "node:process";
 import { post, type ClientOpts } from "../client.js";
 import { getApiKey, getBaseUrl } from "../config.js";
 import { runReportSchema } from "../local-runtime/contracts.js";
+import { auditRun } from "../local-runtime/audit.js";
 import {
   createLocalStore,
   defaultLocalHome,
@@ -159,6 +160,7 @@ export function registerPublishCommand(parent: Command) {
     .option("-u, --base-url <url>", "API base URL")
     .option("-y, --yes", "Skip confirmation prompt")
     .option("--dry-run", "Show what would be published without uploading")
+    .option("--allow-unverified", "Publish evidence that cannot be fully verified (older TT versions, unreadable events)")
     .action(async (runId: string | undefined, cmdOpts) => {
       const inherited = parent.optsWithGlobals() as ClientOpts;
       const opts: ClientOpts = {
@@ -182,12 +184,29 @@ export function registerPublishCommand(parent: Command) {
       const exampleCount = report.candidate.results.length
         || report.baseline.results.length;
 
+      // Publish only evidence that still matches what the run recorded.
+      const audit = await auditRun(store, run.id);
+      if (audit.verdict === "tampered") {
+        throw new Error(
+          `Run ${run.id} evidence does not verify: ${audit.findings.join(" ")} `
+          + `Inspect it with \`tt runs audit ${run.id}\`; tampered runs are not published.`,
+        );
+      }
       const payload = {
         spec: {
           id: specRecord.id,
           ...specRecord.spec,
         },
-        report,
+        report: {
+          ...report,
+          audit: {
+            verdict: audit.verdict,
+            findings: audit.findings,
+            event_chain: { status: audit.chain.status, events: audit.chain.events, head_hash: audit.chain.head_hash },
+            report_sha256: audit.report.recorded_sha256,
+            timeline: audit.timeline,
+          },
+        },
       };
       assertPublishPayloadSize(payload);
 
@@ -216,6 +235,17 @@ export function registerPublishCommand(parent: Command) {
         ]);
         printWarning(
           "Prompts and model outputs from the run report will be uploaded to your Tuned Tensor account.",
+        );
+        if (audit.verdict !== "verified") {
+          printWarning(`Run evidence is unverified: ${audit.findings.join(" ")}`);
+        }
+      }
+
+      if (audit.verdict !== "verified" && !cmdOpts.allowUnverified && !cmdOpts.dryRun) {
+        throw new Error(
+          `Run ${run.id} evidence cannot be fully verified: ${audit.findings.join(" ")} `
+          + "Review it with `tt runs audit`, then pass --allow-unverified to publish it anyway; "
+          + "the dashboard will show it as unverified.",
         );
       }
 
