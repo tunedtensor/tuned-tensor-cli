@@ -212,6 +212,7 @@ test("column mapping converts records with recorded, deterministic cleanup", asy
     const records = (rows: Array<Record<string, unknown>>) => `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
     await cacheDataset(join(root, "hf"), {
       "train.jsonl": records([
+        { text: "missing first label" },
         { text: "I love it", label: "positive" },
         { text: "", label: "neutral" },
         { text: "shared prompt", label: "negative" },
@@ -227,7 +228,7 @@ test("column mapping converts records with recorded, deterministic cleanup", asy
     const run = request({ huggingface: { repo, columns: { input: "text", output: "label" } }, training: "train.jsonl", test: "test.jsonl" });
     const resolved = await resolveRequestDataset(run, config(root));
     assert.deepEqual(resolved.dataset_source?.conversion, {
-      training: { records: 4, kept: 2, skipped_missing_fields: 1, dropped_duplicate_inputs: 0, dropped_eval_overlap: 1 },
+      training: { records: 5, kept: 2, skipped_missing_fields: 2, dropped_duplicate_inputs: 0, dropped_eval_overlap: 1 },
       test: { records: 4, kept: 2, skipped_missing_fields: 1, dropped_duplicate_inputs: 1, dropped_eval_overlap: 0 },
     });
     const trainingPath = resolved.dataset_prebuilt!.training;
@@ -242,6 +243,10 @@ test("column mapping converts records with recorded, deterministic cleanup", asy
     // Same inputs reuse the content-addressed conversion.
     const again = await resolveRequestDataset(run, config(root));
     assert.equal(again.dataset_prebuilt!.training, trainingPath);
+    const original = await readFile(trainingPath, "utf8");
+    await writeFile(trainingPath, original.replace("positive", "negative"));
+    await resolveRequestDataset(run, config(root));
+    assert.equal(await readFile(trainingPath, "utf8"), original);
     // A different instruction yields a different conversion.
     const changed = await resolveRequestDataset(
       fineTuneRunRequestSchema.parse({ ...run, spec_snapshot: { ...spec, system_prompt: "Different." } }),
