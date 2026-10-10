@@ -9,6 +9,7 @@ import { stdin as defaultStdin, stdout as defaultStdout } from "node:process";
 import { post, type ClientOpts } from "../client.js";
 import { getApiKey, getBaseUrl } from "../config.js";
 import { runReportSchema } from "../local-runtime/contracts.js";
+import { auditRun } from "../local-runtime/audit.js";
 import {
   createLocalStore,
   defaultLocalHome,
@@ -182,12 +183,29 @@ export function registerPublishCommand(parent: Command) {
       const exampleCount = report.candidate.results.length
         || report.baseline.results.length;
 
+      // Publish only evidence that still matches what the run recorded.
+      const audit = await auditRun(store, run.id);
+      if (audit.verdict === "tampered") {
+        throw new Error(
+          `Run ${run.id} evidence does not verify: ${audit.findings.join(" ")} `
+          + `Inspect it with \`tt runs audit ${run.id}\`; tampered runs are not published.`,
+        );
+      }
       const payload = {
         spec: {
           id: specRecord.id,
           ...specRecord.spec,
         },
-        report,
+        report: {
+          ...report,
+          audit: {
+            verdict: audit.verdict,
+            findings: audit.findings,
+            event_chain: { status: audit.chain.status, events: audit.chain.events, head_hash: audit.chain.head_hash },
+            report_sha256: audit.report.recorded_sha256,
+            timeline: audit.timeline,
+          },
+        },
       };
       assertPublishPayloadSize(payload);
 
@@ -217,6 +235,9 @@ export function registerPublishCommand(parent: Command) {
         printWarning(
           "Prompts and model outputs from the run report will be uploaded to your Tuned Tensor account.",
         );
+        if (audit.verdict !== "verified") {
+          printWarning(`Run evidence is incomplete: ${audit.findings.join(" ")}`);
+        }
       }
 
       if (cmdOpts.dryRun) {

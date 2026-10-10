@@ -227,6 +227,71 @@ function renderRunEvents(value: unknown): void {
   );
 }
 
+function formatSeconds(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "running";
+  const seconds = Math.round(value);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  if (hours) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  if (minutes) return `${minutes}m ${String(rest).padStart(2, "0")}s`;
+  return `${rest}s`;
+}
+
+function shortHash(value: unknown): string | undefined {
+  const hash = text(value);
+  return hash ? hash.slice(0, 12) : undefined;
+}
+
+function renderRunAudit(value: Record<string, unknown>): void {
+  const verdict = text(value.verdict);
+  const chain = record(value.chain);
+  const reportInfo = record(value.report);
+  const findings = Array.isArray(value.findings) ? value.findings.map(String) : [];
+  if (verdict === "verified") printSuccess("Run evidence verified: event log intact and report unchanged since completion");
+  else if (verdict === "tampered") printError("Run evidence does not verify");
+  else printWarning("Run evidence is incomplete");
+  for (const finding of findings) console.log(`  - ${finding}`);
+  printDetail([
+    ["Run", text(value.run_id)],
+    ["Status", status(value.status)],
+    ["Event chain", `${text(chain?.status) ?? "—"} (${text(chain?.chained_events) ?? 0}/${text(chain?.events) ?? 0} chained, head ${shortHash(chain?.head_hash) ?? "—"})`],
+    ["Report sha256", shortHash(reportInfo?.recorded_sha256) ?? "not recorded"],
+  ]);
+  const timeline = rows(value.timeline);
+  if (timeline.length > 0) {
+    console.log("");
+    printTable(
+      ["Started", "Stage", "Duration", "Status"],
+      timeline.map((entry) => [
+        formatDate(text(entry.started_at)),
+        text(entry.stage) ?? "—",
+        formatSeconds(entry.duration_seconds),
+        status(entry.status),
+      ]),
+    );
+  }
+  const provenance = record(value.provenance);
+  if (provenance) {
+    const software = record(provenance.software);
+    const execution = record(provenance.execution);
+    const spec = record(provenance.spec);
+    const baseModel = record(provenance.base_model);
+    const data = record(provenance.data);
+    const files = record(data?.file_sha256) ?? {};
+    console.log("");
+    printDetail([
+      ["TT", `${text(software?.tt_version) ?? "—"} (node ${text(software?.node_version) ?? "—"}, ${text(software?.platform) ?? "—"}/${text(software?.arch) ?? "—"})`],
+      ["Execution", `${text(execution?.target) ?? "—"}${text(execution?.instance_id) ? ` ${text(execution?.instance_id)}` : ""} via ${text(execution?.training_backend) ?? "—"}`],
+      ["Spec", `${text(spec?.file_path) ?? text(spec?.behavior_spec_id) ?? "—"} (sha256 ${shortHash(spec?.file_sha256) ?? shortHash(spec?.snapshot_sha256) ?? "—"})`],
+      ["Base model", `${text(baseModel?.id) ?? "—"}@${shortHash(baseModel?.revision) ?? "unpinned"}`],
+      ...Object.entries(files).map(([split, hash]): [string, string | undefined] => [`Data ${split}`, `sha256 ${shortHash(hash)}`]),
+      ["Training data", `sha256 ${shortHash(data?.compiled_training_sha256) ?? "—"} (${text(data?.training_examples) ?? "—"} examples)`],
+      ["Evaluation", `${text(data?.eval_examples_used) ?? "—"}/${text(data?.eval_examples_total) ?? "—"} ${text(data?.eval_split) ?? ""} (seed ${text(data?.eval_sample_seed) ?? "—"})`],
+    ]);
+  }
+}
+
 function renderRunRecord(value: Record<string, unknown>): void {
   printDetail([
     ["Run", text(value.id) ?? text(value.run_id)],
@@ -448,6 +513,10 @@ function renderKnownJson(args: string[], value: unknown): boolean {
     }
     if (subcommand === "events" && Array.isArray(value)) {
       renderRunEvents(value);
+      return true;
+    }
+    if (subcommand === "audit" && isRecord(value)) {
+      renderRunAudit(value);
       return true;
     }
     if (subcommand === "get" && isRecord(value)) {

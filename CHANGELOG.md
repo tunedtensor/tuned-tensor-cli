@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Added
+
+- `tt runs audit <run-id>` verifies a run's record and shows its stage
+  timeline with durations and its provenance. The verdict is `verified`,
+  `incomplete` or `tampered` (exit code 2).
+- Run events are hash-chained, and the completion event records the report's
+  SHA-256, so editing, deleting or reordering events, or editing the report
+  after completion, is detected.
+- Run reports include a `provenance` block: software versions and the Python
+  lockfile digest, execution target, spec file and snapshot digests, base model
+  revision and fingerprint, data digests, evaluation split and seed,
+  hyperparameters and training exit code.
+- `tt pipeline run` prints live stage progress with elapsed time. Use
+  `--verbose` for process logs and `--quiet` to hide output.
+
+### Changed
+
+- `tt publish` audits the run first. It refuses evidence that fails
+  verification, warns when evidence is incomplete, and uploads the audit
+  summary with the report.
+
 ## [0.21.0] - 2026-09-30
 
 ### Added

@@ -7,6 +7,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { compareRuns } from "./compare.js";
+import { auditRun } from "./audit.js";
 import { assertArtifactManifest } from "./artifacts.js";
 import { fineTuneRunRequestSchema, isDecisionSpecFile, isFoundationSpecFile, localBehaviorSpecFileSchema, localRunnerConfigSchema, type FineTuneRunRequest, type LocalRunnerConfig, type SpecSnapshot } from "./contracts.js";
 import { buildSystemMessage } from "./dataset.js";
@@ -105,7 +106,7 @@ Commands:
   validate [tunedtensor.json] [--config local-runner.json]
   run [tunedtensor.json] [--config local-runner.json] [--dry-run] [--verbose] [--quiet]
   serve <model-id|active|base|foundation> [--config local-runner.json] [--host 127.0.0.1] [--port 8000]
-  runs list|get|events|report|compare [args] [--config local-runner.json]
+  runs list|get|events|report|compare|audit [args] [--config local-runner.json]
   models list|get|verify|prefetch|verify-base|active|activate|rollback|serve [args] [--config local-runner.json]
 
 Global options:
@@ -242,6 +243,7 @@ const COMMAND_GROUPS: Record<string, CliCommandGroup> = {
       get: { usage: "tt runs get <run-id> [--config path]", description: "Get a local run.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs get requires <run-id>" },
       events: { usage: "tt runs events <run-id> [--config path]", description: "List run events.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs events requires <run-id>" },
       report: { usage: "tt runs report <run-id> [--config path]", description: "Show the baseline-vs-tuned report, including deltas and regressions.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs report requires <run-id>" },
+      audit: { usage: "tt runs audit <run-id> [--config path]", description: "Verify the run's event chain and report digest, and show its timeline and provenance.", options: [CONFIG_OPTION], minPositionals: 1, maxPositionals: 1, missingPositionalsMessage: "runs audit requires <run-id>" },
       compare: { usage: "tt runs compare <run-id-a> <run-id-b> [--config path]", description: "Compare two run reports.", options: [CONFIG_OPTION], minPositionals: 2, maxPositionals: 2, missingPositionalsMessage: "runs compare requires <run-id-a> <run-id-b>" },
     },
   },
@@ -1244,6 +1246,14 @@ async function main(argv: string[]): Promise<void> {
       const id = cli.positionals[0];
       if (!id) throw new Error("runs report requires <run-id>");
       return printJson(await store.getRunReport(id));
+    }
+    if (subcommand === "audit") {
+      const id = cli.positionals[0];
+      if (!id) throw new Error("runs audit requires <run-id>");
+      const audit = await auditRun(store, id);
+      printJson(audit);
+      if (audit.verdict === "tampered") process.exitCode = 2;
+      return;
     }
     if (subcommand === "compare") {
       const idA = cli.positionals[0];

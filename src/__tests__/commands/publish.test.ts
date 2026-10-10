@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Command } from "commander";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { registerPublishCommand } from "../../commands/publish.js";
 import * as client from "../../client.js";
 import { setJsonMode } from "../../output.js";
+import { chainEvent } from "../../local-runtime/audit.js";
 
 vi.mock("../../client.js", async (importOriginal) => {
   const actual = await importOriginal<typeof client>();
@@ -268,6 +270,33 @@ describe("publish command", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("attaches the run audit to the published evidence", async () => {
+    vi.mocked(client.post).mockResolvedValue({ data: { id: "hosted-run", spec_id: "hosted-spec", run_number: 1 } });
+    await buildProgram().parseAsync(["node", "tt", "publish", "--yes"]);
+    const payload = vi.mocked(client.post).mock.calls[0]![1] as { report: { audit: Record<string, unknown> } };
+    // The fixture predates event chaining: publishable, but marked incomplete.
+    expect(payload.report.audit).toMatchObject({
+      verdict: "incomplete",
+      event_chain: { status: "empty", events: 0, head_hash: null },
+      report_sha256: null,
+    });
+  });
+
+  it("refuses to publish a report that changed after the run completed", async () => {
+    const reportPath = join(STORE_ROOT, "runs", RUN_ID, "run-report.json");
+    const recorded = createHash("sha256").update(readFileSync(reportPath)).digest("hex");
+    const queued = chainEvent({ id: "e1", run_id: RUN_ID, stage: "queued", status: "queued", message: "Run queued.", occurred_at: "2026-08-18T10:00:00.000Z" }, undefined);
+    const completed = chainEvent({
+      id: "e2", run_id: RUN_ID, stage: "completed", status: "completed", message: "Run completed successfully.",
+      occurred_at: "2026-08-18T10:05:00.000Z", details: { report_sha256: recorded },
+    }, queued);
+    writeFileSync(join(STORE_ROOT, "runs", RUN_ID, "progress.jsonl"), `${JSON.stringify(queued)}\n${JSON.stringify(completed)}\n`);
+    writeFileSync(reportPath, readFileSync(reportPath, "utf8").replace('"avg_score":0.5', '"avg_score":0.9'));
+    await expect(buildProgram().parseAsync(["node", "tt", "publish", RUN_ID.slice(0, 8), "--yes"]))
+      .rejects.toThrow(/evidence does not verify.*changed after the run completed/);
+    expect(client.post).not.toHaveBeenCalled();
   });
 
   it("supports dry-run without calling the API", async () => {

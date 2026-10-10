@@ -468,6 +468,37 @@ tt runs report <run-id>
 tt models verify local-<run-id>
 ```
 
+### Run records and audit
+
+`tt pipeline run` prints each stage live with the time since the run started.
+`--verbose` adds training and evaluation process output, and `--quiet` hides
+both. Full logs stay in the run directory either way.
+
+Every run report has a `provenance` block recording what produced it:
+
+- TT, Node and platform versions, and the digest of the locked Python runtime;
+- where training ran (local, or the AWS instance and region);
+- the spec file and snapshot digests;
+- the base model id, revision and content fingerprint;
+- every dataset file's SHA-256, the compiled training data digest, and the
+  evaluation split and seed;
+- the hyperparameters and the training exit code.
+
+The run's event log is hash-chained: each event records the previous event's
+hash. When a run completes, TT records the report's SHA-256.
+
+```bash
+tt runs audit <run-id>
+```
+
+`tt runs audit` checks the event chain and re-hashes the report, then prints
+the stage timeline with durations and the provenance. Its verdict is
+`verified`, `incomplete` (older TT versions or unfinished runs) or `tampered`.
+`tampered` exits with code 2 and names the edited event or file. `tt publish`
+runs the same audit, refuses tampered evidence, and uploads the audit summary
+with the report. The chain makes edits evident; it is not a signature, so
+anyone with write access to the store can rewrite the whole log.
+
 Serving still runs on the machine executing `tt serve` and requires a local
 Linux/CUDA GPU, even when training used AWS:
 

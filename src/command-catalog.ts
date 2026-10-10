@@ -40,6 +40,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   { path: "runs report", description: "Show a local run report.", group: "Inspect", modes: LOCAL },
   { path: "runs compare", description: "Compare two local run reports.", group: "Inspect", modes: LOCAL },
   { path: "runs events", description: "Show local run progress events.", group: "Inspect", modes: LOCAL },
+  { path: "runs audit", description: "Verify a run's event log and report, with timeline and provenance.", group: "Inspect", modes: LOCAL },
 
   { path: "models list", description: "List local models.", group: "Inspect", modes: LOCAL },
   { path: "models get", description: "Show a local model.", group: "Inspect", modes: LOCAL },

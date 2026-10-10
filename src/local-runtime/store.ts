@@ -3,6 +3,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { defaultStoreRoot } from "../paths.js";
 import type { FineTuneRunRequest, RunReport, SpecSnapshot, TrainingReport } from "./contracts.js";
+import { chainEvent, sha256File, withAppendLock } from "./audit.js";
 
 export type LocalRunStatus =
   | "queued"
@@ -54,6 +55,10 @@ export interface LocalRunEvent {
   message: string;
   details?: Record<string, unknown>;
   occurred_at: string;
+  /** Hash chain (see audit.ts); absent on events written by older TT versions. */
+  seq?: number;
+  prev_hash?: string | null;
+  hash?: string;
 }
 
 export interface LocalModelRecord {
@@ -110,6 +115,8 @@ export interface LocalStore {
   getRun(id: string): Promise<LocalRunState>;
   getRunEvents(id: string): Promise<LocalRunEvent[]>;
   getRunReport(id: string): Promise<RunReport>;
+  /** Existing report files for a run: the artifact copy and the store copy. */
+  getRunReportPaths(id: string): Promise<string[]>;
   listModels(): Promise<LocalModelRecord[]>;
   getModel(id: string): Promise<LocalModelRecord>;
 }
@@ -376,14 +383,24 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
     return record;
   }
 
-  async function appendRunEvent(state: LocalRunState, event: Omit<LocalRunEvent, "id" | "run_id" | "occurred_at">): Promise<void> {
-    const row: LocalRunEvent = {
-      id: randomUUID(),
-      run_id: state.id,
-      occurred_at: new Date().toISOString(),
-      ...event,
-    };
-    await appendJsonl(runEventsPath(state.id), row);
+  async function appendRunEvent(
+    state: LocalRunState,
+    event: Omit<LocalRunEvent, "id" | "run_id" | "occurred_at" | "seq" | "prev_hash" | "hash">,
+  ): Promise<void> {
+    const path = runEventsPath(state.id);
+    await ensurePrivateDirectory(dirname(path));
+    // Serialize appends across processes so each event links to the last one.
+    const row = await withAppendLock(`${path}.lock`, async () => {
+      const previous = (await readJsonl<LocalRunEvent>(path)).at(-1);
+      const chained = chainEvent({
+        id: randomUUID(),
+        run_id: state.id,
+        occurred_at: new Date().toISOString(),
+        ...event,
+      }, previous as (LocalRunEvent & Record<string, unknown>) | undefined) as LocalRunEvent;
+      await appendJsonl(path, chained);
+      return chained;
+    });
     await appendJsonl(join(state.artifact_dir, "progress.jsonl"), {
       at: row.occurred_at,
       stage: row.stage,
@@ -631,11 +648,18 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
       if (await exists(cancellationPath(report.run_id))) {
         return preserveCancellationRequestState(report.run_id);
       }
+      const manifestPath = join(artifactDir, "artifact-manifest.json");
       await appendRunEvent(state, {
         stage: "completed",
         status: "completed",
         message: "Run completed successfully.",
-        details: { report_path: reportPath, ...(model ? { model_id: model.id } : {}) },
+        details: {
+          report_path: reportPath,
+          // Pin the published evidence: `tt runs audit` re-hashes these files.
+          report_sha256: await sha256File(runReportPath(report.run_id)),
+          ...(await exists(manifestPath) ? { artifact_manifest_sha256: await sha256File(manifestPath) } : {}),
+          ...(model ? { model_id: model.id } : {}),
+        },
       });
       return state;
     },
@@ -724,6 +748,17 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
     async getRunEvents(id) {
       const state = await getRun(id);
       return readJsonl<LocalRunEvent>(runEventsPath(state.id));
+    },
+
+    async getRunReportPaths(id) {
+      const state = await getRun(id);
+      const candidates = [
+        ...(state.report_path ? [resolve(state.report_path)] : []),
+        runReportPath(state.id),
+      ];
+      const existing: string[] = [];
+      for (const path of new Set(candidates)) if (await exists(path)) existing.push(path);
+      return existing;
     },
 
     async getRunReport(id) {
