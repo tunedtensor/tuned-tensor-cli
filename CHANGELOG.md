@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.22.0] - 2026-10-10
 
 ### Added
 
@@ -39,6 +39,17 @@
 - `tt publish` audits the run first and uploads the audit summary with the
   report. It refuses tampered evidence. Unverifiable evidence (runs from older
   TT versions, unreadable event lines) needs `--allow-unverified`.
+
+### Fixed
+
+- Regenerate altered converted dataset files from their verified Hugging Face
+  source instead of reusing changed training data.
+- Skip incomplete mapped records consistently, including the first row, while
+  retaining diagnostics for unknown column names.
+- Treat non-object JSON event lines as unreadable evidence instead of crashing
+  later event appends or audit inspection.
+- Preserve download progress in the shared elapsed-time run reporter and honor
+  quiet mode during pipeline dataset downloads.
 
 ## [0.21.0] - 2026-09-30
 
