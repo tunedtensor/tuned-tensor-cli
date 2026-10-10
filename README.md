@@ -72,7 +72,7 @@ npm install -g --ignore-scripts @tuned-tensor/cli
 tt --version
 ```
 
-Uninstall with `npm uninstall -g @tuned-tensor/cli` (add
+Upgrade later with `tt upgrade`. Uninstall with `npm uninstall -g @tuned-tensor/cli` (add
 `--prefix ~/.local` if the curl installer used that prefix).
 
 Node.js 22.19.0 or newer is required. Training additionally needs
@@ -156,10 +156,19 @@ catalog providers remain available by ID. Unauthenticated entries are marked
 `auth required`. Local endpoints such as Ollama use a placeholder `apiKey` in
 `models.json` and need no TT account.
 
-Before the shell opens, `tt` performs a short, non-blocking npm version check.
-If a newer stable release is available it recommends
-`npm install -g @tuned-tensor/cli@latest`; offline or unavailable registry
-checks are ignored.
+`tt` checks npm for a newer stable release at most every 12 hours and
+remembers the answer in `~/.tuned-tensor/update-check.json`. The notice appears
+when the shell opens and after commands run in a terminal; explicit commands
+never wait on the registry. Upgrade with:
+
+```bash
+tt upgrade            # latest stable, into the same npm prefix tt runs from
+tt upgrade --check    # only report
+tt upgrade beta       # or a specific version
+```
+
+Offline or unavailable registry checks are ignored. `CI`, `TT_NO_UPDATE_CHECK=1`
+or `NO_UPDATE_NOTIFIER=1` disable the check.
 
 After a model is selected, the banner shows it and ordinary sentences go to
 the agent:

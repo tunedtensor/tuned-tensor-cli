@@ -56,6 +56,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   { path: "serve", description: "Serve a local adapter, active model, or base model.", group: "Serving", modes: LOCAL },
 
   { path: "info", description: "Show local runtime package information.", group: "Inspect", modes: LOCAL },
+  { path: "upgrade", description: "Upgrade tt to the latest release.", group: "Inspect", modes: LOCAL },
   { path: "status", description: "Show local project context.", group: "Inspect", modes: LOCAL },
   { path: "agent models", description: "List provider models for the laptop-local TT agent.", group: "Inspect", modes: LOCAL },
   { path: "agent configure", description: "Select the laptop-local TT agent model.", group: "Inspect", modes: LOCAL },

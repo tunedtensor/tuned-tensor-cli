@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PassThrough } from "node:stream";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -283,7 +283,7 @@ describe("unified command routing", () => {
 
     expect(checkForUpdate).toHaveBeenCalledWith("0.10.0");
     expect(errors).toContain("tt 0.10.0");
-    expect(errors).toContain("npm install -g @tuned-tensor/cli@latest");
+    expect(errors).toContain("tt upgrade");
     expect(startShell).toHaveBeenCalledTimes(1);
     expect(checkForUpdate.mock.invocationCallOrder[0]).toBeLessThan(
       startShell.mock.invocationCallOrder[0]!,
@@ -309,6 +309,43 @@ describe("unified command routing", () => {
 
     expect(output).toContain('"storeRoot"');
     expect(checkForUpdate).not.toHaveBeenCalled();
+  });
+
+  it("announces a cached release after explicit commands on a terminal", async () => {
+    const home = mkdtempSync(join(tmpdir(), "tt-cli-update-"));
+    try {
+      writeFileSync(
+        join(home, "update-check.json"),
+        JSON.stringify({ checkedAt: Date.now(), latestVersion: "0.11.0" }),
+      );
+      const run = async (stderrIsTTY: boolean, extraArgs: string[] = []) => {
+        const stdout = new PassThrough();
+        const stderr = Object.assign(new PassThrough(), { isTTY: stderrIsTTY });
+        let errors = "";
+        stderr.setEncoding("utf8");
+        stderr.on("data", (chunk: string) => { errors += chunk; });
+        stdout.resume();
+        await runCli("0.10.0", {
+          argv: ["node", "tt", "status", ...extraArgs],
+          cwd: home,
+          env: { TERM: "xterm-256color", HOME: home, TUNED_TENSOR_HOME: home },
+          stdinIsTTY: true,
+          stdoutIsTTY: true,
+          stdout,
+          stderr,
+        });
+        return errors;
+      };
+
+      const errors = await run(true);
+      expect(errors).toContain("tt 0.10.0");
+      expect(errors).toContain("0.11.0");
+      expect(errors).toContain("tt upgrade");
+      expect(await run(false)).toBe("");
+      expect(await run(true, ["--json"])).toBe("");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("starts the shell when update discovery throws", async () => {
