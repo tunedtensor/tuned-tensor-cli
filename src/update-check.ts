@@ -238,6 +238,10 @@ fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeou
  * and short commands do not cut the request off when they exit.
  */
 export function spawnCliUpdateRefresh(cacheFile: string): void {
+  // Restamp the last answer first so an offline machine retries every 12 hours,
+  // not on every command.
+  const cached = readUpdateCache(cacheFile);
+  if (cached) recordLatestCliVersion(cacheFile, cached.latestVersion);
   try {
     const child = spawn(
       process.execPath,
