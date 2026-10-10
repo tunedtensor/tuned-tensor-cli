@@ -37,7 +37,7 @@ if (values.help) {
 Runs paid model calls using the provider/model/thinking configured in TT.
 Uses synthetic temporary projects; never approves or executes proposals.
 JSON lines report assertions and redacted evidence. Exit 1 on any failed check.
-The serving handoff additionally requires human review of the response.
+Cases marked for human review additionally require inspecting the response.
 
   --list                       List cases without calling a provider
   --scenario <id>               Run one case (default: all)

@@ -27,7 +27,7 @@ const foundationSpec = {
 };
 
 export interface AgentWorkflowScenario {
-  id: "spec-review" | "spec-edit" | "adapter-dry-run" | "foundation-dry-run" | "invalid-spec" | "serving-handoff";
+  id: "spec-review" | "spec-edit" | "adapter-dry-run" | "foundation-dry-run" | "invalid-spec" | "serving-handoff" | "dataset-handoff" | "foundation-dataset-handoff";
   prompt: string;
   specSource: string;
   humanReview?: string;
@@ -50,6 +50,21 @@ export const agentWorkflowScenarios: readonly AgentWorkflowScenario[] = [
     id: "invalid-spec",
     prompt: "Dry-run the workflow for ./tunedtensor.json. Use the existing file; do not replace it or create a new project.",
     specSource: '{ "name": "Broken spec", ',
+  },
+  {
+    id: "dataset-handoff",
+    prompt: "Can you download the Hugging Face dataset already configured in my spec? Inspect it and tell me exactly what to type in this TT shell if you cannot download it yourself. Do not change the spec or start training. Does a dry-run download it?",
+    specSource: JSON.stringify({ ...adapterSpec, dataset_prebuilt: {
+      huggingface: { repo: "SetFit/tweet_sentiment_extraction", columns: { input: "text", output: "label_text" } },
+      training: "train.jsonl", test: "test.jsonl",
+    } }, null, 2) + "\n",
+    humanReview: "Verify the response hands off datasets prefetch and verify, does not claim a download happened, and says dry-runs never download. The configured dataset needs no edit.",
+  },
+  {
+    id: "foundation-dataset-handoff",
+    prompt: "Can I use dataset_prebuilt.huggingface and datasets prefetch with my current spec? Inspect it and explain the supported data workflow without changing anything or preparing a run.",
+    specSource: JSON.stringify(foundationSpec, null, 2) + "\n",
+    humanReview: "Verify the response explains that the current foundation spec does not support adapter dataset_prebuilt/prefetch, and bases its alternative on describe_pipeline rather than inventing functionality.",
   },
   {
     id: "serving-handoff",
@@ -180,6 +195,16 @@ export function gradeAgentWorkflow(
     }
   } else {
     check("no mutation proposed", actions.length === 0 && evidence.persistedActions.length === 0);
+    if (scenario.id === "dataset-handoff" || scenario.id === "foundation-dataset-handoff") {
+      check("dataset guidance inspects the current spec", calls.some(call => call.payload.name === "get_local_spec"));
+      check("dataset guidance does not prepare a run", !calls.some(call => call.payload.name === "prepare_pipeline_run"));
+      if (scenario.id === "dataset-handoff") {
+        check("download and offline verification commands provided", /\bdatasets\s+prefetch\b/.test(turn?.response ?? "")
+          && /\bdatasets\s+verify\b/.test(turn?.response ?? ""));
+      } else {
+        check("foundation workflow inspected", calls.some(call => call.payload.name === "describe_pipeline"));
+      }
+    }
     if (scenario.id === "serving-handoff") {
       // Catch observed invalid syntax; human review still checks the full handoff.
       check("handoff avoids unsupported command syntax", !/\bruns\s+show\b|\bserve\s+--model\b/i.test(turn?.response ?? ""));
