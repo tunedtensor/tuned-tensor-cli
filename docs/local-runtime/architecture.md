@@ -127,6 +127,19 @@ Canonical JSON and JSONL files are the state store; there is no database or
 mirrored index. Writes are atomic and listings scan the small local metadata
 tree deterministically.
 
+Run events (`progress.jsonl` in the store's run directory) form a hash chain.
+Each event carries `seq`, `prev_hash` and `hash`, a SHA-256 over its canonical
+JSON. Appends take a short cross-process lock so concurrent writers, such as a
+cancel from another terminal, extend one chain. The lock records its owner's
+pid and host, so a crashed owner's lock is reclaimed at once and a live owner
+is never broken. Appends read only the log's tail. A line torn by a crash is
+closed off and skipped, and the audit counts it as unreadable. The completion event records
+the report's SHA-256 and the artifact manifest's SHA-256. The report embeds a
+`provenance` block (software, execution target, spec, base model, data
+digests, hyperparameters). `tt runs audit` verifies the chain and report
+digests and reports the first broken link. Events written by older versions
+have no hashes and are reported as legacy.
+
 Each real adapter has an atomic `artifact-manifest.json` with the expected PEFT
 files, byte sizes, and SHA-256 hashes. A model is registered immediately after
 training and manifest verification, so a later evaluation failure does not

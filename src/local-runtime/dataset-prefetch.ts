@@ -292,8 +292,11 @@ async function convertMappedDataset(args: {
       throw new Error(`No usable ${split} records remain after applying dataset_prebuilt.huggingface.columns.`);
     }
     const output = join(args.outputRoot, `${split}-${key}.jsonl`);
-    if (!await stat(output).then((metadata) => metadata.isFile() && metadata.size > 0, () => false)) {
-      await writeFileAtomic(output, `${examples.map((example) => JSON.stringify(exampleToChatRow(args.spec, example))).join("\n")}\n`);
+    const content = `${examples.map((example) => JSON.stringify(exampleToChatRow(args.spec, example))).join("\n")}\n`;
+    // A content-addressed name does not guarantee that a local file stayed intact.
+    // Regenerate changed conversions from the independently verified source.
+    if (await readFile(output, "utf8").catch(() => null) !== content) {
+      await writeFileAtomic(output, content);
     }
     localPaths[split] = output;
   }

@@ -26,7 +26,8 @@ import { runDecisionPipeline } from "../local-runtime/decision-runner.js";
 import { warningsFromSnapshot } from "../local-runtime/capability.js";
 import { readHardwareSnapshot } from "../local-runtime/hardware-snapshot.js";
 import { ensureDatasetCached } from "../local-runtime/dataset-prefetch.js";
-import { createTransferReporter } from "../local-runtime/progress-bar.js";
+
+import { createRunConsoleReporter } from "../local-runtime/console-reporter.js";
 
 const DEFAULT_PIPELINE_FILE = "tunedtensor.pipeline.json";
 const DEFAULT_SPEC_FILE = "tunedtensor.json";
@@ -230,7 +231,9 @@ export function registerPipelineCommands(parent: Command): void {
     .option("--resume <path>", "Resume a foundation run directory")
     .option("--only <ids>", "Comma-separated step IDs to include")
     .option("--skip <ids>", "Comma-separated step IDs to omit")
-    .action(async (options: { file?: string; spec: string; config?: string; output?: string; resume?: string; dryRun?: boolean; only?: string; skip?: string }, command: Command) => {
+    .option("--verbose", "Also stream training and evaluation process logs")
+    .option("--quiet", "Do not print live stage progress")
+    .action(async (options: { file?: string; spec: string; config?: string; output?: string; resume?: string; dryRun?: boolean; only?: string; skip?: string; verbose?: boolean; quiet?: boolean }, command: Command) => {
       if (options.output && options.resume) {
         throw new Error("--output and --resume are mutually exclusive.");
       }
@@ -293,9 +296,20 @@ export function registerPipelineCommands(parent: Command): void {
         ...(plan.name ? { name: plan.name } : {}),
         steps: plan.steps.map(({ transfers: _transfers, ...step }) => step) as LocalPipeline["steps"],
       };
-      // A Hugging Face dataset that is not cached yet downloads here, with progress.
-      const { request } = await ensureDatasetCached({ request: input.request, config, reporter: createTransferReporter() });
-      const result = await runLocalPipeline({ request, config, pipeline: localPipeline, ...(input.kind === "spec" ? { projectSpec: input.spec } : {}) });
+      // Download a missing dataset before starting the recorded pipeline.
+      const reporter = options.quiet ? undefined : createRunConsoleReporter({ verbose: options.verbose });
+      const { request } = await ensureDatasetCached({ request: input.request, config, reporter });
+      const result = await runLocalPipeline({
+        request,
+        config,
+        pipeline: localPipeline,
+        ...(input.kind === "spec" ? { projectSpec: input.spec } : {}),
+        ...(spec ? { specFile: { path: spec.path, sha256: spec.sha256 } } : {}),
+        ...(reporter ? { reporter } : {}),
+      });
+      if (!isJsonMode()) {
+        console.error(`Run ${result.request.run_id}: \`tt runs audit ${result.request.run_id}\` verifies its record and shows timing and provenance.`);
+      }
       if (isJsonMode()) return printJson({ ...result, spec });
       printSuccess(`Pipeline completed with status ${result.status}.`);
     });

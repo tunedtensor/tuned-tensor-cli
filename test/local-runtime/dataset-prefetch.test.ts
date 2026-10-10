@@ -242,6 +242,10 @@ test("column mapping converts records with recorded, deterministic cleanup", asy
     // Same inputs reuse the content-addressed conversion.
     const again = await resolveRequestDataset(run, config(root));
     assert.equal(again.dataset_prebuilt!.training, trainingPath);
+    const original = await readFile(trainingPath, "utf8");
+    await writeFile(trainingPath, original.replace("positive", "negative"));
+    await resolveRequestDataset(run, config(root));
+    assert.equal(await readFile(trainingPath, "utf8"), original);
     // A different instruction yields a different conversion.
     const changed = await resolveRequestDataset(
       fineTuneRunRequestSchema.parse({ ...run, spec_snapshot: { ...spec, system_prompt: "Different." } }),
