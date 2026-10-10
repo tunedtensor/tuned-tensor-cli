@@ -37,6 +37,7 @@ import {
 import {
   buildSystemMessage,
   compileSpecToJsonl,
+  datasetInputIdentity,
   evaluationSuiteFromChatJsonl,
   examplesFromChatJsonl,
   examplesFromSpec,
@@ -63,6 +64,7 @@ import { localRuntimePackageRoot } from "./package-root.js";
 import { createLocalStore, type LocalRunStatus, type LocalStore } from "./store.js";
 import { withHuggingFaceCacheEnvironment } from "./huggingface-cache.js";
 import { verifyLocalBaseModel } from "./prefetch.js";
+import { resolveRequestDataset } from "./dataset-prefetch.js";
 import { evaluateGeneralRegressionGate } from "./general-regression.js";
 
 export interface LocalRunResult {
@@ -359,8 +361,7 @@ async function validateDatasetInputs(
   request: FineTuneRunRequest,
   config: LocalRunnerConfig,
 ): Promise<ValidatedDataset> {
-  const inputIdentity = (value: string) =>
-    value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("en");
+  const inputIdentity = datasetInputIdentity;
   const evalSampleSeed = config.evaluation.sampleSeed
     ?? deriveSampleSeed(request.behavior_spec_id);
   if (!request.dataset_prebuilt) {
@@ -466,7 +467,11 @@ export async function validateLocalFineTuneInput(input: {
   config: unknown;
 }): Promise<{ request: FineTuneRunRequest; config: LocalRunnerConfig }> {
   const config = localRunnerConfigSchema.parse(input.config);
-  const request = fineTuneRunRequestSchema.parse(addDryRunPlaceholders(input.request, config.dryRun));
+  // A Hugging Face dataset resolves to its cached, checksum-verified files.
+  const request = await resolveRequestDataset(
+    fineTuneRunRequestSchema.parse(addDryRunPlaceholders(input.request, config.dryRun)),
+    config,
+  );
   await validateDatasetInputs(request, config);
   if (config.evaluation.generalRegression) {
     await evaluationSuiteFromChatJsonl(
@@ -1695,6 +1700,7 @@ async function runReportStage(args: {
       dataset_prebuilt: args.prepared.metadata.dataset_prebuilt,
       dataset_format: args.prepared.metadata.dataset_format,
       dataset_uri: fileUri(args.prepared.artifacts.trainingJsonl),
+      ...(args.prepared.request.dataset_source ? { dataset_source: args.prepared.request.dataset_source } : {}),
       spec_example_count: args.prepared.request.spec_snapshot.examples.length,
       training_example_count: args.prepared.metadata.training_example_count,
       eval_examples_total: baseline.eval_examples_total,

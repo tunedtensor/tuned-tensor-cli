@@ -471,6 +471,14 @@ class _Constants:
     HF_HOME = os.environ["HF_HOME"]
     HF_HUB_CACHE = os.environ["HF_HUB_CACHE"]
 constants = _Constants()
+class HfApi:
+    def __init__(self, token=None):
+        pass
+    def repo_info(self, repo_id, repo_type=None, revision=None, files_metadata=False):
+        class _Info:
+            sha = revision
+            siblings = []
+        return _Info()
 def snapshot_download(**kwargs):
     Path(${JSON.stringify(receivedRevision)}).write_text(str(kwargs["revision"]))
     snapshot = Path(constants.HF_HUB_CACHE) / "models--Qwen--Qwen3.5-2B" / "snapshots" / ${JSON.stringify(downloadedRevision)}
@@ -480,6 +488,10 @@ def snapshot_download(**kwargs):
     const hfHome = join(root, "huggingface");
     const inputPath = join(root, "input.json");
     const outputPath = join(root, "output.json");
+    await writeFile(join(fakePackage, "utils.py"), `
+def filter_repo_objects(items, allow_patterns=None, ignore_patterns=None, key=None):
+    return list(items)
+`, "utf8");
     await writeFile(inputPath, JSON.stringify({
       base_model: "Qwen/Qwen3.5-2B",
       revision: pinnedRevision,

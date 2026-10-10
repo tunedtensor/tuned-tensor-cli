@@ -122,6 +122,13 @@ resolve beside the spec. New projects default to `.tuned-tensor/artifacts` and
 Foundation supports `runtime.artifactRoot` and `runtime.gpu`; its evaluation
 and training settings remain under `foundation`.
 
+`dataset_prebuilt.huggingface` names a Hugging Face dataset repo, an optional
+pinned `revision` and optional `columns` (`input`/`output` field names). Its
+split paths are then files inside that repo. `tt datasets prefetch` downloads
+them, and `tt pipeline run` downloads them automatically if they are missing.
+Runs record the resolved commit and file digests in the report. See the README
+section "Train on a Hugging Face dataset".
+
 Only `tunedtensor.json` is required. `tt pipeline init --spec tunedtensor.json`
 embeds an advanced recipe when needed; omit this step to keep automatic derivation.
 An explicit `--file` cannot override a conflicting embedded recipe.

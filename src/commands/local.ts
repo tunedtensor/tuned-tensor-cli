@@ -13,6 +13,7 @@ export const LOCAL_COMMANDS = [
   "serve",
   "runs",
   "models",
+  "datasets",
 ] as const;
 
 export type LocalCommandName = (typeof LOCAL_COMMANDS)[number];
@@ -26,6 +27,7 @@ export const LOCAL_COMMAND_DESCRIPTIONS: Record<LocalCommandName, string> = {
   serve: "Serve a verified adapter, the active model, or the protected base",
   runs: "Inspect locally stored runs",
   models: "Inspect, verify, prefetch, or serve local models",
+  datasets: "Download or verify the Hugging Face dataset a spec trains on",
 };
 
 export interface LocalCommandRuntime {

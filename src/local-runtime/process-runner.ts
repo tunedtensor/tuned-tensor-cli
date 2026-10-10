@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { pythonEnvironmentPath } from "../paths.js";
 import { forwardStreamLines, reportInBackground, type LocalRunReporter } from "./run-reporter.js";
 import { localRuntimePackageRoot } from "./package-root.js";
+import { parseProgressLine } from "./progress-bar.js";
 
 const packageRoot = localRuntimePackageRoot(import.meta.url);
 const bundledProject = join(packageRoot, "training/adapter");
@@ -21,6 +22,7 @@ type BundledPythonEntrypoint =
   | "train.py"
   | "evaluate.py"
   | "prefetch.py"
+  | "prefetch_dataset.py"
   | "serve.py"
   | "-c";
 
@@ -279,6 +281,12 @@ export async function runLoggedProcess(args: {
       }
 
       forwardStreamLines(child.stdout, (line) => {
+        const progress = parseProgressLine(line);
+        if (progress) {
+          // Structured progress drives a bar; it stays in the log file only.
+          reportInBackground(() => args.reporter?.onProgress?.(progress));
+          return;
+        }
         args.onLine?.(line, "stdout");
         if (args.reporter?.verbose) {
           reportInBackground(() => args.reporter?.onLog?.({ stage: args.stage, stream: "stdout", message: line }));

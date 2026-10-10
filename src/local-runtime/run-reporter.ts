@@ -1,3 +1,5 @@
+import type { TransferProgress } from "./progress-bar.js";
+
 export interface LocalRunProgressLog {
   stage: string;
   stream?: "stdout" | "stderr" | "info";
@@ -15,6 +17,8 @@ export interface LocalRunReporter {
   verbose?: boolean;
   onEvent?(event: LocalRunProgressEvent): void | Promise<void>;
   onLog?(log: LocalRunProgressLog): void | Promise<void>;
+  /** Byte-level transfer progress, e.g. Hugging Face model or dataset downloads. */
+  onProgress?(progress: TransferProgress): void | Promise<void>;
 }
 
 /** Optional high-volume reporting must never crash or orphan the workload. */

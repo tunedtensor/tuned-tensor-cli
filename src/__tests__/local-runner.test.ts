@@ -190,6 +190,9 @@ describe("runLocalCommand", () => {
   it.each([
     (spec: string) => ["validate", spec],
     (spec: string) => ["models", "prefetch", spec],
+    (spec: string) => ["datasets", "prefetch", spec],
+    (spec: string) => ["datasets", "verify", spec],
+    (spec: string) => ["datasets", spec],
     (spec: string) => ["serve", "base", "--spec", spec, "--print-command"],
   ])(
     "projects only the local spec fields into an adjacent temporary file",

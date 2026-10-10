@@ -165,10 +165,23 @@ function renderValidate(value: Record<string, unknown>): void {
     ["Spec", text(value.behavior_spec_id)],
     ["Base model", text(value.base_model)],
     ["Dataset", text(value.dataset_format)],
+    ["Hugging Face", huggingFaceDatasetLabel(value)],
     ["Artifacts", text(value.artifact_root)],
     ["Store", text(value.store_root)],
     ["Dry run", text(value.dry_run)],
   ]);
+  if (value.dataset_status === "not_downloaded") {
+    printWarning(`Dataset files are not downloaded yet; dataset contents were not checked. Run \`${text(value.next_step) ?? "tt datasets prefetch"}\`.`);
+  }
+}
+
+function huggingFaceDatasetLabel(value: Record<string, unknown>): string | undefined {
+  const source = record(value.dataset_source) ?? record(value.dataset_huggingface);
+  const repo = text(source?.repo);
+  if (!repo) return undefined;
+  const revision = text(source?.revision) ?? "main";
+  const status = value.dataset_status === "not_downloaded" ? "not downloaded" : "cached";
+  return `${repo}@${revision} (${status}${source?.pinned === false || !text(source?.revision) ? ", unpinned" : ""})`;
 }
 
 function renderRun(value: Record<string, unknown>): void {
@@ -342,6 +355,25 @@ function renderModelPrefetch(value: Record<string, unknown>): void {
   ]);
 }
 
+function renderDatasetPrefetch(value: Record<string, unknown>): void {
+  printSuccess(
+    value.local_files_only === true
+      ? "Verified the cached Hugging Face dataset"
+      : "Dataset is ready locally",
+  );
+  const files = record(value.files) ?? {};
+  printDetail([
+    ["Dataset", text(value.repo)],
+    ["Revision", `${text(value.revision) ?? "—"}${value.pinned === false ? " (unpinned: set dataset_prebuilt.huggingface.revision to pin it)" : ""}`],
+    ...Object.entries(files).map(([split, file]): [string, string | undefined] => {
+      const entry = record(file);
+      return [split[0]!.toUpperCase() + split.slice(1), `${text(entry?.path) ?? "—"} (${displayBytes(entry?.size_bytes) ?? "—"}, sha256 ${String(text(entry?.sha256) ?? "").slice(0, 12)})`];
+    }),
+    ["Snapshot", text(value.snapshot_path)],
+    ["Cache", text(value.hub_cache)],
+  ]);
+}
+
 function renderActiveModel(value: Record<string, unknown>): void {
   const active = text(value.active) ?? "base";
   const pointer = record(value.pointer);
@@ -491,6 +523,10 @@ function renderKnownJson(args: string[], value: unknown): boolean {
       renderServePlan(value);
       return true;
     }
+  }
+  if (command === "datasets" && isRecord(value)) {
+    renderDatasetPrefetch(value);
+    return true;
   }
   if (command === "serve" && isRecord(value)) {
     renderServePlan(value);

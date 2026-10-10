@@ -3,7 +3,7 @@ import { resolveProjectConfig } from "./project-workflow.js";
 import { readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { compareRuns } from "./compare.js";
@@ -28,6 +28,8 @@ import {
   type LocalModelServerLaunch,
 } from "./model-server.js";
 import { prefetchBaseModel } from "./prefetch.js";
+import { DatasetNotDownloadedError, ensureDatasetCached, huggingFaceDataset, prefetchHuggingFaceDataset } from "./dataset-prefetch.js";
+import { createProgressRenderer, progressColumns, progressTty } from "./progress-bar.js";
 import { createLocalStore, type LocalModelRecord, type LocalStore } from "./store.js";
 import {
   DEFAULT_LOCAL_SPEC_PATH,
@@ -107,6 +109,7 @@ Commands:
   serve <model-id|active|base|foundation> [--config local-runner.json] [--host 127.0.0.1] [--port 8000]
   runs list|get|events|report|compare [args] [--config local-runner.json]
   models list|get|verify|prefetch|verify-base|active|activate|rollback|serve [args] [--config local-runner.json]
+  datasets prefetch|verify [tunedtensor.json]
 
 Global options:
   -h, --help                       Show help
@@ -298,6 +301,24 @@ const COMMAND_GROUPS: Record<string, CliCommandGroup> = {
         minPositionals: 1,
         maxPositionals: 1,
         missingPositionalsMessage: "models serve requires <model-id>",
+      },
+    },
+  },
+  datasets: {
+    description: "Download or verify the Hugging Face dataset a behavior spec trains on.",
+    defaultSubcommand: "prefetch",
+    subcommands: {
+      prefetch: {
+        usage: "tt datasets prefetch [tunedtensor.json] [options]",
+        description: "Download dataset_prebuilt.huggingface files into the local Hugging Face cache. Resumes after interruption.",
+        options: [CONFIG_OPTION, VERBOSE_OPTION, QUIET_OPTION],
+        maxPositionals: 1,
+      },
+      verify: {
+        usage: "tt datasets verify [tunedtensor.json] [options]",
+        description: "Verify the cached dataset files and checksums without network access.",
+        options: [CONFIG_OPTION, QUIET_OPTION],
+        maxPositionals: 1,
       },
     },
   },
@@ -503,9 +524,15 @@ function formatEvent(event: LocalRunProgressEvent): string {
 function createConsoleReporter(options: { verbose: boolean; quiet: boolean }): LocalRunReporter | undefined {
   if (options.quiet) return undefined;
   let lastLogLine = "";
+  const progress = createProgressRenderer({
+    write: (text) => process.stderr.write(text),
+    tty: progressTty(),
+    columns: progressColumns(),
+  });
   return {
     verbose: options.verbose,
     onEvent(event) {
+      progress.interrupt();
       process.stderr.write(`${formatEvent(event)}\n`);
     },
     onLog(log) {
@@ -514,7 +541,11 @@ function createConsoleReporter(options: { verbose: boolean; quiet: boolean }): L
       // consecutive duplicates so --verbose output stays readable.
       if (line === lastLogLine) return;
       lastLogLine = line;
+      progress.interrupt();
       process.stderr.write(`${line}\n`);
+    },
+    onProgress(update) {
+      progress.update(update);
     },
   };
 }
@@ -1130,10 +1161,33 @@ async function main(argv: string[]): Promise<void> {
     const input = loaded;
     assertLocalRunInputReady(input.request);
     const configSelection = await configSelectionFromArgv(argv, inputPath);
-    const validated = await validateLocalFineTuneInput({
-      request: input.request,
-      config: configSelection.config,
-    });
+    const remoteDataset = huggingFaceDataset(input.request);
+    let validated: Awaited<ReturnType<typeof validateLocalFineTuneInput>>;
+    try {
+      validated = await validateLocalFineTuneInput({
+        request: input.request,
+        config: configSelection.config,
+      });
+    } catch (error) {
+      if (!(error instanceof DatasetNotDownloadedError) || !remoteDataset) throw error;
+      // The spec is valid; its dataset contents can only be checked once cached.
+      const config = localRunnerConfigSchema.parse(configSelection.config);
+      printJson({
+        ok: true,
+        input_path: input.path,
+        config_path: configSelection.path ?? null,
+        behavior_spec_id: input.request.behavior_spec_id,
+        base_model: input.request.spec_snapshot.base_model,
+        dataset_format: remoteDataset.format,
+        dataset_status: "not_downloaded",
+        dataset_huggingface: remoteDataset.huggingface,
+        next_step: `tt datasets prefetch ${relative(cwd(), input.path) || input.path}`,
+        artifact_root: config.artifactRoot,
+        store_root: config.storeRoot,
+        dry_run: config.dryRun,
+      });
+      return;
+    }
     const request = validated.request;
     const config = validated.config;
     printJson({
@@ -1143,6 +1197,7 @@ async function main(argv: string[]): Promise<void> {
       behavior_spec_id: request.behavior_spec_id,
       base_model: request.spec_snapshot.base_model,
       dataset_format: request.dataset_prebuilt?.format ?? null,
+      ...(request.dataset_source ? { dataset_status: "cached", dataset_source: request.dataset_source } : {}),
       artifact_root: config.artifactRoot,
       store_root: config.storeRoot,
       dry_run: config.dryRun,
@@ -1160,15 +1215,16 @@ async function main(argv: string[]): Promise<void> {
       dryRun: hasFlag(argv, "--dry-run") ? true : configInput.dryRun,
     });
     assertLocalRunInputReady(input.request);
-    const validated = await validateLocalFineTuneInput({
-      request: input.request,
-      config,
-    });
-    let request = validated.request;
     const reporter = createConsoleReporter({
       verbose: hasFlag(argv, "--verbose"),
       quiet: hasFlag(argv, "--quiet"),
     });
+    const ensured = await ensureDatasetCached({ request: input.request, config, reporter });
+    const validated = await validateLocalFineTuneInput({
+      request: ensured.request,
+      config,
+    });
+    let request = validated.request;
     if (
       !config.dryRun
       && !config.paths.baseModel
@@ -1256,6 +1312,24 @@ async function main(argv: string[]): Promise<void> {
       return printJson(compareRuns(reportA, reportB));
     }
     throw new Error(`Unknown runs command: ${subcommand}`);
+  }
+
+  if (command === "datasets") {
+    const subcommand = cli.subcommand!;
+    const inputPath = resolve(cli.positionals[0] ?? DEFAULT_LOCAL_SPEC_PATH);
+    const config = await configFromArgv(argv, inputPath);
+    const input = await loadCliBehaviorSpec(inputPath);
+    if (subcommand !== "prefetch" && subcommand !== "verify") throw new Error(`Unknown datasets command: ${subcommand}`);
+    const report = await prefetchHuggingFaceDataset({
+      request: input.request,
+      config,
+      localOnly: subcommand === "verify",
+      reporter: createConsoleReporter({
+        verbose: hasFlag(argv, "--verbose"),
+        quiet: hasFlag(argv, "--quiet"),
+      }),
+    });
+    return printJson({ ...report, input_path: input.path });
   }
 
   if (command === "models") {

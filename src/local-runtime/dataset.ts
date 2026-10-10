@@ -72,6 +72,11 @@ export async function normalizeChatJsonlForRelocation(path: string): Promise<str
   return (await loadNormalizedChatJsonl(path)).jsonl;
 }
 
+/** Normalized prompt identity used for duplicate and train/eval overlap checks. */
+export function datasetInputIdentity(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("en");
+}
+
 /** Compile the shared behavior fields into the instruction seen by either engine. */
 export function buildSystemMessage(
   spec: Pick<BehaviorSpec, "system_prompt" | "guidelines" | "constraints">,

@@ -608,7 +608,11 @@ export function createTunedTensorTools(
           runtime: Type.Optional(Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Null()])),
           evaluation: Type.Optional(Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Null()])),
           pipeline: Type.Optional(Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Null()])),
-          dataset_prebuilt: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+          dataset_prebuilt: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
+            description: "Local chat JSONL files ({training, validation|test}), or a Hugging Face dataset: "
+              + "{huggingface: {repo, revision?: 40-char commit, columns?: {input, output}}, training: 'repo/path.jsonl', test|validation: ...}. "
+              + "The user downloads it with `tt datasets prefetch tunedtensor.json`.",
+          })),
         }, { additionalProperties: false }),
       }, { additionalProperties: false }),
       async (p) => {

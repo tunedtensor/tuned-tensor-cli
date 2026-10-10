@@ -47,6 +47,8 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   { path: "models verify", description: "Verify a local model artifact.", group: "Serving", modes: LOCAL },
   { path: "models prefetch", description: "Download the local base-model snapshot.", group: "Serving", modes: LOCAL },
   { path: "models verify-base", description: "Verify the local base-model snapshot.", group: "Serving", modes: LOCAL },
+  { path: "datasets prefetch", description: "Download the spec's Hugging Face dataset files.", group: "Workflow", modes: LOCAL },
+  { path: "datasets verify", description: "Verify the cached Hugging Face dataset files.", group: "Workflow", modes: LOCAL },
   { path: "models active", description: "Show the active local model.", group: "Serving", modes: LOCAL },
   { path: "models activate", description: "Activate a verified local model.", group: "Serving", modes: LOCAL },
   { path: "models rollback", description: "Roll back the active local model.", group: "Serving", modes: LOCAL },

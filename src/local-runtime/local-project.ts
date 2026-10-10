@@ -80,7 +80,9 @@ export function resolveLocalRunInputPaths(raw: unknown, inputPath: string): unkn
   const dataset = value.dataset_prebuilt;
   if (dataset && typeof dataset === "object" && !Array.isArray(dataset)) {
     const fields = dataset as Record<string, unknown>;
-    for (const key of ["training", "validation", "test"] as const) {
+    // Hugging Face split paths name files inside the dataset repo; they are
+    // resolved against the cached snapshot, not the spec directory.
+    if (fields.huggingface === undefined) for (const key of ["training", "validation", "test"] as const) {
       if (fields[key] !== undefined) fields[key] = resolveLocalReference(fields[key], baseDirectory);
     }
   }

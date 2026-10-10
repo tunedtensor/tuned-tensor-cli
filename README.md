@@ -460,6 +460,12 @@ tt pipeline run --spec tunedtensor.json --dry-run
 tt pipeline run --spec tunedtensor.json
 ```
 
+`tt models prefetch` shows a progress bar with transfer rate and ETA. Large
+downloads survive flaky networks: TT pins the requested revision to one commit,
+retries interrupted transfers with backoff (`TT_HF_DOWNLOAD_MAX_ATTEMPTS`,
+default 10), and keeps completed files in the Hugging Face cache, so running the
+command again resumes instead of starting over.
+
 These commands read runtime and evaluation settings from the core spec. The preview needs
 no GPU or AWS connection. Results return to the local run and model stores:
 
@@ -467,6 +473,48 @@ no GPU or AWS connection. Results return to the local run and model stores:
 tt runs report <run-id>
 tt models verify local-<run-id>
 ```
+
+### Train on a Hugging Face dataset
+
+Point `dataset_prebuilt` at files in a Hugging Face dataset repo instead of
+local paths. It works like `base_model`: name the repo, pin a commit, and TT
+downloads it into the same Hugging Face cache.
+
+```json
+{
+  "dataset_prebuilt": {
+    "huggingface": {
+      "repo": "SetFit/tweet_sentiment_extraction",
+      "revision": "0d5359cfbb2470332f2b82e62269cf755e0ac5c3",
+      "columns": { "input": "text", "output": "label_text" }
+    },
+    "training": "train.jsonl",
+    "test": "test.jsonl"
+  }
+}
+```
+
+```bash
+tt datasets prefetch tunedtensor.json   # download with progress; rerun to resume
+tt datasets verify tunedtensor.json     # offline checksum check of the cached files
+tt pipeline run --spec tunedtensor.json # downloads automatically if still missing
+```
+
+- Split paths are files inside the repo and must be JSONL. Parquet and CSV are
+  not supported yet.
+- Without `columns`, files must already be TT chat JSONL whose system message
+  matches the spec. With `columns`, each record's `input` and `output` fields
+  become chat rows that use the spec's instruction. Records missing either
+  field are skipped. Evaluation splits keep the first of any duplicate input,
+  and training drops inputs that also appear in an evaluation split. The run
+  report lists every skipped or dropped count.
+- Without `revision`, TT uses the cached `main` snapshot and records the commit
+  it resolved. `tt validate` and `tt datasets prefetch` flag the spec as
+  unpinned. Pin the commit for reproducible runs.
+- Runs never contact the Hub after the download. Each run checks every file
+  against its content-addressed blob and records the repo, commit, file
+  SHA-256s and conversion counts in `run_metadata.dataset_source`.
+- Gated datasets use `HF_TOKEN`, as model downloads do.
 
 Serving still runs on the machine executing `tt serve` and requires a local
 Linux/CUDA GPU, even when training used AWS:

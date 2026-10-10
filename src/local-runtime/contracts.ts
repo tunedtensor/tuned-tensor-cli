@@ -64,11 +64,46 @@ export const foundationHyperparametersSchema = z.object({
   log_interval_steps: z.number().int().min(1).max(1_000_000).optional(),
 }).strict();
 
+/** A Hugging Face dataset repo id such as `org/name`. */
+export const huggingFaceRepoIdSchema = z.string().regex(
+  /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}\/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/,
+  "huggingface.repo must be a Hugging Face dataset id such as org/name",
+);
+
+/**
+ * Optional Hugging Face source for `dataset_prebuilt`. When present, the split
+ * paths are files inside that dataset repo rather than local paths. Like
+ * `base_model` + `base_model_revision`, pin `revision` to an immutable commit
+ * for reproducible runs; an unpinned source uses the cached `main` snapshot.
+ */
+export const datasetColumnsSchema = z.object({
+  input: z.string().min(1),
+  output: z.string().min(1),
+}).strict();
+
+export const huggingFaceDatasetSourceSchema = z.object({
+  repo: huggingFaceRepoIdSchema,
+  revision: baseModelRevisionSchema.optional(),
+  /**
+   * Field names for plain JSONL records such as `{"text": ..., "label": ...}`.
+   * Each record becomes a chat row with the spec's compiled system message.
+   * Omit for files that are already TT chat JSONL.
+   */
+  columns: datasetColumnsSchema.optional(),
+}).strict();
+
+/** True for a contained path inside a repo, such as `data/train.jsonl`. */
+export function isRepoRelativePath(value: string): boolean {
+  if (/^(?:[A-Za-z]:|[/\\]|file:)/.test(value)) return false;
+  return value.split(/[/\\]/).every((part) => part !== "" && part !== "." && part !== "..");
+}
+
 export const datasetPrebuiltSchema = z.object({
   training: z.string().min(1),
   validation: z.string().min(1).optional(),
   test: z.string().min(1).optional(),
   format: datasetFormatSchema.default("chat_jsonl"),
+  huggingface: huggingFaceDatasetSourceSchema.optional(),
 }).strict().superRefine((dataset, context) => {
   if (!dataset.validation && !dataset.test) {
     context.addIssue({
@@ -77,7 +112,65 @@ export const datasetPrebuiltSchema = z.object({
       message: "Provide a distinct validation or test split for held-out evaluation",
     });
   }
+  if (!dataset.huggingface) return;
+  for (const key of ["training", "validation", "test"] as const) {
+    const value = dataset[key];
+    if (value === undefined) continue;
+    if (!isRepoRelativePath(value)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: `With dataset_prebuilt.huggingface, ${key} must be a file path inside the dataset repo, such as data/${key}.jsonl`,
+      });
+    } else if (!value.toLowerCase().endsWith(".jsonl")) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: `${key} must be a chat JSONL (.jsonl) file; Parquet, CSV and other formats are not supported yet`,
+      });
+    }
+  }
 });
+
+/**
+ * Provenance of a dataset resolved from the Hugging Face cache. Recorded on the
+ * run request and report so every run names the exact repo commit and file
+ * digests it trained and evaluated on.
+ */
+const datasetSourceFileSchema = z.object({
+  path: z.string().min(1),
+  size_bytes: z.number().int().nonnegative(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+
+const datasetConversionStatsSchema = z.object({
+  records: z.number().int().nonnegative(),
+  kept: z.number().int().nonnegative(),
+  skipped_missing_fields: z.number().int().nonnegative(),
+  dropped_duplicate_inputs: z.number().int().nonnegative(),
+  dropped_eval_overlap: z.number().int().nonnegative(),
+}).strict();
+
+export const datasetSourceSchema = z.object({
+  provider: z.literal("huggingface"),
+  repo: huggingFaceRepoIdSchema,
+  requested_revision: baseModelRevisionSchema.nullable(),
+  revision: baseModelRevisionSchema,
+  pinned: z.boolean(),
+  columns: datasetColumnsSchema.nullable(),
+  /** Per-split record accounting when `columns` converted plain JSONL records. */
+  conversion: z.object({
+    training: datasetConversionStatsSchema,
+    validation: datasetConversionStatsSchema.optional(),
+    test: datasetConversionStatsSchema.optional(),
+  }).strict().nullable().optional(),
+  snapshot_path: z.string().min(1),
+  files: z.object({
+    training: datasetSourceFileSchema,
+    validation: datasetSourceFileSchema.optional(),
+    test: datasetSourceFileSchema.optional(),
+  }).strict(),
+}).strict();
 
 export const fineTuneHyperparametersSchema = z.object({
   n_epochs: z.number().int().min(1).max(20).default(1),
@@ -116,6 +209,7 @@ export const fineTuneRunRequestSchema = z.object({
   spec_snapshot: specSnapshotSchema,
   hyperparameters: fineTuneHyperparametersSchema.default({ n_epochs: 1 }),
   dataset_prebuilt: datasetPrebuiltSchema.optional(),
+  dataset_source: datasetSourceSchema.optional(),
 }).strict().superRefine((request, context) => {
   requirePinnedUncertifiedModel(request, context);
   if (request.spec_snapshot.examples.length === 0 && !request.dataset_prebuilt) {
@@ -251,6 +345,7 @@ export const runReportSchema = z.object({
     dataset_prebuilt: z.boolean(),
     dataset_format: datasetFormatSchema.nullable().optional(),
     dataset_uri: z.string(),
+    dataset_source: datasetSourceSchema.optional(),
     spec_example_count: z.number().int().nonnegative(),
     training_example_count: z.number().int().nonnegative().nullable(),
     eval_examples_total: z.number().int().nonnegative(),
@@ -433,6 +528,8 @@ export type BehaviorSpec = z.infer<typeof behaviorSpecSchema>;
 export type SpecSnapshot = z.infer<typeof specSnapshotSchema>;
 export type FineTuneHyperparameters = z.infer<typeof fineTuneHyperparametersSchema>;
 export type FineTuneRunRequest = z.infer<typeof fineTuneRunRequestSchema>;
+export type HuggingFaceDatasetSource = z.infer<typeof huggingFaceDatasetSourceSchema>;
+export type DatasetSource = z.infer<typeof datasetSourceSchema>;
 export type FoundationHyperparameters = z.infer<typeof foundationHyperparametersSchema>;
 export type LocalAdapterSpecFile = z.infer<typeof localAdapterSpecFileSchema>;
 export type LocalFoundationSpecFile = z.infer<typeof localFoundationSpecFileSchema>;
