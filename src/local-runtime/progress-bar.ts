@@ -108,18 +108,28 @@ export function formatProgressLine(
 ): string {
   const total = progress.total_bytes;
   const fraction = total > 0 ? Math.min(1, progress.completed_bytes / total) : 1;
-  const parts = [
-    `${(fraction * 100).toFixed(1).padStart(5)}%`,
-    `${formatBytes(progress.completed_bytes)} / ${formatBytes(total)}`,
+  // `drop` orders what a narrow terminal loses first; percent and size stay.
+  const fields: Array<{ text: string; drop?: number }> = [
+    { text: `${(fraction * 100).toFixed(1).padStart(5)}%` },
+    { text: `${formatBytes(progress.completed_bytes)} / ${formatBytes(total)}` },
   ];
   const done = progress.completed_bytes >= total;
   if (!done && rate !== null && rate > 0) {
-    parts.push(`${formatBytes(rate)}/s`, `ETA ${formatDuration((total - progress.completed_bytes) / rate)}`);
+    fields.push(
+      { text: `${formatBytes(rate)}/s`, drop: 2 },
+      { text: `ETA ${formatDuration((total - progress.completed_bytes) / rate)}`, drop: 3 },
+    );
   }
-  if (progress.files_total > 0) parts.push(`${progress.files_completed}/${progress.files_total} files`);
+  if (progress.files_total > 0) fields.push({ text: `${progress.files_completed}/${progress.files_total} files`, drop: 1 });
   const prefix = `[tt] ${progress.label}: `;
-  const text = parts.join("  ");
-  if (columns === undefined) return `${prefix}${text}`;
+  const join = () => fields.map((field) => field.text).join("  ");
+  if (columns === undefined) return `${prefix}${join()}`;
+  for (const rank of [1, 2, 3]) {
+    if (prefix.length + join().length <= columns - 1) break;
+    const index = fields.findIndex((field) => field.drop === rank);
+    if (index !== -1) fields.splice(index, 1);
+  }
+  const text = join();
   const barWidth = Math.min(30, columns - 1 - prefix.length - text.length - 3);
   if (barWidth < 10) return `${prefix}${text}`.slice(0, Math.max(0, columns - 1));
   const filled = Math.round(fraction * barWidth);
@@ -142,6 +152,7 @@ export function createProgressRenderer(options: {
   const now = options.now ?? (() => Date.now());
   const rates = new Map<string, RateTracker>();
   const lastLine = new Map<string, { at: number; decile: number }>();
+  const completed = new Set<string>();
   let drawn = false;
   let lastDraw = Number.NEGATIVE_INFINITY;
 
@@ -156,12 +167,18 @@ export function createProgressRenderer(options: {
       tracker.add(at, progress.completed_bytes);
       const done = finished(progress);
       if (options.tty) {
+        // The downloader reports completion more than once; print it once.
+        if (done && completed.has(progress.label)) return;
+        if (!done) completed.delete(progress.label);
         if (!done && at - lastDraw < 100) return;
         lastDraw = at;
         const line = formatProgressLine(progress, tracker.bytesPerSecond(), Math.max(40, options.columns ?? 80));
         options.write(`\r\x1b[2K${line}${done ? "\n" : ""}`);
         drawn = !done;
-        if (done) rates.delete(progress.label);
+        if (done) {
+          rates.delete(progress.label);
+          completed.add(progress.label);
+        }
         return;
       }
       const fraction = progress.total_bytes > 0 ? progress.completed_bytes / progress.total_bytes : 1;

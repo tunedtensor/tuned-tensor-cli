@@ -10,8 +10,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+import hub_download  # noqa: E402
 from hub_download import (  # noqa: E402
     PROGRESS_PREFIX,
+    IncompleteDownloadError,
     PlannedFile,
     ProgressMonitor,
     backoff_seconds,
@@ -31,6 +33,10 @@ class RepositoryNotFoundError(Exception):
     pass
 
 
+class LocalEntryNotFoundError(FileNotFoundError):
+    """huggingface_hub raises this when a connection drops on an uncached file."""
+
+
 class HttpError(Exception):
     def __init__(self, status):
         super().__init__(f"HTTP {status}")
@@ -43,6 +49,8 @@ class RetryTests(unittest.TestCase):
         self.assertTrue(is_retryable(TimeoutError()))
         self.assertTrue(is_retryable(HttpError(503)))
         self.assertTrue(is_retryable(HttpError(429)))
+        self.assertTrue(is_retryable(LocalEntryNotFoundError("connection error")))
+        self.assertTrue(is_retryable(IncompleteDownloadError("1 file missing")))
         self.assertFalse(is_retryable(HttpError(401)))
         self.assertFalse(is_retryable(HttpError(404)))
         self.assertFalse(is_retryable(RepositoryNotFoundError()))
@@ -198,6 +206,104 @@ class DatasetFileTests(unittest.TestCase):
             (snapshot / "escape.jsonl").symlink_to(outside)
             with self.assertRaisesRegex(ValueError, "escapes"):
                 verify_dataset_files(snapshot, {"training": "escape.jsonl"})
+
+
+class FakeHub:
+    """Stand-in for huggingface_hub with a scripted snapshot_download."""
+
+    def __init__(self, hub_cache: Path, commit: str, outcomes: list):
+        self.hub_cache = hub_cache
+        self.commit = commit
+        self.outcomes = outcomes
+        self.calls: list[dict] = []
+        self.constants = SimpleNamespace(HF_HUB_CACHE=str(hub_cache), HF_HOME=str(hub_cache.parent))
+
+    def install(self, test: unittest.TestCase) -> None:
+        hub = SimpleNamespace(constants=self.constants, snapshot_download=self.snapshot_download, HfApi=self.api)
+        utils = SimpleNamespace(filter_repo_objects=lambda items, allow_patterns=None, ignore_patterns=None, key=None: list(items))
+        previous = {name: sys.modules.get(name) for name in ("huggingface_hub", "huggingface_hub.utils")}
+        sys.modules["huggingface_hub"] = hub
+        sys.modules["huggingface_hub.utils"] = utils
+
+        def restore():
+            for name, module in previous.items():
+                if module is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = module
+        test.addCleanup(restore)
+
+    def api(self, token=None):
+        commit = self.commit
+        return SimpleNamespace(repo_info=lambda *args, **kwargs: SimpleNamespace(
+            sha=commit,
+            siblings=[SimpleNamespace(rfilename="train.jsonl", size=4, blob_id="b" * 40, lfs=None)],
+        ))
+
+    def snapshot_download(self, **kwargs):
+        self.calls.append(kwargs)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        snapshot = self.hub_cache / "datasets--org--name" / "snapshots" / self.commit
+        snapshot.mkdir(parents=True, exist_ok=True)
+        if outcome == "complete":
+            (snapshot / "train.jsonl").write_text("data")
+        return str(snapshot)
+
+
+class DownloadSnapshotTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.hub_cache = Path(self.temporary.name) / "hub"
+        self.commit = "c" * 40
+        self.sleeps = []
+        original_sleep = hub_download.time.sleep
+        hub_download.time.sleep = self.sleeps.append
+        self.addCleanup(setattr, hub_download.time, "sleep", original_sleep)
+        self.output = io.StringIO()
+        original_stdout = sys.stdout
+        sys.stdout = self.output
+        self.addCleanup(setattr, sys, "stdout", original_stdout)
+
+    def download(self, revision):
+        return hub_download.download_snapshot(
+            repo_id="org/name", repo_type="dataset", revision=revision,
+            allow_patterns=["train.jsonl"], label="dataset_prefetch",
+        )
+
+    def test_a_cached_pinned_commit_needs_no_network(self):
+        hub = FakeHub(self.hub_cache, self.commit, ["complete"])
+        hub.install(self)
+        path, commit = self.download(self.commit)
+        self.assertEqual(commit, self.commit)
+        self.assertTrue(hub.calls[0]["local_files_only"])
+        self.assertEqual(len(hub.calls), 1)
+        self.assertIn("already cached", self.output.getvalue())
+
+    def test_connection_drops_and_partial_snapshots_are_retried_on_one_commit(self):
+        hub = FakeHub(self.hub_cache, self.commit, [
+            LocalEntryNotFoundError("connection reset"),
+            "partial",
+            "complete",
+        ])
+        hub.install(self)
+        path, commit = self.download(None)
+        self.assertEqual(commit, self.commit)
+        self.assertEqual([call["revision"] for call in hub.calls], [self.commit] * 3)
+        self.assertEqual(self.sleeps, [2, 4])
+        self.assertIn("IncompleteDownloadError", self.output.getvalue())
+        self.assertEqual((self.hub_cache / "datasets--org--name" / "refs" / "main").read_text(), self.commit)
+        progress = [json.loads(line[len(PROGRESS_PREFIX):]) for line in self.output.getvalue().splitlines() if line.startswith(PROGRESS_PREFIX)]
+        self.assertEqual(progress[-1]["phase"], "downloaded")
+
+    def test_permanent_errors_are_not_retried(self):
+        hub = FakeHub(self.hub_cache, self.commit, [RepositoryNotFoundError("no such repo")])
+        hub.install(self)
+        with self.assertRaises(RepositoryNotFoundError):
+            self.download(None)
+        self.assertEqual(self.sleeps, [])
 
 
 if __name__ == "__main__":

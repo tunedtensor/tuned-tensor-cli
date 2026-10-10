@@ -20,6 +20,7 @@ import errno
 import hashlib
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -28,6 +29,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 PROGRESS_PREFIX = "@@tt-progress "
+COMMIT = re.compile(r"[0-9a-fA-F]{40}")
 DEFAULT_MAX_ATTEMPTS = 10
 MAX_BACKOFF_SECONDS = 60.0
 # A per-request read timeout that tolerates slow or briefly stalled Wi-Fi.
@@ -71,8 +73,17 @@ def backoff_seconds(attempt: int) -> float:
     return min(MAX_BACKOFF_SECONDS, float(2 ** attempt))
 
 
+class IncompleteDownloadError(RuntimeError):
+    """snapshot_download returned a cached folder that still lacks planned files."""
+
+
 def is_retryable(error: BaseException) -> bool:
-    """Retry network and server failures; fail fast on caller or auth errors."""
+    """Retry network and server failures; fail fast on caller or auth errors.
+
+    huggingface_hub reports a connection failure on a file that is not cached
+    yet as LocalEntryNotFoundError (a FileNotFoundError), so that and
+    IncompleteSnapshotError are retried during downloads.
+    """
     if isinstance(error, (KeyboardInterrupt, SystemExit)):
         return False
     if isinstance(error, OSError) and error.errno in (errno.ENOSPC, errno.EACCES, errno.EROFS, errno.EDQUOT):
@@ -82,9 +93,7 @@ def is_retryable(error: BaseException) -> bool:
         "RepositoryNotFoundError",
         "GatedRepoError",
         "RevisionNotFoundError",
-        "EntryNotFoundError",
         "RemoteEntryNotFoundError",
-        "LocalEntryNotFoundError",
         "DisabledRepoError",
         "OfflineModeIsEnabled",
     }:
@@ -145,10 +154,19 @@ def measure(blobs: Path, planned: list[PlannedFile]) -> dict[str, int]:
     }
 
 
-def emit_progress(event: dict[str, Any], stream: Any = None) -> None:
+_STDOUT_LOCK = threading.Lock()
+
+
+def write_line(text: str, stream: Any = None) -> None:
+    """Write one whole line; the progress thread and log messages share stdout."""
     target = stream if stream is not None else sys.stdout
-    target.write(PROGRESS_PREFIX + json.dumps(event, separators=(",", ":")) + "\n")
-    target.flush()
+    with _STDOUT_LOCK:
+        target.write(text + "\n")
+        target.flush()
+
+
+def emit_progress(event: dict[str, Any], stream: Any = None) -> None:
+    write_line(PROGRESS_PREFIX + json.dumps(event, separators=(",", ":")), stream)
 
 
 class ProgressMonitor:
@@ -207,8 +225,8 @@ def with_retries(
     *,
     description: str,
     max_attempts: int,
-    sleep: Callable[[float], None] = time.sleep,
-    log: Callable[[str], None] = lambda message: print(message, flush=True),
+    sleep: Callable[[float], None] | None = None,
+    log: Callable[[str], None] = write_line,
 ) -> Any:
     for attempt in range(1, max_attempts + 1):
         try:
@@ -222,39 +240,36 @@ def with_retries(
                 f"Retrying in {delay:.0f}s (attempt {attempt + 1}/{max_attempts}); "
                 "completed files are kept in the cache."
             )
-            sleep(delay)
+            (sleep or time.sleep)(delay)
     raise AssertionError("unreachable")
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(8 * 1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def verify_blob(path: Path) -> bool:
     """Check a cached file against its content-addressed blob name.
 
     Returns True when the blob name is a recognized digest and it matches;
-    False when the name carries no digest. Raises ValueError on a mismatch.
+    False when the name carries no digest (for example a cache without
+    symlinks). Raises ValueError on a mismatch.
     """
+    return verify_blob_digest(path)[0]
+
+
+def verify_blob_digest(path: Path) -> tuple[bool, str]:
+    """Like verify_blob, also returning the file's SHA-256 from the same read."""
     blob = path.resolve()
     expected = blob.name.lower()
-    if len(expected) == 64 and all(character in "0123456789abcdef" for character in expected):
-        actual = sha256_file(blob)
-    elif len(expected) == 40 and all(character in "0123456789abcdef" for character in expected):
-        digest = hashlib.sha1(f"blob {blob.stat().st_size}\0".encode())
-        with blob.open("rb") as source:
-            for chunk in iter(lambda: source.read(8 * 1024 * 1024), b""):
-                digest.update(chunk)
-        actual = digest.hexdigest()
-    else:
-        return False
-    if actual != expected:
-        raise ValueError(f"Cached Hugging Face blob checksum mismatch: {path}")
-    return True
+    sha256 = hashlib.sha256()
+    git_sha1 = hashlib.sha1(f"blob {blob.stat().st_size}\0".encode())
+    with blob.open("rb") as source:
+        for chunk in iter(lambda: source.read(8 * 1024 * 1024), b""):
+            sha256.update(chunk)
+            git_sha1.update(chunk)
+    digests = {64: sha256.hexdigest(), 40: git_sha1.hexdigest()}
+    if len(expected) in digests and all(character in "0123456789abcdef" for character in expected):
+        if digests[len(expected)] != expected:
+            raise ValueError(f"Cached Hugging Face blob checksum mismatch: {path}")
+        return True, digests[64]
+    return False, digests[64]
 
 
 def download_snapshot(
@@ -283,6 +298,25 @@ def download_snapshot(
         )
         return path, Path(path).name
 
+    if revision and COMMIT.fullmatch(revision):
+        # A pinned commit that is already fully cached needs no network, so
+        # prefetch keeps working offline. huggingface_hub checks completeness
+        # against its cached tree listing and raises if files are missing.
+        try:
+            path = snapshot_download(
+                repo_id=repo_id,
+                repo_type=repo_type,
+                revision=revision,
+                token=token,
+                allow_patterns=allow_patterns,
+                ignore_patterns=ignore_patterns,
+                local_files_only=True,
+            )
+            write_line(f"{label}: {repo_id}@{revision} is already cached; no download needed.")
+            return path, revision
+        except Exception:  # noqa: BLE001 - not cached or incomplete: download below
+            pass
+
     from huggingface_hub import HfApi
     from huggingface_hub.utils import filter_repo_objects
 
@@ -304,25 +338,29 @@ def download_snapshot(
     blobs = Path(constants.HF_HUB_CACHE) / repo_folder_name(repo_id, repo_type) / "blobs"
     blobs.mkdir(parents=True, exist_ok=True)
     total = sum(item.size for item in planned)
-    print(
+    write_line(
         f"{label}: {repo_id}@{commit} — {len(planned)} file(s), {total} bytes. "
-        "Interrupted downloads can be restarted; completed files are reused.",
-        flush=True,
+        "Interrupted downloads can be restarted; completed files are reused."
     )
     monitor = ProgressMonitor(blobs, planned, label)
     with monitor:
-        path = with_retries(
-            lambda: snapshot_download(
+        def attempt() -> str:
+            path = snapshot_download(
                 repo_id=repo_id,
                 repo_type=repo_type,
                 revision=commit,
                 token=token,
                 allow_patterns=allow_patterns,
                 ignore_patterns=ignore_patterns,
-            ),
-            description=f"Downloading {repo_id}",
-            max_attempts=max_attempts,
-        )
+            )
+            # If the Hub becomes unreachable mid-way, huggingface_hub may hand
+            # back the partial cached folder; treat that as a retryable failure.
+            missing = [sibling.rfilename for sibling in siblings if not (Path(path) / sibling.rfilename).exists()]
+            if missing:
+                raise IncompleteDownloadError(f"{len(missing)} file(s) still missing, e.g. {missing[0]}")
+            return path
+
+        path = with_retries(attempt, description=f"Downloading {repo_id}", max_attempts=max_attempts)
     monitor.snapshot(force=True, phase="downloaded")
     if revision and revision != commit:
         # Downloading by commit skips huggingface_hub's ref bookkeeping. Record

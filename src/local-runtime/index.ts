@@ -3,7 +3,7 @@ import { resolveProjectConfig } from "./project-workflow.js";
 import { readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { cwd } from "node:process";
 import { fileURLToPath } from "node:url";
 import { compareRuns } from "./compare.js";
@@ -1181,7 +1181,7 @@ async function main(argv: string[]): Promise<void> {
         dataset_format: remoteDataset.format,
         dataset_status: "not_downloaded",
         dataset_huggingface: remoteDataset.huggingface,
-        next_step: "tt datasets prefetch tunedtensor.json",
+        next_step: `tt datasets prefetch ${relative(cwd(), input.path) || input.path}`,
         artifact_root: config.artifactRoot,
         store_root: config.storeRoot,
         dry_run: config.dryRun,
@@ -1219,9 +1219,9 @@ async function main(argv: string[]): Promise<void> {
       verbose: hasFlag(argv, "--verbose"),
       quiet: hasFlag(argv, "--quiet"),
     });
-    await ensureDatasetCached({ request: input.request, config, reporter });
+    const ensured = await ensureDatasetCached({ request: input.request, config, reporter });
     const validated = await validateLocalFineTuneInput({
-      request: input.request,
+      request: ensured.request,
       config,
     });
     let request = validated.request;

@@ -113,7 +113,7 @@ test("an uncached dataset fails offline with the prefetch command", async () => 
     await assert.rejects(resolveRequestDataset(run, config(root)), (error: unknown) => {
       assert.ok(error instanceof DatasetNotDownloadedError);
       assert.match(error.message, /org\/tweets@main is not in the local cache/);
-      assert.match(error.message, /tt datasets prefetch tunedtensor\.json/);
+      assert.match(error.message, /tt datasets prefetch/);
       return true;
     });
     // A dry run never downloads.
@@ -153,6 +153,8 @@ test("a cached chat JSONL dataset resolves to verified snapshot files with prove
         test: { path: "data/test.jsonl", size_bytes: Buffer.byteLength(test), sha256: createHash("sha256").update(test).digest("hex") },
       },
     });
+    const ensured = await ensureDatasetCached({ request: run, config: config(root) });
+    assert.deepEqual(ensured, { request: resolved, prefetch: null });
     // Resolution is idempotent: a resolved request is already local.
     assert.deepEqual(await resolveRequestDataset(resolved, config(root)), resolved);
     const pinned = await resolveRequestDataset(
@@ -179,8 +181,26 @@ test("a corrupted or escaping cache entry is rejected", async () => {
     await symlink(outside, join(snapshot, "test.jsonl"));
     await assert.rejects(
       resolveCachedHuggingFaceDataset({ dataset: { ...dataset, training: "test.jsonl" }, modelCache: join(root, "hf") }),
-      /must resolve inside the Hugging Face blob store/,
+      /must resolve inside its Hugging Face cache repository/,
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("caches without symlinks are accepted when contained in the repo", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-dataset-copies-"));
+  try {
+    const content = chatRow("a", "b");
+    const snapshot = join(root, "hf", "hub", "datasets--org--tweets", "snapshots", revision);
+    await mkdir(snapshot, { recursive: true });
+    await mkdir(join(root, "hf", "hub", "datasets--org--tweets", "blobs"), { recursive: true });
+    await writeFile(join(snapshot, "train.jsonl"), content);
+    const resolved = await resolveCachedHuggingFaceDataset({
+      dataset: { huggingface: { repo, revision }, training: "train.jsonl", test: "train.jsonl", format: "chat_jsonl" },
+      modelCache: join(root, "hf"),
+    });
+    assert.equal(resolved.source.files.training.sha256, createHash("sha256").update(content).digest("hex"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -333,7 +353,7 @@ test("prefetch explains when a spec has no Hugging Face dataset", async () => {
       spec_snapshot: { ...spec, examples: [{ input: "a", output: "b" }] },
     });
     await assert.rejects(prefetchHuggingFaceDataset({ request: run, config: config(root) }), /no dataset_prebuilt\.huggingface source/);
-    assert.equal(await ensureDatasetCached({ request: run, config: config(root) }), null);
+    assert.deepEqual(await ensureDatasetCached({ request: run, config: config(root) }), { request: run, prefetch: null });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -57,7 +57,8 @@ test("a progress line shows percent, size, rate, ETA and a width-fitted bar", ()
   assert.ok(line.length < 120);
   const narrow = formatProgressLine(progress(250), 50, 60);
   assert.doesNotMatch(narrow, /\[[#-]+\]/, "narrow terminals drop the bar");
-  assert.ok(narrow.length <= 59);
+  assert.equal(narrow, "[tt] model_prefetch:  25.0%  250 B / 1000 B  ETA 15s");
+  assert.equal(formatProgressLine(progress(250), 50, 45), "[tt] model_prefetch:  25.0%  250 B / 1000 B");
   assert.doesNotMatch(formatProgressLine(progress(1_000), 50), /ETA/);
 });
 
@@ -73,6 +74,7 @@ test("the terminal renderer redraws one line and finishes with a newline", () =>
   renderer.interrupt();
   clock = 2_000;
   renderer.update(progress(1_000, 1_000, "downloaded"));
+  renderer.update(progress(1_000, 1_000, "downloaded")); // repeated completion prints once
   assert.equal(output.length, 4);
   assert.ok(output.slice(0, 2).every((text) => text.startsWith("\r\x1b[2K") && !text.endsWith("\n")));
   assert.equal(output[2], "\r\x1b[2K");

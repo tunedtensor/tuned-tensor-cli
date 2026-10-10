@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from hub_download import configure_download_environment, download_snapshot, sha256_file, verify_blob
+from hub_download import configure_download_environment, download_snapshot, verify_blob_digest
 from prefetch import configure_hugging_face_cache, write_json
 
 HUGGING_FACE_REPO_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}")
@@ -28,26 +28,30 @@ def validate_repo_path(value: Any) -> str:
 
 
 def verify_dataset_files(snapshot: Path, files: dict[str, str]) -> dict[str, dict[str, Any]]:
-    """Check each split file is a complete, checksum-verified cache entry."""
-    repository = snapshot.parent.parent
-    blobs = (repository / "blobs").resolve()
+    """Check each split file is a complete cache entry inside the dataset repo.
+
+    Normal caches link snapshot files to content-addressed blobs, which are
+    checked against their digest. Caches without symlink support (Windows
+    without Developer Mode) hold plain copies; those are contained and hashed.
+    """
+    repository = snapshot.parent.parent.resolve()
     verified: dict[str, dict[str, Any]] = {}
     for split, relative in files.items():
         path = snapshot / relative
         if not path.is_file():
             raise ValueError(f"Dataset file {relative} ({split}) is missing from snapshot {snapshot}")
         target = path.resolve()
-        if blobs not in target.parents:
-            raise ValueError(f"Dataset file {relative} escapes the Hugging Face blob store: {target}")
+        if repository not in target.parents:
+            raise ValueError(f"Dataset file {relative} escapes the Hugging Face dataset cache: {target}")
         size = target.stat().st_size
         if size == 0:
             raise ValueError(f"Dataset file {relative} ({split}) is empty")
-        verify_blob(path)
+        _, sha256 = verify_blob_digest(path)
         verified[split] = {
             "path": relative,
             "local_path": str(path),
             "size_bytes": size,
-            "sha256": sha256_file(target),
+            "sha256": sha256,
         }
     return verified
 

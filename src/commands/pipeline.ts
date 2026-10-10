@@ -294,8 +294,8 @@ export function registerPipelineCommands(parent: Command): void {
         steps: plan.steps.map(({ transfers: _transfers, ...step }) => step) as LocalPipeline["steps"],
       };
       // A Hugging Face dataset that is not cached yet downloads here, with progress.
-      await ensureDatasetCached({ request: input.request, config, reporter: createTransferReporter() });
-      const result = await runLocalPipeline({ request: input.request, config, pipeline: localPipeline, ...(input.kind === "spec" ? { projectSpec: input.spec } : {}) });
+      const { request } = await ensureDatasetCached({ request: input.request, config, reporter: createTransferReporter() });
+      const result = await runLocalPipeline({ request, config, pipeline: localPipeline, ...(input.kind === "spec" ? { projectSpec: input.spec } : {}) });
       if (isJsonMode()) return printJson({ ...result, spec });
       printSuccess(`Pipeline completed with status ${result.status}.`);
     });

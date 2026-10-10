@@ -158,11 +158,15 @@ function selectedSpecArgument(args: string[], cwd: string): SpecArgument | null 
   ) {
     return positionalSpecArgument(args, 2, join(cwd, DEFAULT_SPEC_NAME));
   }
-  if (
-    command === "datasets"
-    && ["prefetch", "verify"].includes(args[1] ?? "")
-  ) {
-    return positionalSpecArgument(args, 2, join(cwd, DEFAULT_SPEC_NAME));
+  if (command === "datasets") {
+    // `tt datasets` and `tt datasets my.json` mean `tt datasets prefetch ...`;
+    // spell the default out so the spec argument is found and projected.
+    if (args[1] === undefined || args[1].startsWith("-") || args[1].endsWith(".json")) {
+      args.splice(1, 0, "prefetch");
+    }
+    if (["prefetch", "verify"].includes(args[1] ?? "")) {
+      return positionalSpecArgument(args, 2, join(cwd, DEFAULT_SPEC_NAME));
+    }
   }
 
   const serves = command === "serve"

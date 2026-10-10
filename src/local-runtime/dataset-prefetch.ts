@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, stat } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   baseModelRevisionSchema,
@@ -14,7 +15,8 @@ import {
   type SpecSnapshot,
 } from "./contracts.js";
 import { buildSystemMessage, datasetInputIdentity, exampleToChatRow } from "./dataset.js";
-import { fileUri, writeJson } from "./artifacts.js";
+import { fileUri, writeFileAtomic, writeJson } from "./artifacts.js";
+import { safeName } from "./prefetch.js";
 import {
   minimalMachineLearningEnvironment,
   withHuggingFaceCacheEnvironment,
@@ -111,7 +113,7 @@ export async function resolveCachedHuggingFaceDataset(args: {
   const source = args.dataset.huggingface;
   const hubCache = huggingFaceHubCache(args.modelCache);
   const repository = repositoryDirectory(hubCache, source.repo);
-  const prefetchHint = "Run `tt datasets prefetch tunedtensor.json` to download it.";
+  const prefetchHint = "Run `tt datasets prefetch` with this spec (for example `tt datasets prefetch tunedtensor.json`) to download it.";
   let revision = source.revision;
   if (!revision) {
     const ref = await readFile(join(repository, "refs", "main"), "utf8").catch(() => null);
@@ -124,24 +126,27 @@ export async function resolveCachedHuggingFaceDataset(args: {
     revision = parsed.data;
   }
   const snapshot = join(repository, "snapshots", revision);
-  const blobs = await realpath(join(repository, "blobs")).catch(() => null);
+  const physicalRepository = await realpath(repository).catch(() => null);
+  const blobs = physicalRepository ? join(physicalRepository, "blobs") : null;
   const files: Partial<Record<Split, DatasetSource["files"]["training"]>> = {};
   const localPaths: ResolvedHuggingFaceDataset["localPaths"] = {};
   for (const [split, path] of Object.entries(datasetFiles(args.dataset)) as Array<[Split, string]>) {
     const local = join(snapshot, ...path.split(/[/\\]/));
     const metadata = await stat(local).catch(() => null);
-    if (!metadata || !blobs) {
+    if (!metadata || !physicalRepository || !blobs) {
       throw new DatasetNotDownloadedError(
         `Hugging Face dataset file ${path} (${split}) from ${source.repo}@${revision} is not in the local cache (${hubCache}). ${prefetchHint}`,
       );
     }
     const target = await realpath(local);
-    if (!metadata.isFile() || !isStrictDescendant(blobs, target)) {
-      throw new Error(`Cached dataset file ${local} must resolve inside the Hugging Face blob store ${blobs}.`);
+    // Normal caches link into content-addressed blobs. Caches without symlink
+    // support (Windows without Developer Mode) hold plain copies in snapshots/.
+    if (!metadata.isFile() || !isStrictDescendant(physicalRepository, target)) {
+      throw new Error(`Cached dataset file ${local} must resolve inside its Hugging Face cache repository ${physicalRepository}.`);
     }
     if (metadata.size === 0) throw new Error(`Cached dataset file ${path} (${split}) is empty: ${local}`);
     const digests = await digestFile(target, metadata.size);
-    const blobName = basename(target).toLowerCase();
+    const blobName = isStrictDescendant(blobs, target) ? basename(target).toLowerCase() : "";
     const expected = /^[0-9a-f]{64}$/.test(blobName) ? digests.sha256 : /^[0-9a-f]{40}$/.test(blobName) ? digests.gitSha1 : null;
     if (expected !== null && expected !== blobName) {
       throw new Error(
@@ -179,8 +184,11 @@ async function readMappedRecords(path: string, split: Split, columns: NonNullabl
   const examples: BehaviorSpecExample[] = [];
   let records = 0;
   let skipped = 0;
-  const text = await readFile(path, "utf8");
-  for (const [index, line] of text.split(/\r?\n/).entries()) {
+  // Stream: Hub splits can exceed the maximum string length of a single read.
+  const lines = createInterface({ input: createReadStream(path, { encoding: "utf8" }), crlfDelay: Infinity });
+  let index = -1;
+  for await (const line of lines) {
+    index += 1;
     if (!line.trim()) continue;
     records += 1;
     let value: unknown;
@@ -327,16 +335,6 @@ export async function resolveRequestDataset(
   });
 }
 
-async function writeFileAtomic(path: string, content: string): Promise<void> {
-  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
-  await rename(temporary, path);
-}
-
-function safeName(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "dataset";
-}
-
 /**
  * Download the spec's Hugging Face dataset files into the shared cache, the
  * same way `tt models prefetch` fetches a base model. With `localOnly`, only
@@ -448,21 +446,20 @@ export async function prefetchHuggingFaceDataset(args: {
 
 /**
  * Make sure a Hugging Face dataset is cached before a run, downloading it with
- * progress when it is missing. Returns the prefetch report when a download ran.
+ * progress when it is missing. Returns the request with its dataset resolved
+ * to local files, so later validation does not hash the files again.
  */
-export async function ensureDatasetCached(args: {
-  request: Pick<FineTuneRunRequest, "dataset_prebuilt">;
+export async function ensureDatasetCached<T extends FineTuneRunRequest>(args: {
+  request: T;
   config: LocalRunnerConfig;
   reporter?: LocalRunReporter;
-}): Promise<DatasetPrefetchReport | null> {
-  const dataset = huggingFaceDataset(args.request);
-  if (!dataset) return null;
-  const modelCache = args.config.paths.modelCache ? resolve(args.config.paths.modelCache) : undefined;
+}): Promise<{ request: FineTuneRunRequest; prefetch: DatasetPrefetchReport | null }> {
+  if (!huggingFaceDataset(args.request)) return { request: args.request, prefetch: null };
   try {
-    await resolveCachedHuggingFaceDataset({ dataset, modelCache });
-    return null;
+    return { request: await resolveRequestDataset(args.request, args.config), prefetch: null };
   } catch (error) {
     if (!(error instanceof DatasetNotDownloadedError) || args.config.dryRun) throw error;
   }
-  return await prefetchHuggingFaceDataset(args);
+  const prefetch = await prefetchHuggingFaceDataset(args);
+  return { request: await resolveRequestDataset(args.request, args.config), prefetch };
 }

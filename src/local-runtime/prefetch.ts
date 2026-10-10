@@ -300,7 +300,7 @@ export function buildModelPrefetchPayload(
   };
 }
 
-function safeName(value: string): string {
+export function safeName(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "model";
 }
 
