@@ -36,7 +36,16 @@ import { registerBalanceCommands } from "./commands/balance.js";
 import { registerTopupCommands } from "./commands/topup.js";
 import { registerPublishCommand } from "./commands/publish.js";
 import { registerCloudCommands, registerUsageCommand } from "./commands/cloud.js";
-import { checkForCliUpdate, formatCliUpdateNotice } from "./update-check.js";
+import { registerUpgradeCommand } from "./commands/upgrade.js";
+import {
+  cachedCliUpdate,
+  checkForCliUpdate,
+  cliUpdateCacheIsStale,
+  cliUpdateChecksDisabled,
+  formatCliUpdateNotice,
+  getCliUpdateCacheFile,
+  spawnCliUpdateRefresh,
+} from "./update-check.js";
 export { extractPassthroughOptions } from "./passthrough.js";
 
 function createAccountToolApi(opts: api.ClientOpts): AgentToolApi {
@@ -368,6 +377,11 @@ export function createProgram(
   registerUsageCommand(program);
   registerPublishCommand(program);
   registerCloudCommands(program);
+  registerUpgradeCommand(program, {
+    version,
+    entrypoint: runtime.argv?.[1] ?? process.argv[1],
+    env,
+  });
   registerAgentCommands(program, {
     get env() { return childEnvironment(program.opts(), env); },
     output: runtime.stdout ?? process.stdout,
@@ -462,7 +476,11 @@ export async function runCli(
     const error = runtime.stderr ?? process.stderr;
     let update: Awaited<ReturnType<NonNullable<CliRuntime["checkForUpdate"]>>> = null;
     try {
-      update = await (runtime.checkForUpdate ?? checkForCliUpdate)(version);
+      if (runtime.checkForUpdate) {
+        update = await runtime.checkForUpdate(version);
+      } else if (!cliUpdateChecksDisabled(env)) {
+        update = await checkForCliUpdate(version, { cacheFile: getCliUpdateCacheFile(env) });
+      }
     } catch {
       // Version discovery is advisory and must never prevent shell launch.
     }
@@ -504,5 +522,37 @@ export async function runCli(
 
   // Honor --json even when Commander rejects input before a preAction hook.
   if (argv.includes("--json")) setJsonMode(true);
-  await createProgram(version, { ...runtime, argv }).parseAsync(argv);
+  const notifier = startCommandUpdateNotifier(version, args, runtime, env);
+  try {
+    await createProgram(version, { ...runtime, argv }).parseAsync(argv);
+  } finally {
+    notifier?.();
+  }
+}
+
+/**
+ * Explicit commands never wait on npm: a stale cache is refreshed by a
+ * detached process, and the last known release is announced afterwards.
+ */
+function startCommandUpdateNotifier(
+  version: string,
+  args: string[],
+  runtime: CliRuntime,
+  env: NodeJS.ProcessEnv,
+): (() => void) | null {
+  const error = (runtime.stderr ?? process.stderr) as NodeJS.WritableStream & { isTTY?: boolean };
+  if (
+    runtime.checkForUpdate ||
+    error.isTTY !== true ||
+    cliUpdateChecksDisabled(env) ||
+    args.some((arg) => ["--json", "--version", "-V", "--help", "-h"].includes(arg)) ||
+    ["upgrade", "update", "help"].includes(args[0] ?? "")
+  ) return null;
+  const cacheFile = getCliUpdateCacheFile(env);
+  if (cliUpdateCacheIsStale(cacheFile)) spawnCliUpdateRefresh(cacheFile);
+  return () => {
+    if (isJsonMode()) return;
+    const update = cachedCliUpdate(version, cacheFile);
+    if (update) error.write(`\n${formatCliUpdateNotice(update)}\n`);
+  };
 }

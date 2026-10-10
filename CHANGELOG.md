@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.22.1] - 2026-10-10
+
+### Added
+
+- `tt upgrade` installs the latest release into the same npm prefix the
+  running `tt` came from (including the curl installer's `~/.local`
+  fallback). `--check` only reports; `tt upgrade beta` or a version pins one.
+
+### Fixed
+
+- Update notices were rarely shown: the check only ran when opening the bare
+  shell and gave up after 750 ms. The latest version is now cached for 12 hours,
+  refreshed in the background, and announced after commands run in a
+  terminal as well as when the shell opens.
+
 ## [0.22.0] - 2026-10-10
 
 ### Added
