@@ -184,6 +184,7 @@ async function readMappedRecords(path: string, split: Split, columns: NonNullabl
   const examples: BehaviorSpecExample[] = [];
   let records = 0;
   let skipped = 0;
+  const availableFields = new Set<string>();
   // Stream: Hub splits can exceed the maximum string length of a single read.
   const lines = createInterface({ input: createReadStream(path, { encoding: "utf8" }), crlfDelay: Infinity });
   let index = -1;
@@ -201,16 +202,7 @@ async function readMappedRecords(path: string, split: Split, columns: NonNullabl
       throw new Error(`${split} line ${index + 1}: expected a JSON object in ${path}`);
     }
     const row = value as Record<string, unknown>;
-    if (records === 1) {
-      for (const name of [columns.input, columns.output]) {
-        if (!(name in row)) {
-          throw new Error(
-            `${split} records have no "${name}" field (dataset_prebuilt.huggingface.columns). `
-            + `Available fields: ${Object.keys(row).join(", ")}`,
-          );
-        }
-      }
-    }
+    for (const name of Object.keys(row)) availableFields.add(name);
     const input = mappedField(row, columns.input);
     const output = mappedField(row, columns.output);
     if (input === null || output === null) {
@@ -218,6 +210,18 @@ async function readMappedRecords(path: string, split: Split, columns: NonNullabl
       continue;
     }
     examples.push({ input, output });
+  }
+  // Diagnose a misspelled mapping only after considering all records. A sparse
+  // first record follows the same skip rule as a sparse record anywhere else.
+  if (records > 0) {
+    for (const name of [columns.input, columns.output]) {
+      if (!availableFields.has(name)) {
+        throw new Error(
+          `${split} records have no "${name}" field (dataset_prebuilt.huggingface.columns). `
+          + `Available fields: ${[...availableFields].join(", ")}`,
+        );
+      }
+    }
   }
   return { examples, records, skipped };
 }
