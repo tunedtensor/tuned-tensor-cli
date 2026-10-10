@@ -1,11 +1,11 @@
 import argparse
-import hashlib
 import json
 import os
 import re
 from pathlib import Path
 from typing import Any
 
+from hub_download import configure_download_environment, download_snapshot, verify_blob
 from model_contract import (
     assert_certified_base_model,
     assert_certified_base_model_revision,
@@ -77,15 +77,6 @@ def configure_hugging_face_cache(cache_home: str | None) -> None:
         os.environ.pop(deprecated, None)
 
 
-def hash_file(path: Path, algorithm: str, prefix: bytes = b"") -> str:
-    digest = hashlib.new(algorithm)
-    digest.update(prefix)
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(8 * 1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def verify_snapshot(snapshot: Path, expected_model_id: str | None = None) -> tuple[list[Path], int]:
     config = snapshot / "config.json"
     if not config.is_file() or config.stat().st_size == 0:
@@ -142,19 +133,7 @@ def verify_snapshot(snapshot: Path, expected_model_id: str | None = None) -> tup
     if not tokenizer_config.is_file() or not any(path.is_file() and path.stat().st_size > 0 for path in vocabulary):
         raise ValueError(f"Cached snapshot is missing tokenizer metadata or vocabulary files: {snapshot}")
 
-    verified_blobs = 0
-    for path in files:
-        blob = path.resolve()
-        expected = blob.name.lower()
-        if len(expected) == 64 and all(character in "0123456789abcdef" for character in expected):
-            actual = hash_file(blob, "sha256")
-        elif len(expected) == 40 and all(character in "0123456789abcdef" for character in expected):
-            actual = hash_file(blob, "sha1", f"blob {blob.stat().st_size}\0".encode())
-        else:
-            continue
-        if actual != expected:
-            raise ValueError(f"Cached Hugging Face blob checksum mismatch: {path}")
-        verified_blobs += 1
+    verified_blobs = sum(1 for path in files if verify_blob(path))
     return files, verified_blobs
 
 
@@ -178,17 +157,20 @@ def main() -> None:
 
     # Import only after the cache environment is final. huggingface_hub reads
     # these variables while importing its constants module.
-    from huggingface_hub import constants, snapshot_download
+    configure_download_environment()
+    from huggingface_hub import constants
 
-    action = "Verifying cached" if payload.get("local_files_only") else "Prefetching"
+    local_only = bool(payload.get("local_files_only", False))
+    action = "Verifying cached" if local_only else "Prefetching"
     print(f"{action} {base_model} in {constants.HF_HUB_CACHE}...", flush=True)
-    snapshot_path = snapshot_download(
+    snapshot_path, _ = download_snapshot(
         repo_id=base_model,
+        repo_type="model",
         revision=payload.get("revision"),
-        token=os.getenv("HF_TOKEN"),
         allow_patterns=ALLOW_PATTERNS,
         ignore_patterns=IGNORE_PATTERNS + ([] if is_certified_base_model(base_model) else ["pytorch_model*.bin"]),
-        local_files_only=bool(payload.get("local_files_only", False)),
+        local_files_only=local_only,
+        label="model_prefetch",
     )
     snapshot = Path(snapshot_path)
     snapshot_revision = snapshot.name

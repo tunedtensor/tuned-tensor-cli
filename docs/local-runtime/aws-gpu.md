@@ -140,6 +140,8 @@ Run these commands on your laptop in the project directory. Adapter workflow:
 # Fetch the base model locally first.
 tt validate tunedtensor.json
 tt models prefetch tunedtensor.json
+# Only when dataset_prebuilt.huggingface is set:
+tt datasets prefetch tunedtensor.json
 tt doctor tunedtensor.json
 tt pipeline run --spec tunedtensor.json --dry-run
 tt pipeline run --spec tunedtensor.json

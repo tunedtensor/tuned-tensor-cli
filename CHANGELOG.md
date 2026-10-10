@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Added
+
+- Train on Hugging Face datasets. `dataset_prebuilt.huggingface` names a
+  dataset repo, an optional pinned `revision` and optional `columns` that map
+  plain JSONL records (for example `text`/`label`) to chat rows.
+  `tt datasets prefetch` downloads only the named split files into the shared
+  Hugging Face cache, and `tt datasets verify` checks them offline.
+  `tt pipeline run` downloads missing files automatically. Each run checks every
+  file against its blob checksum and records the repo, commit, file SHA-256s
+  and row accounting in `run_metadata.dataset_source`.
+- Download progress for models and datasets: an in-place bar with transfer
+  rate and ETA on terminals, and a line every 10% or 30 seconds in logs.
+
+### Changed
+
+- Model and dataset prefetch resolve the revision to one commit before
+  downloading. They retry network failures with exponential backoff
+  (`TT_HF_DOWNLOAD_MAX_ATTEMPTS`, default 10) and keep completed files, so a
+  rerun resumes long downloads. huggingface_hub's own progress bars are
+  disabled because they flooded captured logs.
+
 ## [0.21.0] - 2026-09-30
 
 ### Added

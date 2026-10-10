@@ -158,6 +158,12 @@ function selectedSpecArgument(args: string[], cwd: string): SpecArgument | null 
   ) {
     return positionalSpecArgument(args, 2, join(cwd, DEFAULT_SPEC_NAME));
   }
+  if (
+    command === "datasets"
+    && ["prefetch", "verify"].includes(args[1] ?? "")
+  ) {
+    return positionalSpecArgument(args, 2, join(cwd, DEFAULT_SPEC_NAME));
+  }
 
   const serves = command === "serve"
     || (command === "models" && args[1] === "serve");
@@ -341,6 +347,12 @@ async function spawnLocalCli(args: {
 }> {
   const output = args.stdout ?? process.stdout;
   const errors = args.stderr ?? process.stderr;
+  // The child's stderr is a pipe; tell it whether our stderr is a terminal so
+  // download progress redraws in place instead of printing a line per update.
+  const errorTerminal = errors as NodeJS.WriteStream;
+  const childEnv: NodeJS.ProcessEnv = errorTerminal.isTTY && !args.jsonMode && args.env.TT_PROGRESS_TTY === undefined
+    ? { ...args.env, TT_PROGRESS_TTY: "1", TT_PROGRESS_COLUMNS: String(errorTerminal.columns ?? 100) }
+    : args.env;
   const pipeInput = Boolean(args.stdin && args.stdin !== process.stdin);
   const pipeStreamingOutput = args.streamingStdout
     && Boolean(args.stdout && args.stdout !== process.stdout);
@@ -349,7 +361,7 @@ async function spawnLocalCli(args: {
     [args.entrypoint, ...args.commandArgs],
     {
       cwd: args.cwd,
-      env: args.env,
+      env: childEnv,
       stdio: [
         pipeInput ? "pipe" : "inherit",
         args.streamingStdout && !pipeStreamingOutput ? "inherit" : "pipe",

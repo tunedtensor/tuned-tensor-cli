@@ -97,6 +97,8 @@ Node owns input validation, state, process lifecycle, manifests, and reports.
 The bundled Python project owns four small operations:
 
 - `prefetch.py`: download and verify the pinned Hugging Face snapshot;
+- `prefetch_dataset.py`: download and verify the spec's Hugging Face dataset
+  files (`dataset_prebuilt.huggingface`);
 - `evaluate.py`: generate predictions without receiving reference answers;
 - `train.py`: perform CUDA-only, model-specific LoRA SFT;
 - `serve.py`: prepare the verified base model and adapter for the vLLM serving runtime.
@@ -138,6 +140,29 @@ The runner config controls:
 - optional AWS instance lookup, SSH access, and a remote process deadline;
 - CUDA or CPU evaluation, with local serving through the CUDA vLLM runtime;
 - deterministic generation and scoring limits.
+
+## Hugging Face downloads
+
+Model and dataset prefetch share `hub_download.py`. It resolves the requested
+revision to one commit before downloading, so retries never mix files from two
+commits. Network and server errors are retried with exponential backoff (2s up
+to 60s, `TT_HF_DOWNLOAD_MAX_ATTEMPTS` attempts, default 10). Repo, auth,
+revision and disk-full errors fail at once. Completed files stay in the cache,
+so a rerun after Ctrl-C or a crash downloads only what is missing. A file
+interrupted mid-transfer restarts from its beginning.
+
+Progress is measured from the cache blob directory against the repo's file
+sizes and printed as `@@tt-progress {json}` lines. The process runner sends
+them to the reporter instead of the log stream. A terminal shows an in-place
+bar with rate and ETA. Captured output gets a line every 10% or 30 seconds.
+The parent `tt` process sets `TT_PROGRESS_TTY` for the local runtime child,
+whose stderr is a pipe.
+
+Dataset runs resolve the cached snapshot in Node without network access.
+Each split file must link into the repo's blob store, and its digest must match
+the blob name. With `columns`, records are converted to chat rows under
+`<artifactRoot>/datasets/huggingface/`. The conversion path is keyed by the
+source digests, the mapping and the system message.
 
 The training project, Python entrypoints, working directory, and forwarded
 runtime settings are internal and fixed. Every stage uses the locked `uv`
