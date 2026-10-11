@@ -35,6 +35,8 @@ describe("explicit cloud operations", () => {
       requests: 4, completed_requests: 2, failed_requests: 1, cancelled_requests: 1,
       running_requests: 0, usage_reported_requests: 2, cost_reported_requests: 2, prompt_tokens: 120, completion_tokens: 30,
       provider_cost_usd: 0.01, daily_request_limit: 100, remaining_requests: 96,
+      weekly_period_start: "2026-10-05T00:00:00Z", weekly_resets_at: "2026-10-12T00:00:00Z",
+      weekly_cost_usd: 3.15, weekly_cost_limit_usd: 9, weekly_remaining_percent: 65,
       billing: "included_allowance",
     };
     vi.mocked(client.get).mockResolvedValue({ data: usage });
@@ -42,6 +44,50 @@ describe("explicit cloud operations", () => {
     await createProgram("test").parseAsync(["node", "tt", "--json", "--api-key", token, "usage"]);
     expect(client.get).toHaveBeenCalledWith("/agent/usage", undefined, expect.objectContaining({ apiKey: token }));
     expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual(usage);
+  });
+
+  it("shows the weekly limit first in text output", async () => {
+    vi.mocked(client.get).mockResolvedValue({ data: {
+      period_start: "2026-10-11T00:00:00.000Z", resets_at: "2026-10-12T00:00:00.000Z",
+      requests: 4, completed_requests: 4, failed_requests: 0, cancelled_requests: 0,
+      running_requests: 0, usage_reported_requests: 4, cost_reported_requests: 4, prompt_tokens: 120, completion_tokens: 30,
+      provider_cost_usd: 0.5, daily_request_limit: 100, remaining_requests: 96,
+      weekly_period_start: "2026-10-05T00:00:00.000Z", weekly_resets_at: "2026-10-12T00:00:00.000Z",
+      weekly_cost_usd: 3.15, weekly_cost_limit_usd: 9, weekly_remaining_percent: 65,
+      billing: "included_allowance",
+    } });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await createProgram("test").parseAsync(["node", "tt", "--api-key", token, "usage"]);
+    const lines = log.mock.calls.map(([line]) => String(line).replace(/\u001b\[[0-9;]*m/g, ""));
+    expect(lines[0]).toMatch(/^Weekly limit\s+65% remaining$/);
+    expect(lines).toContainEqual(expect.stringMatching(/^Weekly cost\s+\$3\.15 \/ \$9\.00$/));
+    expect(lines).toContainEqual(expect.stringMatching(/^Weekly resets\s+2026-10-12T00:00:00\.000Z$/));
+  });
+
+  it("omits weekly rows when the server predates the weekly limit", async () => {
+    vi.mocked(client.get).mockResolvedValue({ data: {
+      period_start: "2026-09-06T00:00:00.000Z", resets_at: "2026-09-07T00:00:00.000Z",
+      requests: 0, completed_requests: 0, failed_requests: 0, cancelled_requests: 0,
+      running_requests: 0, usage_reported_requests: 0, cost_reported_requests: 0, prompt_tokens: 0, completion_tokens: 0,
+      provider_cost_usd: null, daily_request_limit: 100, remaining_requests: 100, billing: "included_allowance",
+    } });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await createProgram("test").parseAsync(["node", "tt", "--api-key", token, "usage"]);
+    const output = log.mock.calls.map(([line]) => String(line)).join("\n");
+    expect(output.toLowerCase()).not.toContain("weekly");
+    expect(output).toContain("Included daily allowance");
+    expect(output).toContain("Managed requests");
+  });
+
+  it.each([undefined, null])("does not report missing weekly cost as zero: %s", async (cost) => {
+    vi.mocked(client.get).mockResolvedValue({ data: {
+      provider_cost_usd: null, weekly_cost_usd: cost,
+      weekly_cost_limit_usd: 9, weekly_remaining_percent: 65,
+    } });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await createProgram("test").parseAsync(["node", "tt", "--api-key", token, "usage"]);
+    const output = log.mock.calls.map(([line]) => String(line)).join("\n");
+    expect(output).toMatch(/Weekly cost\s+Unknown \/ \$9\.00/);
   });
 
   it("archives a published report through the existing API", async () => {

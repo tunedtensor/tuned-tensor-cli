@@ -518,7 +518,7 @@ export function createTunedTensorTools(
       async (p) => await api.get(`/models/${p.id}`)),
     define("get_balance", "Get balance", "Get account credit balance.", Empty,
       async () => await api.get("/billing/balance")),
-    define("get_agent_usage", "Get managed agent usage", "Get the account's managed inference allowance and reported token usage. Each model request including tool follow-ups uses the daily allowance; BYO provider usage is separate.", Empty,
+    define("get_agent_usage", "Get managed agent usage", "Get the account's managed inference weekly cost limit (percentage remaining and reset time), daily request allowance, and reported token usage. Each model request including tool follow-ups uses the allowances; BYO provider usage is separate.", Empty,
       async () => await api.get("/agent/usage")),
     define("list_transactions", "List transactions", "List credit ledger transactions.", Type.Object({
       page: Type.Optional(Page), per_page: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 10 })),
