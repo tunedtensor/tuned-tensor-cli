@@ -128,7 +128,7 @@ selects `tunedtensor/managed` automatically. In the shell, `/login tunedtensor`
 saves the same account token and switches the saved agent selection to
 `tunedtensor/managed`, including after restart. Managed inference requires no OpenRouter key
 or additional login. The server controls the model and request limits.
-`tt usage` shows the configured daily allowance and reported usage.
+`tt usage` shows the weekly limit remaining, the daily allowance, and reported usage.
 
 For BYO OpenRouter inference:
 
@@ -401,9 +401,14 @@ original account and origin or prepare a new proposal. Cancelling older
 hosted runs remains an explicit CLI command. Without a TT token these account tools are unavailable, while
 local workflow commands and BYO inference continue to work.
 
-`tt usage` reports the server-configured daily managed inference allowance.
-Each provider completion, including a tool follow-up, consumes one request;
-failed and cancelled requests also count. Token/cost coverage shows which
+`tt usage` reports how much of the weekly managed inference limit remains,
+when it resets (Monday 00:00 UTC), and the server-configured daily request
+allowance. When the weekly limit is used up, managed requests are refused
+until the reset; BYO provider keys are unaffected. Check `tt usage` before a
+long session to avoid hitting the limit mid-task. Each provider completion, including a tool follow-up, consumes one request;
+failed and cancelled requests also count. Weekly cost includes reservations for
+running requests and estimates for interrupted requests or missing final costs.
+Token/cost coverage shows which
 requests have provider usage reports, so incomplete reporting is not mistaken
 for zero consumption. The displayed provider cost is informational, not a
 charge to TT credits. BYO provider usage is separate. `tt balance` shows TT

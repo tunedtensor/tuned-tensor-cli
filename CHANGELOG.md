@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `tt usage` shows the managed inference weekly limit first: percentage
+  remaining, cost against the limit, and the Monday 00:00 UTC reset. Servers
+  without the weekly limit show the daily allowance as before. The agent's
+  `get_agent_usage` tool description mentions the weekly limit. Older servers
+  retain daily-only billing guidance; missing weekly costs display as unknown,
+  and weekly output explains that the total can include estimates.
+
 ## [0.22.1] - 2026-10-10
 
 ### Added
