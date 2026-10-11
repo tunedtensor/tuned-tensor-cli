@@ -4,61 +4,39 @@
 
 ### Added
 
-- `tt usage` shows the managed inference weekly limit first: percentage
-  remaining, cost against the limit, and the Monday 00:00 UTC reset. Servers
-  without the weekly limit show the daily allowance as before. The agent's
-  `get_agent_usage` tool description mentions the weekly limit. Older servers
-  retain daily-only billing guidance; missing weekly costs display as unknown,
-  and weekly output explains that the total can include estimates.
-- The local agent runs teacher labeling for raw adapter data. With a TT token,
-  `prepare_label_job` proposes labeling a workspace `.jsonl` or `.csv` file;
-  approval pushes the spec (as `tt cloud push`), uploads the file and starts
-  the hosted job. `get_label_job` and `list_label_jobs` report status, percent
-  done and cost. `prepare_label_download` proposes writing a finished job as
-  local training files, and the agent then proposes the `dataset_prebuilt`
-  edit. Approval re-checks that the file and spec are unchanged. A job that
-  was refused (for example for insufficient credits) is reported as failed,
-  not unknown. The next turn tells the model the new job ID or the downloaded
-  paths. Approval failures now show their reason.
-- `tt cloud label download <job-id>` (alias `export`) turns a reviewed job into
-  local `training.jsonl` and `validation.jsonl` chat files for
-  `dataset_prebuilt`, using the local adapter spec's system message. It keeps
-  accepted and edited rows (unreviewed drafts only with `--include-unreviewed`),
-  never exports rows blocked for secrets, removes duplicate inputs, drops
-  inputs that received conflicting labels, and holds out a deterministic
-  validation split. It writes an `export.json` manifest and prints the
-  `dataset_prebuilt` edit. Promoted datasets previously had no path back to
-  local training.
-- `search_hugging_face` accepts tag filters such as
-  `task_categories:text-classification` or `language:en`.
+- Start teacher-labeling jobs from the agent with explicit approval. The
+  agent can report progress and cost, propose downloading the results, and
+  help configure the resulting adapter dataset. Labeling uses TT credits.
+- `tt cloud label download <job-id>` (alias `export`) writes local training
+  and validation JSONL files plus a download manifest. It uses accepted and
+  edited rows by default; teacher drafts require `--include-unreviewed`.
+  Downloads exclude blocked rows, remove duplicate inputs and conflicting
+  labels, and create a deterministic validation split.
+- Hugging Face search supports tag filters such as
+  `task_categories:text-classification` and `language:en`.
+- `tt usage` shows the managed inference weekly limit, percentage remaining,
+  and reset time, alongside the daily allowance and reported usage. It remains
+  compatible with accounts reporting only a daily allowance, and distinguishes
+  estimates and unavailable costs from reported usage.
 
 ### Fixed
 
-- The agent now explains adapter dataset setup and download commands, reuses
-  an existing dataset configuration, and asks for missing filenames, columns,
-  or revisions instead of inventing them. It distinguishes adapter JSONL
-  downloads from foundation and decision data workflows, and explains that
-  prefetch and real adapter runs can download files while dry-runs do not.
-  Workflow evaluations cover these command handoffs and engine boundaries.
-- Labeling approvals stay bound to the original workspace and downloaded
-  data uses the approved spec and output directory. Uploads use the source
-  bytes checked at approval, even if the file changes during the cloud spec
-  push. Downloads reject symlinks and recheck overwrite consent after fetching
-  rows. Instruction matching accepts the teacher's explicit example block,
-  but no longer treats missing or merely prefixed instructions as a match.
-- Hugging Face search returned nothing for descriptive queries such as
-  "raw email corpus", because the Hub requires every word to appear in the
-  repository name. Searches with no exact match now fall back to each keyword,
-  ranking repos that match more keywords first. Results are sorted by
-  downloads, and empty results explain how to search.
-- Hugging Face search failures were opaque. Network errors now name their cause
-  (for example `ENOTFOUND`), rate limits say so, one retry absorbs transient
-  network, 429 and 5xx failures, and the timeout is 10 seconds. Failed agent
-  tools now show their reason in the terminal instead of only "failed".
-- `tt cloud label upload` rejects invalid JSONL inputs and outputs, enforces
-  the 50,000-row JSONL limit and the 50 MB upload limit, and checks CSV column
-  selection before uploading. A `.json` file with JSON Lines content is no longer rejected after
-  validation. `tt cloud label watch` retries transient network and server errors.
+- Descriptive Hugging Face searches such as "raw email corpus" fall back to
+  relevant keywords when the full query returns no results. Results prioritize
+  keyword matches and download counts; empty results offer search guidance.
+- Search and agent-action failures show useful error messages. Hugging Face
+  search retries transient failures once and allows more time for a response.
+- Labeling approvals check the account, workspace, source data, spec, and
+  download destination against what the user reviewed. Uploads use approved
+  file contents, and downloads reject unsafe paths and require explicit
+  overwrite consent. Instruction mismatches are reported in the manifest.
+- Label uploads validate JSONL records, row counts, file sizes, and CSV column
+  selection before uploading. JSON Lines in a `.json` file upload correctly,
+  and `tt cloud label watch` retries transient errors.
+- The agent gives clearer adapter dataset setup and download instructions,
+  reuses existing configuration, and asks for missing filenames, columns, or
+  revisions. Guidance distinguishes adapter, foundation, and decision data
+  workflows and explains that dry-runs do not download datasets.
 
 ## [0.22.1] - 2026-10-10
 
