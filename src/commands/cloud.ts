@@ -34,16 +34,32 @@ export interface ManagedAgentUsage {
   provider_cost_usd: number | null;
   daily_request_limit: number;
   remaining_requests: number;
+  // Weekly cost limit fields; absent on servers that predate the weekly limit.
+  weekly_period_start?: string;
+  weekly_resets_at?: string;
+  weekly_cost_usd?: number;
+  weekly_cost_limit_usd?: number;
+  weekly_remaining_percent?: number;
   billing: "included_allowance";
+}
+
+function weeklyRows(data: ManagedAgentUsage): Array<[string, string]> {
+  if (data.weekly_remaining_percent === undefined || data.weekly_cost_limit_usd === undefined) return [];
+  return [
+    ["Weekly limit", `${data.weekly_remaining_percent}% remaining`],
+    ["Weekly cost", `$${(data.weekly_cost_usd ?? 0).toFixed(2)} / $${data.weekly_cost_limit_usd.toFixed(2)}`],
+    ["Weekly resets", data.weekly_resets_at ?? "Unknown"],
+  ];
 }
 
 export function registerUsageCommand(parent: Command): void {
   parent.command("usage")
-    .description("Show managed agent request allowance and reported token usage")
+    .description("Show managed agent weekly limit, daily request allowance, and reported token usage")
     .action(async () => {
       const { data } = await get<ManagedAgentUsage>("/agent/usage", undefined, parent.optsWithGlobals() as ClientOpts);
       if (isJsonMode()) return printJson(data);
       printDetail([
+        ...weeklyRows(data),
         ["Managed requests", `${data.requests} / ${data.daily_request_limit}`],
         ["Remaining", String(data.remaining_requests)],
         ["Resets", data.resets_at],
@@ -57,6 +73,6 @@ export function registerUsageCommand(parent: Command): void {
         ["Cost coverage", `${data.cost_reported_requests} / ${data.requests} requests`],
         ["Billing", "Included daily allowance"],
       ]);
-      console.log("\nEach model request, including tool follow-ups, uses the allowance. Failed and cancelled requests also count. BYO provider usage is reported by that provider.\nUse `tt balance` for cloud training credits.");
+      console.log("\nEach model request, including tool follow-ups, uses the allowance. Failed and cancelled requests also count. When the weekly limit is used up, managed requests pause until the reset; your own provider key keeps working. BYO provider usage is reported by that provider.\nUse `tt balance` for cloud training credits.");
     });
 }
