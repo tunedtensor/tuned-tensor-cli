@@ -77,6 +77,7 @@ export function createAccountLabelingExecutor(opts: api.ClientOpts): AgentLabeli
       const { data: spec, created } = await beforeLabelingStarts(() => pushLocalSpec(args.specPath, opts));
       const job = await startLabelingJob({
         file: args.file,
+        fileBytes: args.fileBytes,
         format: args.format,
         specId: spec.id,
         inputColumn: args.inputColumn,
@@ -94,6 +95,7 @@ export function createAccountLabelingExecutor(opts: api.ClientOpts): AgentLabeli
     download: async (args) => await downloadLabelingJob({
       jobId: args.jobId,
       specPath: args.specPath,
+      outDir: args.outDir,
       includeUnreviewed: args.includeUnreviewed,
       validationRatio: args.validationRatio,
       force: args.overwrite,

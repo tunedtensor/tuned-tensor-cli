@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Command } from "commander";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   buildLabelExport,
+  downloadLabelingJob,
+  teacherInstructionsMatch,
   LabelingNotStartedError,
   parseCsvHeader,
   startLabelingJob,
@@ -234,6 +236,18 @@ describe("startLabelingJob", () => {
   const file = join(tmpdir(), `tt-label-start-${process.pid}.jsonl`);
   afterEach(() => rmSync(file, { force: true }));
 
+  it("uploads approved bytes without rereading a changed source file", async () => {
+    const fileBytes = Buffer.from('{"input":"approved"}\n');
+    writeFileSync(file, '{"input":"unapproved"}\n');
+    const upload = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", upload);
+    vi.mocked(client.post)
+      .mockResolvedValueOnce({ data: { path: "s3://b/x.jsonl", upload_url: "https://s3/u", method: "PUT" } })
+      .mockResolvedValueOnce({ data: mockJob });
+    await startLabelingJob({ file, fileBytes, format: "jsonl", specId: SPEC_UUID }, {});
+    expect(await (upload.mock.calls[0][1].body as Blob).text()).toBe(fileBytes.toString());
+  });
+
   it("reports refusals before or at job creation as not started", async () => {
     writeFileSync(file, '{"input":"a"}\n');
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
@@ -356,6 +370,36 @@ describe("label download", () => {
     examples: [],
   };
 
+  it.each(["directory", "file", "created-during-fetch"])("refuses unsafe output paths: %s", async (kind) => {
+    const specPath = join(dir, "tunedtensor.json");
+    writeFileSync(specPath, JSON.stringify(spec));
+    const outside = mkdtempSync(join(tmpdir(), "tt-label-outside-"));
+    const target = join(outside, "training.jsonl");
+    writeFileSync(target, "keep me");
+    const output = join(dir, "datasets", "support-tickets");
+    try {
+      if (kind === "directory") symlinkSync(outside, join(dir, "datasets"));
+      if (kind === "file") {
+        mkdirSync(output, { recursive: true });
+        symlinkSync(target, join(output, "training.jsonl"));
+      }
+      vi.mocked(client.get).mockReset();
+      vi.mocked(client.get).mockResolvedValueOnce({ data: { ...mockJob, status: "awaiting_review" } })
+        .mockImplementationOnce(async () => {
+          if (kind === "created-during-fetch") {
+            mkdirSync(output, { recursive: true });
+            writeFileSync(join(output, "training.jsonl"), "new user data");
+          }
+          return { data: [labelRow(0, {}), labelRow(1, {})], meta: { total: 2, page: 1, per_page: 100 } };
+        });
+      await expect(downloadLabelingJob({ jobId: JOB_UUID, specPath, includeUnreviewed: false,
+        validationRatio: 0.1, force: kind !== "created-during-fetch" }, {}))
+        .rejects.toThrow(/symlinks|already exists/);
+      expect(readFileSync(target, "utf8")).toBe("keep me");
+      if (kind === "created-during-fetch") expect(readFileSync(join(output, "training.jsonl"), "utf8")).toBe("new user data");
+    } finally { rmSync(outside, { recursive: true, force: true }); }
+  });
+
   it("writes chat JSONL under the local spec's system message", async () => {
     const specPath = join(dir, "tunedtensor.json");
     writeFileSync(specPath, JSON.stringify(spec));
@@ -401,6 +445,18 @@ describe("label download", () => {
     writeFileSync(specPath, JSON.stringify({ ...spec, engine: "decision" }));
     await expect(buildProgram().parseAsync(["node", "tt", "label", "export", JOB_UUID, "--spec", specPath]))
       .rejects.toThrow(/engine "decision"/);
+  });
+});
+
+describe("teacher instruction matching", () => {
+  it("accepts exact instructions and the server's explicit example block only", () => {
+    const instructions = "Classify as spam.";
+    expect(teacherInstructionsMatch(instructions, instructions)).toBe(true);
+    expect(teacherInstructionsMatch(instructions, `${instructions}\n\nLabeled examples. Follow their output format exactly and reply with the output only:\n\nExample 1\nInput:\nx\nOutput:\ny`)).toBe(true);
+    expect(teacherInstructionsMatch(instructions, `${instructions} Unless the sender is known.`)).toBe(false);
+    expect(teacherInstructionsMatch("", instructions)).toBe(false);
+    expect(teacherInstructionsMatch(instructions, undefined)).toBe(false);
+    expect(teacherInstructionsMatch("Return a  b", "Return a b")).toBe(false);
   });
 });
 

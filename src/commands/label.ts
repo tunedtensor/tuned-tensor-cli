@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, relative, resolve, sep } from "node:path";
+import { closeSync, constants, existsSync, lstatSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, parse, relative, resolve, sep } from "node:path";
 import { ApiError, get, patch, post, type ClientOpts } from "../client.js";
 import { buildSystemMessage, datasetInputIdentity } from "../local-runtime/dataset.js";
 import { resolveLabelingJobId, resolveSpecId } from "../resolve.js";
@@ -493,10 +493,10 @@ export async function beforeLabelingStarts<T>(step: () => Promise<T>): Promise<T
 
 /** Upload a validated source file and start a hosted labeling job under a cloud spec. */
 export async function startLabelingJob(
-  args: { file: string; format: "jsonl" | "csv"; specId: string; inputColumn?: string | null; name?: string },
+  args: { file: string; fileBytes?: Buffer<ArrayBuffer>; format: "jsonl" | "csv"; specId: string; inputColumn?: string | null; name?: string },
   opts: ClientOpts,
 ): Promise<LabelingJob> {
-  const fileBytes = readFileSync(args.file);
+  const fileBytes = args.fileBytes ?? readFileSync(args.file);
   const contentType = args.format === "csv" ? "text/csv" : "application/jsonl";
   const uploadUrl = await beforeLabelingStarts(async () => {
     const { data } = await post<UploadUrl>(
@@ -554,6 +554,34 @@ export function labelingDownloadFiles(outDir: string) {
     validation: resolve(outDir, "validation.jsonl"),
     manifest: resolve(outDir, "export.json"),
   };
+}
+
+/** Do not let a download follow existing directory or output-file symlinks. */
+export function assertLabelDownloadPaths(outDir: string, overwrite: boolean): void {
+  const absolute = resolve(outDir);
+  let current = parse(absolute).root;
+  for (const part of relative(current, absolute).split(sep).filter(Boolean)) {
+    current = resolve(current, part);
+    const info = lstatSync(current, { throwIfNoEntry: false });
+    if (info && (!info.isDirectory() || info.isSymbolicLink())) {
+      throw new Error("Download directories must be real directories, not symlinks.");
+    }
+  }
+  for (const file of Object.values(labelingDownloadFiles(absolute))) {
+    const info = lstatSync(file, { throwIfNoEntry: false });
+    if (info && (!info.isFile() || info.isSymbolicLink() || info.nlink > 1)) {
+      throw new Error("Download outputs must be regular files, not symlinks or hard links.");
+    }
+    if (info && !overwrite) {
+      throw new Error(`${file} already exists. Ask the user whether to overwrite it (--force) or choose another directory.`);
+    }
+  }
+}
+
+export function teacherInstructionsMatch(systemMessage: string, teacherMessage: unknown): boolean {
+  if (typeof teacherMessage !== "string" || !systemMessage.trim()) return false;
+  const examplesHeader = "\n\nLabeled examples. Follow their output format exactly and reply with the output only:\n\n";
+  return teacherMessage === systemMessage || teacherMessage.startsWith(systemMessage + examplesHeader);
 }
 
 /** Fetch every row of a job, retrying transient failures, and check none were missed. */
@@ -614,24 +642,26 @@ export async function downloadLabelingJob(args: LabelDownloadArgs, opts: ClientO
   }
   const outDir = labelingDownloadDir(args.specPath, job, args.outDir);
   const files = labelingDownloadFiles(outDir);
-  const existing = Object.values(files).filter((path) => existsSync(path));
-  if (existing.length > 0 && !args.force) {
-    throw new Error(`${existing[0]} already exists. Overwrite it explicitly (--force) or choose another directory.`);
-  }
+  assertLabelDownloadPaths(outDir, args.force);
 
   const rows = await fetchLabelingRows(args.jobId, opts, args.onProgress);
   const result = buildLabelExport(rows, {
     includeUnreviewed: args.includeUnreviewed,
     validationRatio: ratio,
   });
+  // Fetching can take minutes; recheck paths and overwrite consent at write time.
+  assertLabelDownloadPaths(outDir, args.force);
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(files.training, chatJsonl(systemMessage, result.training));
-  writeFileSync(files.validation, chatJsonl(systemMessage, result.validation));
+  const writeOutput = (file: string, text: string) => {
+    const fd = openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW
+      | (args.force ? constants.O_TRUNC : constants.O_EXCL), 0o600);
+    try { writeFileSync(fd, text); } finally { closeSync(fd); }
+  };
+  writeOutput(files.training, chatJsonl(systemMessage, result.training));
+  writeOutput(files.validation, chatJsonl(systemMessage, result.validation));
   // The teacher prompt starts with the hosted spec's compiled instructions
   // and may append few-shot examples after them.
-  const collapse = (value: string) => value.replace(/\s+/g, " ").trim();
-  const instructionsMatch = typeof job.system_message !== "string"
-    || collapse(job.system_message).startsWith(collapse(systemMessage));
+  const instructionsMatch = teacherInstructionsMatch(systemMessage, job.system_message);
   const manifest = {
     labeling_job_id: job.id,
     labeling_job_name: job.name,
@@ -646,7 +676,7 @@ export async function downloadLabelingJob(args: LabelDownloadArgs, opts: ClientO
     validation_rows: result.validation.length,
     ...result.stats,
   };
-  writeFileSync(files.manifest, JSON.stringify(manifest, null, 2) + "\n");
+  writeOutput(files.manifest, JSON.stringify(manifest, null, 2) + "\n");
   return {
     out_dir: outDir,
     files,

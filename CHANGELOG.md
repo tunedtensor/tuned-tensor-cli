@@ -35,6 +35,12 @@
 
 ### Fixed
 
+- Labeling approvals stay bound to the original workspace and downloaded
+  data uses the approved spec and output directory. Uploads use the source
+  bytes checked at approval, even if the file changes during the cloud spec
+  push. Downloads reject symlinks and recheck overwrite consent after fetching
+  rows. Instruction matching accepts the teacher's explicit example block,
+  but no longer treats missing or merely prefixed instructions as a match.
 - Hugging Face search returned nothing for descriptive queries such as
   "raw email corpus", because the Hub requires every word to appear in the
   repository name. Searches with no exact match now fall back to each keyword,

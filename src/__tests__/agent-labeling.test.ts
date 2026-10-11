@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { LocalAgentStore } from "../agent-store.js";
 import { createLocalAgentClient } from "../local-agent-client.js";
-import { createCloudActionContext, approvePreparedAction } from "../agent-approval.js";
+import { createCloudActionContext, approvePreparedAction, preflightPreparedAction, PreparedActionWorkspaceMismatchError } from "../agent-approval.js";
 import { createTunedTensorTools, type AgentToolApi } from "../agent-tools.js";
-import { approvedResultsNote, summarizeLabelJob } from "../agent-labeling.js";
+import { approvedResultsNote, summarizeLabelJob, prepareLabelDownload } from "../agent-labeling.js";
 import { LabelingNotStartedError } from "../commands/label.js";
+import { createAccountLabelingExecutor } from "../cli.js";
+import { buildSystemMessage, examplesFromChatJsonl } from "../local-runtime/dataset.js";
 import type { AgentAction } from "../agent-client.js";
 
 const JOB_ID = "55555555-5555-4555-8555-555555555555";
@@ -27,7 +29,10 @@ beforeEach(() => {
   writeFileSync(join(root, "tunedtensor.json"), JSON.stringify(SPEC, null, 2));
   writeFileSync(join(root, "emails.jsonl"), '{"input":"Lunch?"}\n{"input":"Server down"}\n');
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  vi.unstubAllGlobals();
+  rmSync(root, { recursive: true, force: true });
+});
 
 function fakeApi(get: AgentToolApi["get"] = vi.fn(async () => ({}))): AgentToolApi {
   return { get, postRead: vi.fn(), propose: async (action) => action };
@@ -117,6 +122,12 @@ describe("agent labeling tools", () => {
 });
 
 describe("labeling approval", () => {
+  async function preparedDownload(): Promise<AgentAction> {
+    const prepared = await prepareLabelDownload(root, {
+      name: "emails", status: "awaiting_review", counts: { accepted: 10 },
+    }, { job_id: JOB_ID });
+    return { id: "download-1", operation: "download_label_job", title: "Download", summary: "", risk: "medium", status: "proposed", arguments: prepared.args };
+  }
   async function prepared(): Promise<AgentAction> {
     return (await tool(fakeApi(), "prepare_label_job").execute("p", { file: "emails.jsonl", name: "Inbox" })).details as AgentAction;
   }
@@ -165,19 +176,116 @@ describe("labeling approval", () => {
   });
 
   it("marks a failed download as safely failed rather than unknown", async () => {
-    const action: AgentAction = {
-      id: "download-1", operation: "download_label_job", title: "Download", summary: "", risk: "medium", status: "proposed",
-      arguments: { job_id: JOB_ID, spec_path: "./tunedtensor.json", include_unreviewed: false, validation_ratio: 0.1, overwrite: false },
-    };
+    const action = await preparedDownload();
     const labeling = { start: vi.fn(), download: vi.fn(async () => { throw new Error("network down"); }) };
     await expect(approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
       workspaceRoot: root, labeling,
     })).rejects.toThrow("network down");
     expect(action.status).toBe("failed");
   });
+
+  it("binds both actions to the workspace even when another workspace has identical files", async () => {
+    const other = mkdtempSync(join(tmpdir(), "tt-label-other-"));
+    try {
+      for (const file of ["tunedtensor.json", "emails.jsonl"]) {
+        writeFileSync(join(other, file), readFileSync(join(root, file)));
+      }
+      for (const action of [await prepared(), await preparedDownload()]) {
+        await expect(preflightPreparedAction(action, { workspaceRoot: other }))
+          .rejects.toBeInstanceOf(PreparedActionWorkspaceMismatchError);
+        expect(action.status).toBe("proposed");
+      }
+    } finally { rmSync(other, { recursive: true, force: true }); }
+  });
+
+  it("refuses a changed download spec and paths replaced with symlinks after preparation", async () => {
+    const action = await preparedDownload();
+    const labeling = { start: vi.fn(), download: vi.fn() };
+    writeFileSync(join(root, "tunedtensor.json"), JSON.stringify({ ...SPEC, system_prompt: "Different task" }));
+    await expect(approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+      workspaceRoot: root, labeling,
+    })).rejects.toThrow(/spec changed/);
+    expect(labeling.download).not.toHaveBeenCalled();
+
+    const next = await preparedDownload();
+    symlinkSync(root, join(root, "datasets"));
+    await expect(approvePreparedAction(next, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+      workspaceRoot: root, labeling,
+    })).rejects.toThrow(/symlinks/);
+    expect(labeling.download).not.toHaveBeenCalled();
+  });
+
+  it("passes the approved bytes even if the file changes before the upload", async () => {
+    const action = await prepared();
+    const original = readFileSync(join(root, "emails.jsonl"));
+    const start = vi.fn(async (args) => {
+      writeFileSync(args.file, '{"input":"changed during cloud push"}\n');
+      expect(args.fileBytes).toEqual(original);
+    });
+    await approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+      workspaceRoot: root, labeling: { start, download: vi.fn() },
+    });
+    expect(start).toHaveBeenCalledOnce();
+  });
 });
 
 describe("labeling through the agent client", () => {
+  it("runs approved upload and download through the production account executor", async () => {
+    const original = readFileSync(join(root, "emails.jsonl"), "utf8");
+    const cloudSpecId = "66666666-6666-4666-8666-666666666666";
+    const job = { id: JOB_ID, name: "emails", status: "awaiting_review", counts: { accepted: 12 } };
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      const path = new URL(String(url)).pathname;
+      seen.push(`${init?.method ?? "GET"} ${path}`);
+      if (path === "/api/v1/behavior-specs") {
+        writeFileSync(join(root, "emails.jsonl"), '{"input":"changed during spec push"}\n');
+        return Response.json({ data: { id: cloudSpecId, name: SPEC.name } });
+      }
+      if (path === "/api/v1/labeling-jobs/upload-url") {
+        expect(JSON.parse(init.body).size).toBe(Buffer.byteLength(original));
+        return Response.json({ data: { path: "s3://b/source.jsonl", upload_url: "https://upload.example/source", method: "PUT" } });
+      }
+      if (path === "/source") {
+        expect(await init.body.text()).toBe(original);
+        return new Response(null, { status: 200 });
+      }
+      if (path === "/api/v1/labeling-jobs") {
+        expect(JSON.parse(init.body).behavior_spec_id).toBe(cloudSpecId);
+        return Response.json({ data: { ...job, status: "preparing", est_cost_cents: 12 } });
+      }
+      if (path === `/api/v1/labeling-jobs/${JOB_ID}`) {
+        // A rename after preparation must not redirect the approved output path.
+        return Response.json({ data: { ...job, name: "renamed", system_message: buildSystemMessage(SPEC) } });
+      }
+      if (path.endsWith("/rows")) {
+        return Response.json({ data: Array.from({ length: 12 }, (_, i) => ({
+          id: `row-${i}`, row_index: i, input: `email ${i}`, teacher_output: `category ${i}`,
+          final_output: null, status: "accepted", sanitization_status: "clean",
+        })), meta: { total: 12, page: 1, per_page: 100 } });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+    const labeling = createAccountLabelingExecutor({ baseUrl: "https://account.example", apiKey: "test-account-key" });
+    const mutations = { get: vi.fn(), post: vi.fn(), put: vi.fn() };
+    const start = (await tool(fakeApi(), "prepare_label_job").execute("p", { file: "emails.jsonl" })).details as AgentAction;
+    await expect(approvePreparedAction(start, mutations, async () => {}, { workspaceRoot: root, labeling }))
+      .resolves.toMatchObject({ job_id: JOB_ID, cloud_spec_id: cloudSpecId });
+    const download = (await tool(fakeApi(async () => ({ data: job })), "prepare_label_download")
+      .execute("d", { job_id: JOB_ID })).details as AgentAction;
+    const output = await approvePreparedAction(download, mutations, async () => {}, { workspaceRoot: root, labeling });
+    expect(output).toMatchObject({ dataset_prebuilt: {
+      training: "./datasets/emails/training.jsonl", validation: "./datasets/emails/validation.jsonl",
+    }, manifest: { teacher_instructions_match_spec: true } });
+    const training = await examplesFromChatJsonl(join(root, "datasets/emails/training.jsonl"));
+    const validation = await examplesFromChatJsonl(join(root, "datasets/emails/validation.jsonl"));
+    expect(training.length + validation.length).toBe(12);
+    expect(seen).toEqual([
+      "POST /api/v1/behavior-specs", "POST /api/v1/labeling-jobs/upload-url", "PUT /source",
+      "POST /api/v1/labeling-jobs", `GET /api/v1/labeling-jobs/${JOB_ID}`, `GET /api/v1/labeling-jobs/${JOB_ID}/rows`,
+    ]);
+  });
+
   it("keeps the preview, binds approval to the account, and tells the model the job ID next turn", async () => {
     const prompts: string[] = [];
     const labeling = {

@@ -6,11 +6,12 @@ import type { AgentAction } from "./agent-client.js";
 import {
   labelingDownloadDir,
   labelingDownloadFiles,
+  assertLabelDownloadPaths,
   readLocalAdapterSpec,
   validateUnlabeledFile,
 } from "./commands/label.js";
-import { canonicalWorkspace } from "./local-spec-workspace.js";
-import { inspectLocalSpec } from "./spec-workspace.js";
+import { canonicalWorkspace, fingerprintWorkspace } from "./local-spec-workspace.js";
+import { inspectLocalSpec, SpecWorkspaceMismatchError } from "./spec-workspace.js";
 
 /**
  * Agent workflow for hosted teacher labeling. The model can only inspect jobs
@@ -26,6 +27,7 @@ export const LABELING_OPERATIONS = ["start_label_job", "download_label_job"] as 
 export interface StartLabelJobArgs {
   workspaceRoot: string;
   file: string;
+  fileBytes: Buffer<ArrayBuffer>;
   format: "jsonl" | "csv";
   inputColumn: string | null;
   name: string | null;
@@ -37,6 +39,7 @@ export interface DownloadLabelJobArgs {
   jobId: string;
   specPath: string;
   includeUnreviewed: boolean;
+  outDir: string;
   validationRatio: number;
   overwrite: boolean;
 }
@@ -129,6 +132,7 @@ export async function prepareLabelJob(
       name: input.name ?? null,
       spec_path: spec.displayPath,
       spec_sha256: spec.sha256,
+      workspace_fingerprint: spec.workspaceFingerprint,
     },
     preview: {
       file: source.display,
@@ -149,10 +153,12 @@ export async function prepareLabelJob(
 
 /** Re-check that the prepared file and spec are unchanged, then return execution arguments. */
 export async function revalidateLabelJob(workspaceRoot: string, args: Record<string, unknown>): Promise<StartLabelJobArgs> {
+  await validateLabelWorkspace(workspaceRoot, args);
   const file = String(args.file ?? "");
   const specPath = String(args.spec_path ?? "");
   const source = await workspaceFile(workspaceRoot, file);
-  if (sha256(readFileSync(source.path)) !== args.file_sha256) {
+  const fileBytes = readFileSync(source.path);
+  if (sha256(fileBytes) !== args.file_sha256) {
     throw new Error(`${file} changed after this labeling job was prepared; prepare it again.`);
   }
   const spec = await inspectLocalSpec(workspaceRoot, specPath);
@@ -165,6 +171,7 @@ export async function revalidateLabelJob(workspaceRoot: string, args: Record<str
   return {
     workspaceRoot,
     file: source.path,
+    fileBytes,
     format,
     inputColumn,
     name: typeof args.name === "string" ? args.name : null,
@@ -232,10 +239,8 @@ export async function prepareLabelDownload(
     );
   }
   const outDir = labelingDownloadDir(spec.path, { id: input.job_id, name: String(job.name ?? "") });
+  assertLabelDownloadPaths(outDir, input.overwrite === true);
   const existing = Object.values(labelingDownloadFiles(outDir)).filter((path) => existsSync(path));
-  if (existing.length > 0 && input.overwrite !== true) {
-    throw new Error(`${relative(workspaceRoot, outDir)} already has a download. Ask the user whether to overwrite it.`);
-  }
   const root = await canonicalWorkspace(workspaceRoot);
   const display = `./${relative(root, outDir).split(/[\\/]/).join("/")}`;
   return {
@@ -243,6 +248,9 @@ export async function prepareLabelDownload(
     args: {
       job_id: input.job_id,
       spec_path: spec.displayPath,
+      spec_sha256: spec.sha256,
+      workspace_fingerprint: spec.workspaceFingerprint,
+      out_dir: display,
       include_unreviewed: includeUnreviewed,
       validation_ratio: input.validation_ratio ?? 0.1,
       overwrite: input.overwrite === true,
@@ -259,11 +267,29 @@ export async function prepareLabelDownload(
   };
 }
 
-export function downloadArgs(workspaceRoot: string, spec: { path: string }, args: Record<string, unknown>): DownloadLabelJobArgs {
+export async function validateLabelWorkspace(workspaceRoot: string, args: Record<string, unknown>): Promise<void> {
+  if (await fingerprintWorkspace(await canonicalWorkspace(workspaceRoot)) !== args.workspace_fingerprint) {
+    throw new SpecWorkspaceMismatchError("The labeling workspace changed; return to the original workspace before approving.");
+  }
+}
+
+export async function revalidateLabelDownload(workspaceRoot: string, args: Record<string, unknown>): Promise<DownloadLabelJobArgs> {
+  await validateLabelWorkspace(workspaceRoot, args);
+  const spec = await inspectLocalSpec(workspaceRoot, String(args.spec_path ?? ""));
+  if (spec.sha256 !== args.spec_sha256) {
+    throw new Error("The spec changed after this download was prepared; prepare it again.");
+  }
+  const parts = String(args.out_dir ?? "").replace(/^\.\//, "").split(/[\\/]/);
+  if (isAbsolute(String(args.out_dir)) || parts.some(part => !part || part === "." || part === "..")) {
+    throw new Error("Download directory must be inside the current workspace.");
+  }
+  const outDir = join(spec.root, ...parts);
+  assertLabelDownloadPaths(outDir, args.overwrite === true);
   return {
     workspaceRoot,
     jobId: String(args.job_id ?? ""),
     specPath: spec.path,
+    outDir,
     includeUnreviewed: args.include_unreviewed === true,
     validationRatio: typeof args.validation_ratio === "number" ? args.validation_ratio : 0.1,
     overwrite: args.overwrite === true,

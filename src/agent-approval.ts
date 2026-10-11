@@ -18,11 +18,10 @@ import {
 } from "./local-pipeline-action.js";
 
 import {
-  downloadArgs,
+  revalidateLabelDownload,
   revalidateLabelJob,
   type AgentLabelingExecutor,
 } from "./agent-labeling.js";
-import { inspectLocalSpec } from "./spec-workspace.js";
 
 export interface AgentMutationApi {
   get(path: string): Promise<unknown>;
@@ -206,9 +205,15 @@ export async function preflightPreparedAction(
       input.spec,
       expectedWorkspaceFingerprint,
     );
-  } else if (action.operation === "start_label_job") {
-    if (!options.workspaceRoot) throw new Error("A local workspace is required to start labeling.");
-    await revalidateLabelJob(options.workspaceRoot, args(action));
+  } else if (action.operation === "start_label_job" || action.operation === "download_label_job") {
+    if (!options.workspaceRoot) throw new Error("A local workspace is required for labeling.");
+    try {
+      const validate = action.operation === "start_label_job" ? revalidateLabelJob : revalidateLabelDownload;
+      await validate(options.workspaceRoot, args(action));
+    } catch (error) {
+      if (error instanceof SpecWorkspaceMismatchError) throw new PreparedActionWorkspaceMismatchError(error.message, error);
+      throw error;
+    }
   } else if (action.operation === "run_local_pipeline") {
     try {
       await prepareLocalPipelineApproval(action, options);
@@ -307,8 +312,7 @@ export async function approvePreparedAction(
       case "download_label_job": {
         const labeling = options.labeling;
         if (!options.workspaceRoot || !labeling) throw new Error("Downloading labeled data needs a local workspace and a TT account.");
-        const spec = await inspectLocalSpec(options.workspaceRoot, requiredString(input.spec_path, "spec path"));
-        const download = downloadArgs(options.workspaceRoot, spec, input);
+        const download = await revalidateLabelDownload(options.workspaceRoot, input);
         execute = async () => await labeling.download(download);
         break;
       }

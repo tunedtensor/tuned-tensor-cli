@@ -421,7 +421,7 @@ export class TunedTensorAgentSession {
       const label = (id && this.pendingToolLabels.get(id)) ?? this.pendingUnkeyedToolLabel ?? "Tool";
       if (id) this.pendingToolLabels.delete(id);
       else this.pendingUnkeyedToolLabel = null;
-      const reason = failed ? stringValue(payload.error) : undefined;
+      const reason = failed ? sanitizeTerminalText(stringValue(payload.error) ?? "") : undefined;
       this.writeStatus(
         `${failed ? errorMark() : successMark()} ${chalk.dim(failed ? `${label} failed${reason ? `: ${reason}` : ""}` : label)}`,
       );
