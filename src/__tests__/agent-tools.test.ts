@@ -311,6 +311,8 @@ exit 1
     expect(url.origin + url.pathname).toBe("https://huggingface.co/api/models");
     expect(url.searchParams.get("search")).toBe("small instruct");
     expect(url.searchParams.get("limit")).toBe("5");
+    expect(url.searchParams.get("sort")).toBe("downloads");
+    expect(url.searchParams.get("direction")).toBe("-1");
     expect(new Headers(requestInit?.headers).has("authorization")).toBe(false);
     expect(output.details).toEqual({
       source: "huggingface.co",
@@ -385,6 +387,7 @@ exit 1
       localOnly: true,
       fetchImpl: stalled as unknown as typeof fetch,
       huggingFaceTimeoutMs: 10,
+      huggingFaceRetryDelayMs: 1,
     }).find((candidate) => candidate.name === "search_hugging_face")!;
 
     await expect(search.execute("stalled-hub-body", {
@@ -423,6 +426,127 @@ exit 1
     await expect(search.execute("invalid-hub-response", {
       kind: "model", query: "code",
     })).rejects.toThrow("Hugging Face returned an invalid search response.");
+  });
+
+  it("sends tag filters and validates their shape", async () => {
+    const fetchImpl = vi.fn(async (_input: string | URL | Request) => new Response(JSON.stringify([{ id: "a/b" }]), { status: 200 }));
+    const search = createTunedTensorTools(fakeApi(), {
+      localOnly: true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).find((candidate) => candidate.name === "search_hugging_face")!;
+
+    expect(Value.Check(search.parameters, {
+      kind: "dataset", query: "email", filter: ["task_categories:text-classification", "language:en"],
+    })).toBe(true);
+    expect(Value.Check(search.parameters, {
+      kind: "dataset", query: "email", filter: ["bad filter&x=1"],
+    })).toBe(false);
+    await search.execute("filtered", {
+      kind: "dataset", query: "email", filter: ["task_categories:text-classification", "language:en"],
+    });
+    const url = new URL(String(fetchImpl.mock.calls[0]![0]));
+    expect(url.searchParams.getAll("filter")).toEqual(["task_categories:text-classification", "language:en"]);
+  });
+
+  it("falls back to individual keywords when no repo name contains every word", async () => {
+    const byQuery: Record<string, unknown[]> = {
+      "raw email support corpus": [],
+      support: [{ id: "x/support-email-tickets", downloads: 5, tags: [] }, { id: "y/support-chat", downloads: 900 }],
+      email: [{ id: "z/enron-emails", downloads: 50, tags: ["language:en"] }, { id: "x/support-email-tickets", downloads: 5 }],
+    };
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const query = new URL(String(input)).searchParams.get("search")!;
+      return new Response(JSON.stringify(byQuery[query] ?? []), { status: 200 });
+    });
+    const search = createTunedTensorTools(fakeApi(), {
+      localOnly: true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).find((candidate) => candidate.name === "search_hugging_face")!;
+
+    const output = await search.execute("fallback", { kind: "dataset", query: "raw email support corpus" });
+    const details = output.details as { results: Array<{ id: string }>; match?: string; note?: string };
+
+    expect(fetchImpl.mock.calls.map(([input]) => new URL(String(input)).searchParams.get("search")))
+      .toEqual(["raw email support corpus", "support", "email"]);
+    expect(details.match).toBe("any_keyword");
+    expect(details.results.map((item) => item.id)).toEqual([
+      "x/support-email-tickets", "y/support-chat", "z/enron-emails",
+    ]);
+    expect(details.note).toMatch(/match any of: support, email/);
+  });
+
+  it("drops generic words so a descriptive query searches its topic", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const query = new URL(String(input)).searchParams.get("search");
+      return new Response(JSON.stringify(query === "email" ? [{ id: "corbt/enron-emails" }] : []), { status: 200 });
+    });
+    const search = createTunedTensorTools(fakeApi(), {
+      localOnly: true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).find((candidate) => candidate.name === "search_hugging_face")!;
+
+    const output = await search.execute("topic", { kind: "dataset", query: "raw email corpus" });
+    expect(fetchImpl.mock.calls.map(([input]) => new URL(String(input)).searchParams.get("search")))
+      .toEqual(["raw email corpus", "email"]);
+    expect((output.details as { results: Array<{ id: string }> }).results.map((item) => item.id))
+      .toEqual(["corbt/enron-emails"]);
+  });
+
+  it("explains how to search when nothing matches", async () => {
+    const fetchImpl = vi.fn(async () => new Response("[]", { status: 200 }));
+    const search = createTunedTensorTools(fakeApi(), {
+      localOnly: true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).find((candidate) => candidate.name === "search_hugging_face")!;
+
+    const output = await search.execute("empty", { kind: "dataset", query: "inbox" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(output.details).toMatchObject({ results: [], note: expect.stringMatching(/repository names/) });
+  });
+
+  it("retries one transient Hugging Face failure and names network causes", async () => {
+    const flaky = vi.fn()
+      .mockResolvedValueOnce(new Response("busy", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: "a/b" }]), { status: 200 }));
+    const search = createTunedTensorTools(fakeApi(), {
+      localOnly: true,
+      fetchImpl: flaky as unknown as typeof fetch,
+      huggingFaceRetryDelayMs: 1,
+    }).find((candidate) => candidate.name === "search_hugging_face")!;
+    const output = await search.execute("retry", { kind: "model", query: "qwen" });
+    expect(flaky).toHaveBeenCalledTimes(2);
+    expect((output.details as { results: unknown[] }).results).toHaveLength(1);
+
+    const offline = vi.fn(async () => {
+      throw new TypeError("fetch failed", { cause: Object.assign(new Error("getaddrinfo"), { code: "ENOTFOUND" }) });
+    });
+    const offlineSearch = createTunedTensorTools(fakeApi(), {
+      localOnly: true,
+      fetchImpl: offline as unknown as typeof fetch,
+      huggingFaceRetryDelayMs: 1,
+    }).find((candidate) => candidate.name === "search_hugging_face")!;
+    await expect(offlineSearch.execute("offline", { kind: "model", query: "qwen" }))
+      .rejects.toThrow("Hugging Face search failed: could not reach huggingface.co (ENOTFOUND).");
+    expect(offline).toHaveBeenCalledTimes(2);
+
+    const limited = vi.fn(async () => new Response("slow down", { status: 429 }));
+    const limitedSearch = createTunedTensorTools(fakeApi(), {
+      localOnly: true,
+      fetchImpl: limited as unknown as typeof fetch,
+      huggingFaceRetryDelayMs: 1,
+    }).find((candidate) => candidate.name === "search_hugging_face")!;
+    await expect(limitedSearch.execute("limited", { kind: "model", query: "qwen" }))
+      .rejects.toThrow(/HTTP 429.*rate-limited/);
+
+    const missing = vi.fn(async () => new Response("no", { status: 400 }));
+    const missingSearch = createTunedTensorTools(fakeApi(), {
+      localOnly: true,
+      fetchImpl: missing as unknown as typeof fetch,
+      huggingFaceRetryDelayMs: 1,
+    }).find((candidate) => candidate.name === "search_hugging_face")!;
+    await expect(missingSearch.execute("bad-request", { kind: "model", query: "qwen" }))
+      .rejects.toThrow("Hugging Face search failed (HTTP 400).");
+    expect(missing).toHaveBeenCalledTimes(1);
   });
 
   it("inspects only typed shipped training sources for educational answers", async () => {

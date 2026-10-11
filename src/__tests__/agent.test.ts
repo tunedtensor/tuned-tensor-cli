@@ -589,6 +589,24 @@ describe("TunedTensorAgentSession", () => {
     expect(output).toContain("Thinking…\r\u001b[2K");
   });
 
+  it("shows why a tool failed", async () => {
+    const client = fakeClient();
+    client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {
+      onEvent({ type: "tool_call", payload: { toolUseId: "hf", label: "Search Hugging Face" } });
+      onEvent({ type: "tool_result", payload: {
+        toolUseId: "hf", status: "error", error: "\u001b[2JHugging Face search timed out.",
+      } });
+      return { threadId: thread.id, turnId: "t", status: "completed", response: "", actions: [] };
+    });
+    const { io, stdout } = testIO();
+    const session = new TunedTensorAgentSession({ client, io });
+
+    await session.send("search");
+
+    expect(stdout.join("")).toContain("Search Hugging Face failed: Hugging Face search timed out.");
+    expect(stdout.join("")).not.toContain("\u001b[2J");
+  });
+
   it("matches results to tool labels when tools finish out of order", async () => {
     const client = fakeClient();
     client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {

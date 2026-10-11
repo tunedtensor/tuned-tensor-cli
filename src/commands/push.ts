@@ -22,6 +22,62 @@ function persistRemoteId(filePath: string, id: string): void {
   writeFileSync(filePath, JSON.stringify(raw, null, 2) + "\n");
 }
 
+/**
+ * Create or update the cloud copy of a local spec, as \`tt cloud push\` does.
+ * A newly created cloud spec ID is written back to the local file.
+ */
+export async function pushLocalSpec(
+  file: string,
+  opts: ClientOpts,
+): Promise<{ data: RemoteSpec; created: boolean }> {
+  const filePath = resolve(file);
+  const spec = loadSpec(file);
+  const evalCaseErrors = validateEvalCases(spec);
+  if (evalCaseErrors.length > 0) {
+    throw new Error(`Invalid eval_cases: ${evalCaseErrors.join("; ")}`);
+  }
+
+  const rawSpec = spec as unknown as Record<string, unknown>;
+  const { body } = projectCloudSpec(rawSpec);
+  const id = spec.id;
+  const canRecoverLocalId = Boolean(
+    id && hasLocalOnlySpecFields(rawSpec),
+  );
+
+  let data: RemoteSpec;
+  let created = false;
+
+  if (id) {
+    try {
+      const res = await put<RemoteSpec>(
+        `/behavior-specs/${id}`,
+        body,
+        opts,
+      );
+      data = res.data;
+    } catch (error) {
+      if (
+        !canRecoverLocalId
+        || !(error instanceof ApiError)
+        || error.status !== 404
+      ) {
+        throw error;
+      }
+
+      const res = await post<RemoteSpec>("/behavior-specs", body, opts);
+      data = res.data;
+      created = true;
+      persistRemoteId(filePath, data.id);
+    }
+  } else {
+    const res = await post<RemoteSpec>("/behavior-specs", body, opts);
+    data = res.data;
+    created = true;
+    persistRemoteId(filePath, data.id);
+  }
+  return { data, created };
+}
+
 export function registerPushCommand(parent: Command) {
   parent
     .command("push")
@@ -29,52 +85,7 @@ export function registerPushCommand(parent: Command) {
     .option("-f, --file <path>", "Spec file path", DEFAULT_SPEC_FILE)
     .action(async (cmdOpts) => {
       const opts = parent.optsWithGlobals() as ClientOpts;
-      const filePath = resolve(cmdOpts.file);
-      const spec = loadSpec(cmdOpts.file);
-      const evalCaseErrors = validateEvalCases(spec);
-      if (evalCaseErrors.length > 0) {
-        throw new Error(`Invalid eval_cases: ${evalCaseErrors.join("; ")}`);
-      }
-
-      const rawSpec = spec as unknown as Record<string, unknown>;
-      const { body } = projectCloudSpec(rawSpec);
-      const id = spec.id;
-      const canRecoverLocalId = Boolean(
-        id && hasLocalOnlySpecFields(rawSpec),
-      );
-
-      let data: RemoteSpec;
-      let created = false;
-
-      if (id) {
-        try {
-          const res = await put<RemoteSpec>(
-            `/behavior-specs/${id}`,
-            body,
-            opts,
-          );
-          data = res.data;
-        } catch (error) {
-          if (
-            !canRecoverLocalId
-            || !(error instanceof ApiError)
-            || error.status !== 404
-          ) {
-            throw error;
-          }
-
-          const res = await post<RemoteSpec>("/behavior-specs", body, opts);
-          data = res.data;
-          created = true;
-          persistRemoteId(filePath, data.id);
-        }
-      } else {
-        const res = await post<RemoteSpec>("/behavior-specs", body, opts);
-        data = res.data;
-        created = true;
-        persistRemoteId(filePath, data.id);
-      }
-
+      const { data, created } = await pushLocalSpec(cmdOpts.file, opts);
       if (isJsonMode()) return printJson(data);
       printSuccess(
         `Spec ${created ? "created" : "updated"}: ${data.name} (${shortId(data.id)})`,

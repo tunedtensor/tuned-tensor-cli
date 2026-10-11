@@ -17,6 +17,12 @@ import {
   validatePreparedLocalPipelineAction,
 } from "./local-pipeline-action.js";
 
+import {
+  revalidateLabelDownload,
+  revalidateLabelJob,
+  type AgentLabelingExecutor,
+} from "./agent-labeling.js";
+
 export interface AgentMutationApi {
   get(path: string): Promise<unknown>;
   post(path: string, body?: unknown, guard?: AgentMutationGuard): Promise<unknown>;
@@ -44,6 +50,7 @@ export interface AgentApprovalOptions {
   runPipelineCommand?: LocalPipelineCommandRunner;
   signal?: AbortSignal;
   durableClaimed?: boolean;
+  labeling?: AgentLabelingExecutor;
 }
 
 export class PreparedActionWorkspaceMismatchError extends Error {
@@ -198,6 +205,15 @@ export async function preflightPreparedAction(
       input.spec,
       expectedWorkspaceFingerprint,
     );
+  } else if (action.operation === "start_label_job" || action.operation === "download_label_job") {
+    if (!options.workspaceRoot) throw new Error("A local workspace is required for labeling.");
+    try {
+      const validate = action.operation === "start_label_job" ? revalidateLabelJob : revalidateLabelDownload;
+      await validate(options.workspaceRoot, args(action));
+    } catch (error) {
+      if (error instanceof SpecWorkspaceMismatchError) throw new PreparedActionWorkspaceMismatchError(error.message, error);
+      throw error;
+    }
   } else if (action.operation === "run_local_pipeline") {
     try {
       await prepareLocalPipelineApproval(action, options);
@@ -286,6 +302,20 @@ export async function approvePreparedAction(
         }));
         break;
       }
+      case "start_label_job": {
+        const labeling = options.labeling;
+        if (!options.workspaceRoot || !labeling) throw new Error("Teacher labeling needs a local workspace and a TT account.");
+        const start = await revalidateLabelJob(options.workspaceRoot, input);
+        execute = async () => await labeling.start(start);
+        break;
+      }
+      case "download_label_job": {
+        const labeling = options.labeling;
+        if (!options.workspaceRoot || !labeling) throw new Error("Downloading labeled data needs a local workspace and a TT account.");
+        const download = await revalidateLabelDownload(options.workspaceRoot, input);
+        execute = async () => await labeling.download(download);
+        break;
+      }
 
       default:
         throw new Error(`Unsupported prepared operation: ${String(action.operation)}.`);
@@ -320,6 +350,9 @@ export async function approvePreparedAction(
     if (
       (["create_local_spec", "update_local_spec"].includes(action.operation ?? "") && isKnownLocalSpecFailure(error))
       || (action.operation === "run_local_pipeline" && isKnownLocalPipelineFailure(error))
+      // A download only writes local files after every row is fetched; retrying is safe.
+      || (action.operation as string | undefined) === "download_label_job"
+      || (error instanceof Error && error.name === "LabelingNotStartedError")
     ) {
       action.status = "failed";
       try {
@@ -345,7 +378,11 @@ export async function approvePreparedAction(
       ? "local workspace"
       : action.operation === "run_local_pipeline"
         ? "local run store"
-        : "remote resource";
+        : action.operation === "start_label_job"
+          ? "labeling jobs (tt cloud label list)"
+          : action.operation === "download_label_job"
+            ? "download directory"
+            : "remote resource";
     throw new Error(
       `The mutation outcome is unknown and this action cannot be retried automatically. Inspect the ${inspectionTarget} before preparing another action. ${detail}`,
       { cause: error },
