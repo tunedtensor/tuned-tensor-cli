@@ -44,10 +44,14 @@ export interface ManagedAgentUsage {
 }
 
 function weeklyRows(data: ManagedAgentUsage): Array<[string, string]> {
-  if (data.weekly_remaining_percent === undefined || data.weekly_cost_limit_usd === undefined) return [];
+  if (typeof data.weekly_remaining_percent !== "number" || !Number.isFinite(data.weekly_remaining_percent)
+      || typeof data.weekly_cost_limit_usd !== "number" || !Number.isFinite(data.weekly_cost_limit_usd)
+      || data.weekly_cost_limit_usd <= 0) return [];
+  const cost = typeof data.weekly_cost_usd === "number" && Number.isFinite(data.weekly_cost_usd) && data.weekly_cost_usd >= 0
+    ? `$${data.weekly_cost_usd.toFixed(2)}` : "Unknown";
   return [
     ["Weekly limit", `${data.weekly_remaining_percent}% remaining`],
-    ["Weekly cost", `$${(data.weekly_cost_usd ?? 0).toFixed(2)} / $${data.weekly_cost_limit_usd.toFixed(2)}`],
+    ["Weekly cost", `${cost} / $${data.weekly_cost_limit_usd.toFixed(2)}`],
     ["Weekly resets", data.weekly_resets_at ?? "Unknown"],
   ];
 }
@@ -58,8 +62,9 @@ export function registerUsageCommand(parent: Command): void {
     .action(async () => {
       const { data } = await get<ManagedAgentUsage>("/agent/usage", undefined, parent.optsWithGlobals() as ClientOpts);
       if (isJsonMode()) return printJson(data);
+      const weekly = weeklyRows(data);
       printDetail([
-        ...weeklyRows(data),
+        ...weekly,
         ["Managed requests", `${data.requests} / ${data.daily_request_limit}`],
         ["Remaining", String(data.remaining_requests)],
         ["Resets", data.resets_at],
@@ -71,8 +76,10 @@ export function registerUsageCommand(parent: Command): void {
         ["Usage reported", `${data.usage_reported_requests} / ${data.requests} requests`],
         ["Provider cost reported", data.provider_cost_usd === null ? "Unknown" : `$${data.provider_cost_usd.toFixed(6)}`],
         ["Cost coverage", `${data.cost_reported_requests} / ${data.requests} requests`],
-        ["Billing", "Included allowance (weekly limit and daily requests)"],
+        ["Billing", weekly.length ? "Included allowance (weekly limit and daily requests)" : "Included daily allowance"],
       ]);
-      console.log("\nEach model request, including tool follow-ups, uses the allowance. Failed and cancelled requests also count. When the weekly limit is used up, managed requests pause until the reset; your own provider key keeps working. BYO provider usage is reported by that provider.\nUse `tt balance` for cloud training credits.");
+      const weeklyNote = weekly.length
+        ? " Weekly cost includes estimates for running requests and requests without final cost reports. When the weekly limit is used up, managed requests pause until the reset; your own provider key keeps working." : "";
+      console.log(`\nEach model request, including tool follow-ups, uses the allowance. Failed and cancelled requests also count.${weeklyNote} BYO provider usage is reported by that provider.\nUse \`tt balance\` for cloud training credits.`);
     });
 }

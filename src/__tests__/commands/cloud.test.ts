@@ -35,6 +35,8 @@ describe("explicit cloud operations", () => {
       requests: 4, completed_requests: 2, failed_requests: 1, cancelled_requests: 1,
       running_requests: 0, usage_reported_requests: 2, cost_reported_requests: 2, prompt_tokens: 120, completion_tokens: 30,
       provider_cost_usd: 0.01, daily_request_limit: 100, remaining_requests: 96,
+      weekly_period_start: "2026-10-05T00:00:00Z", weekly_resets_at: "2026-10-12T00:00:00Z",
+      weekly_cost_usd: 3.15, weekly_cost_limit_usd: 9, weekly_remaining_percent: 65,
       billing: "included_allowance",
     };
     vi.mocked(client.get).mockResolvedValue({ data: usage });
@@ -72,8 +74,20 @@ describe("explicit cloud operations", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     await createProgram("test").parseAsync(["node", "tt", "--api-key", token, "usage"]);
     const output = log.mock.calls.map(([line]) => String(line)).join("\n");
-    expect(output).not.toContain("Weekly");
+    expect(output.toLowerCase()).not.toContain("weekly");
+    expect(output).toContain("Included daily allowance");
     expect(output).toContain("Managed requests");
+  });
+
+  it.each([undefined, null])("does not report missing weekly cost as zero: %s", async (cost) => {
+    vi.mocked(client.get).mockResolvedValue({ data: {
+      provider_cost_usd: null, weekly_cost_usd: cost,
+      weekly_cost_limit_usd: 9, weekly_remaining_percent: 65,
+    } });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await createProgram("test").parseAsync(["node", "tt", "--api-key", token, "usage"]);
+    const output = log.mock.calls.map(([line]) => String(line)).join("\n");
+    expect(output).toMatch(/Weekly cost\s+Unknown \/ \$9\.00/);
   });
 
   it("archives a published report through the existing API", async () => {

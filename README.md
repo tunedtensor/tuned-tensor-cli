@@ -406,7 +406,9 @@ when it resets (Monday 00:00 UTC), and the server-configured daily request
 allowance. When the weekly limit is used up, managed requests are refused
 until the reset; BYO provider keys are unaffected. Check `tt usage` before a
 long session to avoid hitting the limit mid-task. Each provider completion, including a tool follow-up, consumes one request;
-failed and cancelled requests also count. Token/cost coverage shows which
+failed and cancelled requests also count. Weekly cost includes reservations for
+running requests and estimates for interrupted requests or missing final costs.
+Token/cost coverage shows which
 requests have provider usage reports, so incomplete reporting is not mistaken
 for zero consumption. The displayed provider cost is informational, not a
 charge to TT credits. BYO provider usage is separate. `tt balance` shows TT
