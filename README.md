@@ -387,6 +387,27 @@ tt usage
 tt balance
 ```
 
+### Teacher-label raw data
+
+Label unlabeled inputs with a stronger teacher model, review them, and train
+an adapter on the result. Add a few high-quality examples to the spec first:
+the teacher sees them as the output format to follow. Labeling uses TT credits.
+
+```bash
+tt cloud push --file tunedtensor.json                 # prints the cloud spec ID
+tt cloud label upload emails.jsonl --spec <spec-id> --watch   # {"input": "..."} per line
+tt cloud label rows <job-id> --status labeled
+tt cloud label accept <job-id> --rows 0,3,12           # or --all after spot checks
+tt cloud label edit <job-id> --row 5 --output "..."
+tt cloud label export <job-id>                         # writes datasets/<job-name>/
+```
+
+`export` keeps accepted and edited rows (add `--include-unreviewed` for teacher
+drafts), drops rows blocked for secrets, removes duplicate inputs, drops inputs
+that received conflicting labels, and holds out a deterministic validation
+split (`--validation-ratio`, default 0.1). It prints the `dataset_prebuilt`
+paths to add to `tunedtensor.json`.
+
 `tt cloud specs`, `tt cloud datasets`,
 `tt cloud label`, and `tt cloud models` expose the corresponding account
 operations; each command's `--help` documents its arguments. Hosted training

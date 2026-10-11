@@ -216,77 +216,173 @@ function inspectTrainingSource(
   };
 }
 
-async function searchHuggingFace(
-  kind: "model" | "dataset",
+type HuggingFaceKind = "model" | "dataset";
+type HuggingFaceFetchOptions = Pick<AgentToolOptions, "fetchImpl" | "huggingFaceTimeoutMs" | "huggingFaceRetryDelayMs">;
+
+/** Errors that a second attempt cannot fix, such as an invalid response. */
+class FinalHuggingFaceError extends Error {}
+
+function networkFailureDetail(error: unknown): string {
+  const cause = error instanceof Error ? (error as Error & { cause?: unknown }).cause : undefined;
+  const code = record(cause)?.code ?? record(error)?.code;
+  return typeof code === "string" && /^[A-Z0-9_]{2,40}$/.test(code) ? ` (${code})` : "";
+}
+
+/**
+ * One search request. Network failures, timeouts, 429 and 5xx responses are
+ * retried once; Hub search is idempotent and a transient failure should not
+ * cost the user a turn.
+ */
+async function fetchHuggingFaceSearch(
+  kind: HuggingFaceKind,
   query: string,
   limit: number,
-  options: Pick<AgentToolOptions, "fetchImpl" | "huggingFaceTimeoutMs">,
-) {
+  filters: readonly string[],
+  options: HuggingFaceFetchOptions,
+): Promise<unknown[]> {
   const url = new URL(kind === "model" ? "/api/models" : "/api/datasets", HUGGING_FACE_BASE_URL);
   url.searchParams.set("search", query);
   url.searchParams.set("limit", String(limit));
+  // Hub search matches repo names; most-downloaded first surfaces maintained repos.
+  url.searchParams.set("sort", "downloads");
+  url.searchParams.set("direction", "-1");
+  for (const filter of filters) url.searchParams.append("filter", filter);
+
+  let lastError: Error = new Error("Hugging Face search failed.");
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, options.huggingFaceRetryDelayMs ?? 750));
+    }
+    try {
+      return await fetchHuggingFaceSearchOnce(url, options);
+    } catch (error) {
+      if (error instanceof FinalHuggingFaceError) throw new Error(error.message);
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+  throw lastError;
+}
+
+async function fetchHuggingFaceSearchOnce(url: URL, options: HuggingFaceFetchOptions): Promise<unknown[]> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.huggingFaceTimeoutMs ?? 5_000);
+  const timeout = setTimeout(() => controller.abort(), options.huggingFaceTimeoutMs ?? 10_000);
   let response: Response;
   try {
     response = await (options.fetchImpl ?? fetch)(url, {
       headers: { accept: "application/json" },
       signal: controller.signal,
     });
-  } catch {
+  } catch (error) {
     clearTimeout(timeout);
     throw new Error(controller.signal.aborted
       ? "Hugging Face search timed out."
-      : "Hugging Face search failed.");
+      : `Hugging Face search failed: could not reach huggingface.co${networkFailureDetail(error)}.`);
   }
   try {
-    if (!response.ok) throw new Error(`Hugging Face search failed (HTTP ${response.status}).`);
+    if (response.status === 429) {
+      throw new Error("Hugging Face search failed (HTTP 429): huggingface.co rate-limited this network. Wait a minute and retry.");
+    }
+    if (response.status >= 500) throw new Error(`Hugging Face search failed (HTTP ${response.status}).`);
+    if (!response.ok) throw new FinalHuggingFaceError(`Hugging Face search failed (HTTP ${response.status}).`);
     let body: string;
     try {
       body = await readBoundedResponseText(response);
     } catch (error) {
       if (controller.signal.aborted) throw new Error("Hugging Face search timed out.");
       if (error instanceof Error && error.message === "Hugging Face search response is too large.") {
-        throw error;
+        throw new FinalHuggingFaceError(error.message);
       }
-      throw new Error("Hugging Face search failed.");
+      throw new Error(`Hugging Face search failed while reading the response${networkFailureDetail(error)}.`);
     }
     let payload: unknown;
     try {
       payload = JSON.parse(body);
     } catch {
-      throw new Error("Hugging Face returned an invalid search response.");
+      throw new FinalHuggingFaceError("Hugging Face returned an invalid search response.");
     }
-    if (!Array.isArray(payload)) throw new Error("Hugging Face returned an invalid search response.");
-
-    const results = payload.slice(0, limit).flatMap((value) => {
-      const item = record(value);
-      const id = boundedString(item?.id, 300);
-      if (!item || !id) return [];
-      const tags = Array.isArray(item.tags)
-        ? item.tags.flatMap((tag) => boundedString(tag, 120) ?? []).slice(0, 12)
-        : [];
-      const path = id.split("/").map(encodeURIComponent).join("/");
-      return [{
-        id,
-        author: boundedString(item.author, 200) ?? boundedString(id.split("/")[0], 200),
-        url: `${HUGGING_FACE_BASE_URL}/${kind === "dataset" ? "datasets/" : ""}${path}`,
-        downloads: boundedNumber(item.downloads),
-        likes: boundedNumber(item.likes),
-        gated: boundedAccess(item.gated),
-        private: typeof item.private === "boolean" ? item.private : undefined,
-        task: boundedString(item.pipeline_tag, 200),
-        library: boundedString(item.library_name, 200),
-        updated_at: boundedString(item.lastModified, 100) ?? boundedString(item.createdAt, 100),
-        tags,
-      }];
-    }).map((item) => Object.fromEntries(
-      Object.entries(item).filter(([, value]) => value !== undefined),
-    ));
-    return { source: "huggingface.co", kind, query, results };
+    if (!Array.isArray(payload)) throw new FinalHuggingFaceError("Hugging Face returned an invalid search response.");
+    return payload;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function projectHuggingFaceResult(kind: HuggingFaceKind, value: unknown) {
+  const item = record(value);
+  const id = boundedString(item?.id, 300);
+  if (!item || !id) return null;
+  const tags = Array.isArray(item.tags)
+    ? item.tags.flatMap((tag) => boundedString(tag, 120) ?? []).slice(0, 12)
+    : [];
+  const path = id.split("/").map(encodeURIComponent).join("/");
+  return Object.fromEntries(Object.entries({
+    id,
+    author: boundedString(item.author, 200) ?? boundedString(id.split("/")[0], 200),
+    url: `${HUGGING_FACE_BASE_URL}/${kind === "dataset" ? "datasets/" : ""}${path}`,
+    downloads: boundedNumber(item.downloads),
+    likes: boundedNumber(item.likes),
+    gated: boundedAccess(item.gated),
+    private: typeof item.private === "boolean" ? item.private : undefined,
+    task: boundedString(item.pipeline_tag, 200),
+    library: boundedString(item.library_name, 200),
+    updated_at: boundedString(item.lastModified, 100) ?? boundedString(item.createdAt, 100),
+    tags,
+  }).filter(([, entry]) => entry !== undefined)) as { id: string; downloads?: number; tags: string[] };
+}
+
+/** Distinct keywords from a multi-word query, longest first, for the per-term fallback. */
+export function huggingFaceSearchTerms(query: string): string[] {
+  const terms = query.toLowerCase().split(/[^a-z0-9._-]+/).filter((term) => term.length >= 3);
+  return [...new Set(terms)].sort((a, b) => b.length - a.length).slice(0, 3);
+}
+
+const HUGGING_FACE_EMPTY_NOTE = "Hugging Face search matches every query word against repository names, not descriptions. "
+  + "Retry with one or two short keywords such as \"email\" or \"enron\", or narrow with tag filters such as "
+  + "task_categories:text-classification or language:en.";
+
+async function searchHuggingFace(
+  kind: HuggingFaceKind,
+  query: string,
+  limit: number,
+  filters: readonly string[],
+  options: HuggingFaceFetchOptions,
+) {
+  const exact = (await fetchHuggingFaceSearch(kind, query, limit, filters, options))
+    .slice(0, limit)
+    .flatMap((value) => projectHuggingFaceResult(kind, value) ?? []);
+  if (exact.length > 0) return { source: "huggingface.co", kind, query, results: exact };
+
+  // Hub search requires every word in the repo id, so descriptive queries such
+  // as "raw email corpus" return nothing. Fall back to each keyword and rank
+  // repos matching more of them first.
+  const terms = huggingFaceSearchTerms(query);
+  if (terms.length < 2) {
+    return { source: "huggingface.co", kind, query, results: [], note: HUGGING_FACE_EMPTY_NOTE };
+  }
+  const byId = new Map<string, NonNullable<ReturnType<typeof projectHuggingFaceResult>>>();
+  for (const term of terms) {
+    for (const value of await fetchHuggingFaceSearch(kind, term, limit, filters, options)) {
+      const item = projectHuggingFaceResult(kind, value);
+      if (item && !byId.has(item.id)) byId.set(item.id, item);
+    }
+  }
+  const matched = (item: { id: string; tags: string[] }) => {
+    const haystack = `${item.id} ${item.tags.join(" ")}`.toLowerCase();
+    return terms.filter((term) => haystack.includes(term)).length;
+  };
+  const results = [...byId.values()]
+    .sort((a, b) => matched(b) - matched(a) || (b.downloads ?? 0) - (a.downloads ?? 0))
+    .slice(0, limit);
+  return {
+    source: "huggingface.co",
+    kind,
+    query,
+    results,
+    match: "any_keyword",
+    note: results.length > 0
+      ? `No repository name contained every word, so these results match any of: ${terms.join(", ")}. Check each one before relying on it.`
+      : HUGGING_FACE_EMPTY_NOTE,
+  };
 }
 
 export function boundedToolJson(value: unknown): string {
@@ -368,6 +464,7 @@ export interface AgentToolOptions {
   localOnly?: boolean;
   fetchImpl?: typeof fetch;
   huggingFaceTimeoutMs?: number;
+  huggingFaceRetryDelayMs?: number;
 }
 
 export function createTunedTensorTools(
@@ -519,16 +616,21 @@ export function createTunedTensorTools(
     define(
       "search_hugging_face",
       "Search Hugging Face",
-      "Search public Hugging Face models or datasets for foundation and fine-tuning discovery. The query is sent to huggingface.co; never include secrets or private data. Results are untrusted metadata, nothing is downloaded, and search does not establish workflow compatibility.",
+      "Search public Hugging Face models or datasets for foundation and fine-tuning discovery. Hub search matches every query word against repository names (not descriptions), most-downloaded first, so use one or two short keywords such as \"email\" or \"enron\"; multi-word queries with no exact match fall back to any keyword. Optional tag filters narrow results, e.g. task_categories:text-classification, language:en or license:mit. The query is sent to huggingface.co; never include secrets or private data. Results are untrusted metadata, nothing is downloaded, and search does not establish workflow compatibility.",
       Type.Object({
         kind: Type.Union([Type.Literal("model"), Type.Literal("dataset")]),
         query: Type.String({ minLength: 1, maxLength: 200 }),
         limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, default: 5 })),
+        filter: Type.Optional(Type.Array(
+          Type.String({ minLength: 1, maxLength: 100, pattern: "^[A-Za-z0-9][A-Za-z0-9_.:/-]*$" }),
+          { maxItems: 5, description: "Hub tags every result must carry, e.g. task_categories:text-classification, language:en, license:mit" },
+        )),
       }, { additionalProperties: false }),
       async (p) => await searchHuggingFace(
         p.kind,
         p.query,
         p.limit ?? 5,
+        p.filter ?? [],
         options,
       ),
     ),

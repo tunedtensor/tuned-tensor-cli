@@ -1,5 +1,38 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `tt cloud label export <job-id>` turns a reviewed teacher-labeling job into
+  local `training.jsonl` and `validation.jsonl` chat files for
+  `dataset_prebuilt`, using the local adapter spec's system message. It keeps
+  accepted and edited rows (unreviewed drafts only with `--include-unreviewed`),
+  never exports rows blocked for secrets, removes duplicate inputs, drops
+  inputs that received conflicting labels, and holds out a deterministic
+  validation split. It writes an `export.json` manifest and prints the
+  `dataset_prebuilt` edit. Promoted datasets previously had no path back to
+  local training.
+- `search_hugging_face` accepts tag filters such as
+  `task_categories:text-classification` or `language:en`.
+
+### Fixed
+
+- Hugging Face search returned nothing for descriptive queries such as
+  "raw email corpus", because the Hub requires every word to appear in the
+  repository name. Searches with no exact match now fall back to each keyword,
+  ranking repos that match more keywords first. Results are sorted by
+  downloads, and empty results explain how to search.
+- Hugging Face search failures were opaque. Network errors now name their cause
+  (for example `ENOTFOUND`), rate limits say so, one retry absorbs transient
+  network, 429 and 5xx failures, and the timeout is 10 seconds. Failed agent
+  tools now show their reason in the terminal instead of only "failed".
+- `tt cloud label upload` checks the same rules the service enforces before
+  uploading: empty inputs, empty or non-string outputs, the 50,000-row and 50 MB
+  limits. A `.json` file with JSON Lines content is no longer rejected after
+  validation. `tt cloud label watch` retries transient network and server errors.
+- The local agent now knows the teacher-labeling workflow for raw data.
+
 ## [0.22.1] - 2026-10-10
 
 ### Added

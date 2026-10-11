@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Command } from "commander";
-import { writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  buildLabelExport,
   parseCsvHeader,
   registerLabelCommands,
   validateUnlabeledFile,
+  withTransientRetry,
 } from "../../commands/label.js";
+import { buildSystemMessage, examplesFromChatJsonl } from "../../local-runtime/dataset.js";
 import * as client from "../../client.js";
 import { setJsonMode } from "../../output.js";
 
@@ -88,7 +91,24 @@ describe("validateUnlabeledFile", () => {
 
   it("accepts input-only JSONL", () => {
     writeFileSync(tmpFile, '{"input":"a"}\n{"input":"b","output":"x"}\n');
-    expect(validateUnlabeledFile(tmpFile)).toEqual({ format: "jsonl" });
+    expect(validateUnlabeledFile(tmpFile)).toEqual({ format: "jsonl", warnings: [] });
+  });
+
+  it("rejects rows the service would reject, before uploading", () => {
+    writeFileSync(
+      tmpFile,
+      '{"input":"  "}\n{"input":"b","output":""}\n{"input":"c","output":3}\n',
+    );
+    expect(() => validateUnlabeledFile(tmpFile)).toThrow(
+      /Row 1: "input" is empty\nRow 2: "output" is empty - omit it[^\n]*\nRow 3: "output" must be a string/,
+    );
+  });
+
+  it("warns about over-long inputs the service marks failed", () => {
+    writeFileSync(tmpFile, `${JSON.stringify({ input: "x".repeat(32_001) })}\n{"input":"ok"}\n`);
+    expect(validateUnlabeledFile(tmpFile).warnings).toEqual([
+      "Row 1: input exceeds 32,000 characters and will be marked failed",
+    ]);
   });
 
   it("rejects JSONL rows without input", () => {
@@ -108,7 +128,7 @@ describe("validateUnlabeledFile", () => {
 
   it("validates CSV column presence", () => {
     writeFileSync(tmpCsv, "id,text\n1,hello\n");
-    expect(validateUnlabeledFile(tmpCsv, "text")).toEqual({ format: "csv" });
+    expect(validateUnlabeledFile(tmpCsv, "text")).toEqual({ format: "csv", warnings: [] });
     expect(() => validateUnlabeledFile(tmpCsv, "body")).toThrow(
       /"body" not found.*id, text/,
     );
@@ -181,6 +201,175 @@ describe("label upload", () => {
       }),
       expect.anything(),
     );
+  });
+});
+
+describe("label upload (.json)", () => {
+  const jsonFile = join(tmpdir(), `tt-label-upload-${process.pid}.json`);
+  afterEach(() => rmSync(jsonFile, { force: true }));
+
+  it("uploads JSON Lines content in a .json file under a .jsonl name", async () => {
+    writeFileSync(jsonFile, '{"input":"a"}\n');
+    vi.mocked(client.post)
+      .mockResolvedValueOnce({
+        data: { path: "s3://b/x.jsonl", upload_url: "https://s3/upload", method: "PUT", source_format: "jsonl" },
+      })
+      .mockResolvedValueOnce({ data: { ...mockJob, teacher_row_count: 1 } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+
+    await buildProgram().parseAsync(["node", "tt", "label", "upload", jsonFile, "--spec", SPEC_UUID]);
+
+    expect(client.post).toHaveBeenNthCalledWith(
+      1,
+      "/labeling-jobs/upload-url",
+      expect.objectContaining({ filename: `tt-label-upload-${process.pid}.jsonl` }),
+      expect.anything(),
+    );
+  });
+});
+
+describe("withTransientRetry", () => {
+  it("retries network and 5xx failures but not client errors", async () => {
+    const flaky = vi.fn()
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockRejectedValueOnce(new client.ApiError(503, "unavailable", "busy"))
+      .mockResolvedValueOnce("ok");
+    await expect(withTransientRetry(flaky, 5, 1)).resolves.toBe("ok");
+    expect(flaky).toHaveBeenCalledTimes(3);
+
+    const denied = vi.fn().mockRejectedValue(new client.ApiError(404, "not_found", "gone"));
+    await expect(withTransientRetry(denied, 5, 1)).rejects.toThrow("gone");
+    expect(denied).toHaveBeenCalledTimes(1);
+  });
+});
+
+function labelRow(index: number, fields: Record<string, unknown>) {
+  return {
+    id: `row-${index}`,
+    row_index: index,
+    input: `input ${index}`,
+    teacher_output: `label ${index}`,
+    final_output: null,
+    status: "accepted",
+    error: null,
+    sanitization_status: "clean",
+    ...fields,
+  };
+}
+
+describe("buildLabelExport", () => {
+  it("keeps reviewed rows, drops unsafe or ambiguous ones, and holds out a stable split", () => {
+    const rows = [
+      labelRow(0, {}),
+      labelRow(1, { status: "edited", final_output: "fixed 1" }),
+      labelRow(2, { status: "labeled" }),
+      labelRow(3, { status: "rejected" }),
+      labelRow(4, { status: "failed", teacher_output: null }),
+      labelRow(5, { sanitization_status: "blocked" }),
+      labelRow(6, { teacher_output: "   " }),
+      labelRow(7, { input: "Same  Email", teacher_output: "spam" }),
+      labelRow(8, { input: "same email", teacher_output: "spam" }),
+      labelRow(9, { input: "Conflict", teacher_output: "spam" }),
+      labelRow(10, { input: "conflict", status: "edited", final_output: "ham" }),
+      ...Array.from({ length: 20 }, (_, offset) => labelRow(11 + offset, {})),
+    ];
+    const first = buildLabelExport(rows, { includeUnreviewed: false, validationRatio: 0.2 });
+    const all = [...first.training, ...first.validation];
+
+    expect(first.stats).toMatchObject({
+      rows: 31,
+      selected: 23,
+      skipped_unreviewed: 1,
+      skipped_rejected_or_failed: 2,
+      skipped_blocked: 1,
+      skipped_empty_output: 1,
+      dropped_duplicate_inputs: 1,
+      dropped_conflicting_inputs: 2,
+    });
+    expect(all).toHaveLength(23);
+    expect(all).toContainEqual({ input: "input 1", output: "fixed 1" });
+    expect(all).toContainEqual({ input: "Same  Email", output: "spam" });
+    expect(all.some((row) => /conflict/i.test(row.input))).toBe(false);
+    expect(first.validation.length).toBeGreaterThan(0);
+    const trainingInputs = new Set(first.training.map((row) => row.input));
+    expect(first.validation.some((row) => trainingInputs.has(row.input))).toBe(false);
+
+    const shuffled = buildLabelExport([...rows].reverse(), { includeUnreviewed: false, validationRatio: 0.2 });
+    expect(shuffled.validation).toEqual(first.validation);
+
+    const withDrafts = buildLabelExport(rows, { includeUnreviewed: true, validationRatio: 0.2 });
+    expect(withDrafts.stats.selected).toBe(24);
+  });
+
+  it("always holds out at least one row and needs two usable rows", () => {
+    const pair = buildLabelExport([labelRow(0, {}), labelRow(1, {})], { includeUnreviewed: false, validationRatio: 0.05 });
+    expect(pair.training).toHaveLength(1);
+    expect(pair.validation).toHaveLength(1);
+    expect(() => buildLabelExport([labelRow(0, {}), labelRow(1, { status: "labeled" })], {
+      includeUnreviewed: false, validationRatio: 0.1,
+    })).toThrow(/--include-unreviewed/);
+  });
+});
+
+describe("label export", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "tt-label-export-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const spec = {
+    name: "triage",
+    system_prompt: "Classify the email.",
+    guidelines: ["Use Category / Priority / Action."],
+    constraints: [],
+    examples: [],
+  };
+
+  it("writes chat JSONL under the local spec's system message", async () => {
+    const specPath = join(dir, "tunedtensor.json");
+    writeFileSync(specPath, JSON.stringify(spec));
+    const rows = Array.from({ length: 12 }, (_, index) => labelRow(index, {}));
+    vi.mocked(client.get)
+      .mockResolvedValueOnce({
+        data: { ...mockJob, status: "awaiting_review", row_count: 12, system_message: buildSystemMessage(spec) },
+      })
+      .mockResolvedValueOnce({ data: rows, meta: { page: 1, per_page: 100, total: 12 } });
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await buildProgram().parseAsync(["node", "tt", "label", "export", JOB_UUID, "--spec", specPath]);
+
+    const out = join(dir, "datasets", "support-tickets");
+    const training = await examplesFromChatJsonl(join(out, "training.jsonl"));
+    const validation = await examplesFromChatJsonl(join(out, "validation.jsonl"));
+    expect(training.length + validation.length).toBe(12);
+    expect(validation.length).toBeGreaterThan(0);
+    const firstRow = JSON.parse(readFileSync(join(out, "training.jsonl"), "utf8").split("\n")[0]!);
+    expect(firstRow.messages[0]).toEqual({ role: "system", content: buildSystemMessage(spec) });
+    const manifest = JSON.parse(readFileSync(join(out, "export.json"), "utf8"));
+    expect(manifest).toMatchObject({ labeling_job_id: JOB_UUID, teacher_instructions_match_spec: true });
+    expect(console.error).not.toHaveBeenCalled();
+    const printed = vi.mocked(console.log).mock.calls.map((call) => String(call[0])).join("\n");
+    expect(printed).toContain('"training": "./datasets/support-tickets/training.jsonl"');
+
+    vi.mocked(client.get)
+      .mockResolvedValueOnce({ data: { ...mockJob, status: "awaiting_review", row_count: 12 } })
+      .mockResolvedValueOnce({ data: rows, meta: { page: 1, per_page: 100, total: 12 } });
+    await expect(buildProgram().parseAsync(["node", "tt", "label", "export", JOB_UUID, "--spec", specPath]))
+      .rejects.toThrow(/already exists.*--force/);
+  });
+
+  it("refuses unfinished jobs and non-adapter specs", async () => {
+    const specPath = join(dir, "tunedtensor.json");
+    writeFileSync(specPath, JSON.stringify(spec));
+    vi.mocked(client.get).mockResolvedValueOnce({ data: { ...mockJob, status: "labeling" } });
+    await expect(buildProgram().parseAsync(["node", "tt", "label", "export", JOB_UUID, "--spec", specPath]))
+      .rejects.toThrow(/"labeling"/);
+
+    writeFileSync(specPath, JSON.stringify({ ...spec, engine: "decision" }));
+    await expect(buildProgram().parseAsync(["node", "tt", "label", "export", JOB_UUID, "--spec", specPath]))
+      .rejects.toThrow(/engine "decision"/);
   });
 });
 

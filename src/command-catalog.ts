@@ -78,6 +78,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   { path: "cloud label reject", description: "Reject rows so they are excluded from promotion", group: "Cloud", modes: LOCAL },
   { path: "cloud label edit", description: "Replace a row's output with your own", group: "Cloud", modes: LOCAL },
   { path: "cloud label promote", description: "Promote reviewed rows into a validated dataset", group: "Cloud", modes: LOCAL },
+  { path: "cloud label export", description: "Write reviewed rows as local training and validation chat JSONL", group: "Cloud", modes: LOCAL },
   { path: "cloud label cancel", description: "Cancel a labeling job and release unused credits", group: "Cloud", modes: LOCAL },
   { path: "cloud runs list", description: "List runs", group: "Cloud", modes: LOCAL },
   { path: "cloud runs get", description: "Show run details and eval results", group: "Cloud", modes: LOCAL },

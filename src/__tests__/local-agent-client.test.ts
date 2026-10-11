@@ -7,6 +7,7 @@ import {
   createLocalAgentClient,
   type LocalPiAgent,
   type LocalPiAgentOptions,
+  toolErrorSummary,
 } from "../local-agent-client.js";
 import type { AgentToolApi } from "../agent-tools.js";
 import { prepareLocalSpecProject } from "../local-spec-workspace.js";
@@ -440,5 +441,16 @@ describe("local agent conversation client", () => {
     expect(mutationApi.get).not.toHaveBeenCalled();
     expect(mutationApi.post).not.toHaveBeenCalled();
     expect(mutationApi.put).not.toHaveBeenCalled();
+  });
+});
+
+describe("toolErrorSummary", () => {
+  it("returns the first bounded line of a failed tool's text", () => {
+    expect(toolErrorSummary({
+      content: [{ type: "text", text: "Hugging Face search failed: could not reach huggingface.co (ENOTFOUND).\nstack" }],
+    })).toBe("Hugging Face search failed: could not reach huggingface.co (ENOTFOUND).");
+    expect(toolErrorSummary({ content: [{ type: "text", text: "x".repeat(300) }] })).toHaveLength(200);
+    expect(toolErrorSummary({ content: [] })).toBeUndefined();
+    expect(toolErrorSummary(undefined)).toBeUndefined();
   });
 });
