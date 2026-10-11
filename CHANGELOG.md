@@ -4,7 +4,17 @@
 
 ### Added
 
-- `tt cloud label export <job-id>` turns a reviewed teacher-labeling job into
+- The local agent runs teacher labeling for raw adapter data. With a TT token,
+  `prepare_label_job` proposes labeling a workspace `.jsonl` or `.csv` file;
+  approval pushes the spec (as `tt cloud push`), uploads the file and starts
+  the hosted job. `get_label_job` and `list_label_jobs` report status, percent
+  done and cost. `prepare_label_download` proposes writing a finished job as
+  local training files, and the agent then proposes the `dataset_prebuilt`
+  edit. Approval re-checks that the file and spec are unchanged. A job that
+  was refused (for example for insufficient credits) is reported as failed,
+  not unknown. The next turn tells the model the new job ID or the downloaded
+  paths. Approval failures now show their reason.
+- `tt cloud label download <job-id>` (alias `export`) turns a reviewed job into
   local `training.jsonl` and `validation.jsonl` chat files for
   `dataset_prebuilt`, using the local adapter spec's system message. It keeps
   accepted and edited rows (unreviewed drafts only with `--include-unreviewed`),
@@ -31,7 +41,6 @@
   uploading: empty inputs, empty or non-string outputs, the 50,000-row and 50 MB
   limits. A `.json` file with JSON Lines content is no longer rejected after
   validation. `tt cloud label watch` retries transient network and server errors.
-- The local agent now knows the teacher-labeling workflow for raw data.
 
 ## [0.22.1] - 2026-10-10
 

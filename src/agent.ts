@@ -147,6 +147,10 @@ function approvalQuestion(action: AgentAction): string {
     case "create_spec":
     case "update_spec":
       return "Apply this change to your TT account?";
+    case "start_label_job":
+      return "Upload this file and start labeling (uses TT credits)?";
+    case "download_label_job":
+      return "Download the labeled data?";
     default:
       return "Approve this action?";
   }
@@ -160,9 +164,28 @@ function completionMessage(action: AgentAction | null): string {
       return "Project created.";
     case "run_local_pipeline":
       return "Dry-run preview finished.";
+    case "start_label_job":
+      return "Labeling started. It runs in the cloud; ask me for its status any time.";
+    case "download_label_job":
+      return "Labeled data downloaded.";
     default:
       return "Approved action completed.";
   }
+}
+
+function labelingCompletionDetail(operation: string | undefined, output: unknown): string | undefined {
+  if (!isRecord(output)) return undefined;
+  if (operation === "start_label_job" && typeof output.job_id === "string") {
+    const cents = typeof output.estimated_cost_cents === "number"
+      ? ` · est. $${(output.estimated_cost_cents / 100).toFixed(2)}`
+      : "";
+    return `Job ${output.job_id}${cents}`;
+  }
+  if (operation === "download_label_job" && isRecord(output.dataset_prebuilt)) {
+    return `${String(output.training_rows ?? "?")} training · ${String(output.validation_rows ?? "?")} validation rows → `
+      + `${String(output.dataset_prebuilt.training)}, ${String(output.dataset_prebuilt.validation)}`;
+  }
+  return undefined;
 }
 
 function toolLabel(payload: Record<string, unknown>): string {
@@ -421,17 +444,24 @@ export class TunedTensorAgentSession {
 
     if (event.type === "action_result") {
       if (payload.status === "outcome_unknown") {
+        const operation = this.runningAction?.operation;
+        const target = operation === "start_label_job"
+          ? "labeling jobs (tt cloud label list)"
+          : operation === "download_label_job" ? "download directory" : "remote spec";
         this.writeErrorLine(
-          "Approved action outcome is unknown. It cannot be retried; inspect the remote spec before preparing another action.",
+          `Approved action outcome is unknown. It cannot be retried; inspect the ${target} before preparing another action.`,
         );
         return;
       }
       const failed = payload.status === "failed" || Boolean(payload.error);
       if (failed) {
-        this.writeErrorLine("Approved action failed.");
+        const reason = stringValue(payload.error);
+        this.writeErrorLine(`Approved action failed${reason ? `: ${sanitizeTerminalText(reason)}` : "."}`);
         return;
       }
       this.writeStatus(`${successMark()} ${completionMessage(this.runningAction)}`);
+      const detail = labelingCompletionDetail(this.runningAction?.operation, payload.output);
+      if (detail) this.writeStatus(chalk.dim(`${GUTTER}${sanitizeTerminalText(detail)}`));
       return;
     }
 

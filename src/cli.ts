@@ -37,6 +37,9 @@ import { registerTopupCommands } from "./commands/topup.js";
 import { registerPublishCommand } from "./commands/publish.js";
 import { registerCloudCommands, registerUsageCommand } from "./commands/cloud.js";
 import { registerUpgradeCommand } from "./commands/upgrade.js";
+import { beforeLabelingStarts, downloadLabelingJob, startLabelingJob } from "./commands/label.js";
+import { pushLocalSpec } from "./commands/push.js";
+import type { AgentLabelingExecutor } from "./agent-labeling.js";
 import {
   cachedCliUpdate,
   checkForCliUpdate,
@@ -65,6 +68,36 @@ function createAccountMutationApi(opts: api.ClientOpts): AgentMutationApi {
     get: async (path) => api.get(path, undefined, opts),
     post: async (path, body, guard) => api.post(path, body, opts, headers(guard)),
     put: async (path, body, guard) => api.put(path, body, opts, headers(guard)),
+  };
+}
+
+export function createAccountLabelingExecutor(opts: api.ClientOpts): AgentLabelingExecutor {
+  return {
+    start: async (args) => {
+      const { data: spec, created } = await beforeLabelingStarts(() => pushLocalSpec(args.specPath, opts));
+      const job = await startLabelingJob({
+        file: args.file,
+        format: args.format,
+        specId: spec.id,
+        inputColumn: args.inputColumn,
+        name: args.name ?? undefined,
+      }, opts);
+      return {
+        job_id: job.id,
+        name: job.name,
+        status: job.status,
+        estimated_cost_cents: job.est_cost_cents,
+        cloud_spec_id: spec.id,
+        cloud_spec_created: created,
+      };
+    },
+    download: async (args) => await downloadLabelingJob({
+      jobId: args.jobId,
+      specPath: args.specPath,
+      includeUnreviewed: args.includeUnreviewed,
+      validationRatio: args.validationRatio,
+      force: args.overwrite,
+    }, opts),
   };
 }
 
@@ -106,6 +139,7 @@ export interface CliRuntime {
   agentStore?: LocalAgentStore;
   agentToolApi?: AgentToolApi;
   agentMutationApi?: AgentMutationApi;
+  agentLabeling?: AgentLabelingExecutor;
 }
 
 async function createDefaultAgentClient(
@@ -141,6 +175,7 @@ async function createDefaultAgentClient(
     mutationApi,
     cloudEnabled: Boolean(secret),
     cloudContext: secret ? createCloudActionContext(accountOpts.baseUrl, secret) : undefined,
+    labeling: runtime.agentLabeling ?? (secret ? createAccountLabelingExecutor(accountOpts) : undefined),
     runPipelineCommand: async (args, options) => await (
       runtime.runSelfCommand ?? runSelfCommand
     )(args, {

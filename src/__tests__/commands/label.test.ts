@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   buildLabelExport,
+  LabelingNotStartedError,
   parseCsvHeader,
+  startLabelingJob,
   registerLabelCommands,
   validateUnlabeledFile,
   withTransientRetry,
@@ -228,6 +230,34 @@ describe("label upload (.json)", () => {
   });
 });
 
+describe("startLabelingJob", () => {
+  const file = join(tmpdir(), `tt-label-start-${process.pid}.jsonl`);
+  afterEach(() => rmSync(file, { force: true }));
+
+  it("reports refusals before or at job creation as not started", async () => {
+    writeFileSync(file, '{"input":"a"}\n');
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+    vi.mocked(client.post)
+      .mockResolvedValueOnce({ data: { path: "s3://b/x.jsonl", upload_url: "https://s3/u", method: "PUT", source_format: "jsonl" } })
+      .mockRejectedValueOnce(new client.ApiError(402, "insufficient_credits", "Insufficient credits"));
+    await expect(startLabelingJob({ file, format: "jsonl", specId: SPEC_UUID }, {}))
+      .rejects.toBeInstanceOf(LabelingNotStartedError);
+
+    vi.mocked(client.post)
+      .mockResolvedValueOnce({ data: { path: "s3://b/x.jsonl", upload_url: "https://s3/u", method: "PUT", source_format: "jsonl" } })
+      .mockRejectedValueOnce(new TypeError("fetch failed"));
+    const lost = startLabelingJob({ file, format: "jsonl", specId: SPEC_UUID }, {});
+    await expect(lost).rejects.toThrow("fetch failed");
+    await expect(lost).rejects.not.toBeInstanceOf(LabelingNotStartedError);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 403, statusText: "Forbidden" }));
+    vi.mocked(client.post)
+      .mockResolvedValueOnce({ data: { path: "s3://b/x.jsonl", upload_url: "https://s3/u", method: "PUT", source_format: "jsonl" } });
+    await expect(startLabelingJob({ file, format: "jsonl", specId: SPEC_UUID }, {}))
+      .rejects.toThrow(LabelingNotStartedError);
+  });
+});
+
 describe("withTransientRetry", () => {
   it("retries network and 5xx failures but not client errors", async () => {
     const flaky = vi.fn()
@@ -311,7 +341,7 @@ describe("buildLabelExport", () => {
   });
 });
 
-describe("label export", () => {
+describe("label download", () => {
   let dir: string;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "tt-label-export-"));
@@ -353,11 +383,12 @@ describe("label export", () => {
     const printed = vi.mocked(console.log).mock.calls.map((call) => String(call[0])).join("\n");
     expect(printed).toContain('"training": "./datasets/support-tickets/training.jsonl"');
 
+    vi.mocked(client.get).mockClear();
     vi.mocked(client.get)
-      .mockResolvedValueOnce({ data: { ...mockJob, status: "awaiting_review", row_count: 12 } })
-      .mockResolvedValueOnce({ data: rows, meta: { page: 1, per_page: 100, total: 12 } });
-    await expect(buildProgram().parseAsync(["node", "tt", "label", "export", JOB_UUID, "--spec", specPath]))
+      .mockResolvedValueOnce({ data: { ...mockJob, status: "awaiting_review", row_count: 12 } });
+    await expect(buildProgram().parseAsync(["node", "tt", "label", "download", JOB_UUID, "--spec", specPath]))
       .rejects.toThrow(/already exists.*--force/);
+    expect(client.get).not.toHaveBeenCalledWith(`/labeling-jobs/${JOB_UUID}/rows`, expect.anything(), expect.anything());
   });
 
   it("refuses unfinished jobs and non-adapter specs", async () => {

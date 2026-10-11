@@ -428,7 +428,7 @@ export function buildLabelExport(
   };
 }
 
-function readLocalAdapterSpec(specPath: string): { systemMessage: string } {
+export function readLocalAdapterSpec(specPath: string): { systemMessage: string } {
   if (!existsSync(specPath)) {
     throw new Error(`Spec file not found: ${specPath}. Run \`tt init\` or pass --spec <path>.`);
   }
@@ -470,6 +470,194 @@ function toSpecRelative(specPath: string, target: string): string {
   return path.startsWith(".") ? path : `./${path}`;
 }
 
+export const INSTRUCTIONS_MISMATCH_WARNING = "The teacher labeled under different instructions than this spec's "
+  + "system_prompt, guidelines and constraints. Check that the labels still fit before training.";
+
+/** A labeling job was certainly not created, so preparing it again is safe. */
+export class LabelingNotStartedError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, { cause });
+    this.name = "LabelingNotStartedError";
+  }
+}
+
+/** Run a step that precedes job creation, or job creation the service refused. */
+export async function beforeLabelingStarts<T>(step: () => Promise<T>): Promise<T> {
+  try {
+    return await step();
+  } catch (error) {
+    if (error instanceof LabelingNotStartedError) throw error;
+    throw new LabelingNotStartedError(error instanceof Error ? error.message : String(error), error);
+  }
+}
+
+/** Upload a validated source file and start a hosted labeling job under a cloud spec. */
+export async function startLabelingJob(
+  args: { file: string; format: "jsonl" | "csv"; specId: string; inputColumn?: string | null; name?: string },
+  opts: ClientOpts,
+): Promise<LabelingJob> {
+  const fileBytes = readFileSync(args.file);
+  const contentType = args.format === "csv" ? "text/csv" : "application/jsonl";
+  const uploadUrl = await beforeLabelingStarts(async () => {
+    const { data } = await post<UploadUrl>(
+      "/labeling-jobs/upload-url",
+      {
+        // The service stores JSON Lines under .jsonl; a validated .json file is JSONL.
+        filename: basename(args.file).replace(/\.json$/i, ".jsonl"),
+        size: fileBytes.byteLength,
+        contentType,
+      },
+      opts,
+    );
+    const uploadRes = await fetch(data.upload_url, {
+      method: data.method,
+      headers: data.headers ?? { "Content-Type": contentType },
+      body: new Blob([fileBytes], { type: contentType }),
+    });
+    if (!uploadRes.ok) {
+      throw new Error(`Upload failed: ${uploadRes.status} ${uploadRes.statusText}`);
+    }
+    return data;
+  });
+
+  try {
+    const { data: job } = await post<LabelingJob>(
+      "/labeling-jobs",
+      {
+        path: uploadUrl.path,
+        name: args.name?.trim() || basename(args.file).replace(/\.(jsonl|json|csv)$/i, ""),
+        behavior_spec_id: args.specId,
+        source_format: args.format,
+        input_column: args.inputColumn ?? null,
+      },
+      opts,
+    );
+    return job;
+  } catch (error) {
+    // The service validates, reserves credits and creates the job in one
+    // request; a 4xx (bad file, insufficient credits, reused upload) creates nothing.
+    if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+      throw new LabelingNotStartedError(error.message, error);
+    }
+    throw error;
+  }
+}
+
+export function labelingDownloadDir(specPath: string, job: { id: string; name: string }, outDir?: string): string {
+  const safeName = job.name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|-+$/g, "") || shortId(job.id);
+  return resolve(outDir ?? resolve(dirname(resolve(specPath)), "datasets", safeName));
+}
+
+export function labelingDownloadFiles(outDir: string) {
+  return {
+    training: resolve(outDir, "training.jsonl"),
+    validation: resolve(outDir, "validation.jsonl"),
+    manifest: resolve(outDir, "export.json"),
+  };
+}
+
+/** Fetch every row of a job, retrying transient failures, and check none were missed. */
+export async function fetchLabelingRows(
+  jobId: string,
+  opts: ClientOpts,
+  onProgress?: (fetched: number, total: number) => void,
+): Promise<LabelingRow[]> {
+  const PER_PAGE = 100;
+  const rows: LabelingRow[] = [];
+  let total: number | undefined;
+  for (let page = 1; ; page += 1) {
+    const { data, meta } = await withTransientRetry(() => get<LabelingRow[]>(
+      `/labeling-jobs/${jobId}/rows`,
+      { page, per_page: PER_PAGE },
+      opts,
+    ));
+    rows.push(...data);
+    total = meta?.total ?? total;
+    if (total !== undefined) onProgress?.(rows.length, total);
+    if (data.length < PER_PAGE) break;
+  }
+  if (total !== undefined && rows.length !== total) {
+    throw new Error(`Fetched ${rows.length} of ${total} rows; rows changed during download. Retry.`);
+  }
+  return rows;
+}
+
+export interface LabelDownloadArgs {
+  jobId: string;
+  specPath: string;
+  outDir?: string;
+  includeUnreviewed: boolean;
+  validationRatio: number;
+  force: boolean;
+  onProgress?: (fetched: number, total: number) => void;
+}
+
+/**
+ * Download a finished labeling job as local chat JSONL under the local adapter
+ * spec's system message, plus an export.json manifest.
+ */
+export async function downloadLabelingJob(args: LabelDownloadArgs, opts: ClientOpts) {
+  const ratio = args.validationRatio;
+  if (!Number.isFinite(ratio) || ratio < 0.05 || ratio > 0.5) {
+    throw new Error("The validation ratio must be a number between 0.05 and 0.5.");
+  }
+  const { systemMessage } = readLocalAdapterSpec(args.specPath);
+  const { data: job } = await withTransientRetry(() => get<LabelingJob & { system_message?: string }>(
+    `/labeling-jobs/${args.jobId}`,
+    undefined,
+    opts,
+  ));
+  if (job.status !== "awaiting_review" && job.status !== "promoted") {
+    throw new Error(
+      `Labeling job is "${job.status}"; download needs a finished job (awaiting_review or promoted).`,
+    );
+  }
+  const outDir = labelingDownloadDir(args.specPath, job, args.outDir);
+  const files = labelingDownloadFiles(outDir);
+  const existing = Object.values(files).filter((path) => existsSync(path));
+  if (existing.length > 0 && !args.force) {
+    throw new Error(`${existing[0]} already exists. Overwrite it explicitly (--force) or choose another directory.`);
+  }
+
+  const rows = await fetchLabelingRows(args.jobId, opts, args.onProgress);
+  const result = buildLabelExport(rows, {
+    includeUnreviewed: args.includeUnreviewed,
+    validationRatio: ratio,
+  });
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(files.training, chatJsonl(systemMessage, result.training));
+  writeFileSync(files.validation, chatJsonl(systemMessage, result.validation));
+  // The teacher prompt starts with the hosted spec's compiled instructions
+  // and may append few-shot examples after them.
+  const collapse = (value: string) => value.replace(/\s+/g, " ").trim();
+  const instructionsMatch = typeof job.system_message !== "string"
+    || collapse(job.system_message).startsWith(collapse(systemMessage));
+  const manifest = {
+    labeling_job_id: job.id,
+    labeling_job_name: job.name,
+    teacher_model: job.teacher_model,
+    exported_at: new Date().toISOString(),
+    spec: toSpecRelative(args.specPath, args.specPath),
+    system_message_sha256: createHash("sha256").update(systemMessage).digest("hex"),
+    teacher_instructions_match_spec: instructionsMatch,
+    include_unreviewed: args.includeUnreviewed,
+    validation_ratio: ratio,
+    training_rows: result.training.length,
+    validation_rows: result.validation.length,
+    ...result.stats,
+  };
+  writeFileSync(files.manifest, JSON.stringify(manifest, null, 2) + "\n");
+  return {
+    out_dir: outDir,
+    files,
+    manifest,
+    dataset_prebuilt: {
+      training: toSpecRelative(args.specPath, files.training),
+      validation: toSpecRelative(args.specPath, files.validation),
+    },
+  };
+}
+
 export function registerLabelCommands(parent: Command) {
   const label = parent
     .command("label")
@@ -497,42 +685,13 @@ export function registerLabelCommands(parent: Command) {
         if (warnings.length > 5) console.error(`Warning: ...and ${warnings.length - 5} more`);
       }
       const specId = await resolveSpecId(cmdOpts.spec, opts);
-      const name =
-        cmdOpts.name || basename(file).replace(/\.(jsonl|json|csv)$/i, "");
-
-      const fileBytes = readFileSync(file);
-      const contentType = format === "csv" ? "text/csv" : "application/jsonl";
-      const { data: uploadUrl } = await post<UploadUrl>(
-        "/labeling-jobs/upload-url",
-        {
-          // The service stores JSON Lines under .jsonl; a validated .json file is JSONL.
-          filename: basename(file).replace(/\.json$/i, ".jsonl"),
-          size: statSync(file).size,
-          contentType,
-        },
-        opts,
-      );
-
-      const uploadRes = await fetch(uploadUrl.upload_url, {
-        method: uploadUrl.method,
-        headers: uploadUrl.headers ?? { "Content-Type": contentType },
-        body: new Blob([fileBytes], { type: contentType }),
-      });
-      if (!uploadRes.ok) {
-        throw new Error(`Upload failed: ${uploadRes.status} ${uploadRes.statusText}`);
-      }
-
-      const { data: job } = await post<LabelingJob & { teacher_row_count: number }>(
-        "/labeling-jobs",
-        {
-          path: uploadUrl.path,
-          name,
-          behavior_spec_id: specId,
-          source_format: format,
-          input_column: cmdOpts.inputColumn ?? null,
-        },
-        opts,
-      );
+      const job = await startLabelingJob({
+        file,
+        format,
+        specId,
+        inputColumn: cmdOpts.inputColumn,
+        name: cmdOpts.name,
+      }, opts);
 
       if (!cmdOpts.watch) {
         if (isJsonMode()) return printJson(job);
@@ -549,7 +708,7 @@ export function registerLabelCommands(parent: Command) {
         `Labeling ${finished.status === "awaiting_review" ? "complete" : finished.status}: ${finished.labeled_count}/${finished.row_count} rows labeled.`,
       );
       console.log(
-        `Review with \`tt cloud label rows ${shortId(job.id)} --status labeled\`, then \`tt cloud label export ${shortId(job.id)}\` to write local training files.`,
+        `Review with \`tt cloud label rows ${shortId(job.id)} --status labeled\`, then \`tt cloud label download ${shortId(job.id)}\` to write local training files.`,
       );
     });
 
@@ -771,121 +930,51 @@ export function registerLabelCommands(parent: Command) {
         `Dataset created: ${data.name} (${shortId(data.id)}) — ${data.row_count} rows.`,
       );
       console.log(
-        `Write local training files with \`tt cloud label export ${shortId(jobId)}\`.`,
+        `Write local training files with \`tt cloud label download ${shortId(jobId)}\`.`,
       );
     });
 
   label
-    .command("export")
-    .description("Write reviewed rows as local training and validation chat JSONL for tt pipeline run")
+    .command("download")
+    .alias("export")
+    .description("Download reviewed rows as local training and validation files for tt pipeline run")
     .argument("<id>", "Labeling job ID (full UUID or 4+ char prefix)")
     .option("--spec <path>", "Local adapter spec whose system message the rows train under", "tunedtensor.json")
     .option("-o, --out-dir <dir>", "Output directory (default: datasets/<job-name> next to the spec)")
     .option("--validation-ratio <ratio>", "Share of unique inputs held out for validation (0.05-0.5)", "0.1")
     .option("--include-unreviewed", "Also include teacher drafts nobody accepted or edited")
-    .option("--force", "Overwrite existing export files")
+    .option("--force", "Overwrite existing files")
     .action(async (id: string, cmdOpts) => {
       const opts = parent.optsWithGlobals() as ClientOpts;
-      const ratio = Number(cmdOpts.validationRatio);
-      if (!Number.isFinite(ratio) || ratio < 0.05 || ratio > 0.5) {
-        throw new Error("--validation-ratio must be a number between 0.05 and 0.5");
-      }
-      const specPath = cmdOpts.spec as string;
-      const { systemMessage } = readLocalAdapterSpec(specPath);
       const jobId = await resolveLabelingJobId(id, opts);
-      const { data: job } = await withTransientRetry(() => get<LabelingJob & { system_message?: string }>(
-        `/labeling-jobs/${jobId}`,
-        undefined,
-        opts,
-      ));
-      if (job.status !== "awaiting_review" && job.status !== "promoted") {
-        throw new Error(
-          `Labeling job is "${job.status}"; export needs a finished job (awaiting_review or promoted).`,
-        );
-      }
-
-      const PER_PAGE = 100;
-      const rows: LabelingRow[] = [];
-      let total: number | undefined;
-      for (let page = 1; ; page += 1) {
-        const { data, meta } = await withTransientRetry(() => get<LabelingRow[]>(
-          `/labeling-jobs/${jobId}/rows`,
-          { page, per_page: PER_PAGE },
-          opts,
-        ));
-        rows.push(...data);
-        total = meta?.total ?? total;
-        if (!isJsonMode() && meta?.total) {
-          process.stderr.write(`\rFetching rows ${rows.length}/${meta.total}   `);
-        }
-        if (data.length < PER_PAGE) break;
-      }
-      if (!isJsonMode()) process.stderr.write("\n");
-      if (total !== undefined && rows.length !== total) {
-        throw new Error(`Fetched ${rows.length} of ${total} rows; rows changed during export. Retry.`);
-      }
-
-      const result = buildLabelExport(rows, {
+      const result = await downloadLabelingJob({
+        jobId,
+        specPath: cmdOpts.spec as string,
+        outDir: cmdOpts.outDir,
         includeUnreviewed: Boolean(cmdOpts.includeUnreviewed),
-        validationRatio: ratio,
-      });
-      const safeName = job.name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|-+$/g, "") || shortId(job.id);
-      const outDir = resolve(cmdOpts.outDir ?? resolve(dirname(resolve(specPath)), "datasets", safeName));
-      const files = {
-        training: resolve(outDir, "training.jsonl"),
-        validation: resolve(outDir, "validation.jsonl"),
-        manifest: resolve(outDir, "export.json"),
-      };
-      const existing = Object.values(files).filter((path) => existsSync(path));
-      if (existing.length > 0 && !cmdOpts.force) {
-        throw new Error(`${existing[0]} already exists. Pass --force to overwrite it.`);
-      }
-      mkdirSync(outDir, { recursive: true });
-      writeFileSync(files.training, chatJsonl(systemMessage, result.training));
-      writeFileSync(files.validation, chatJsonl(systemMessage, result.validation));
-      // The teacher prompt starts with the hosted spec's compiled instructions
-      // and may append few-shot examples after them.
-      const collapse = (value: string) => value.replace(/\s+/g, " ").trim();
-      const instructionsMatch = typeof job.system_message !== "string"
-        || collapse(job.system_message).startsWith(collapse(systemMessage));
-      const manifest = {
-        labeling_job_id: job.id,
-        labeling_job_name: job.name,
-        teacher_model: job.teacher_model,
-        exported_at: new Date().toISOString(),
-        spec: toSpecRelative(specPath, specPath),
-        system_message_sha256: createHash("sha256").update(systemMessage).digest("hex"),
-        teacher_instructions_match_spec: instructionsMatch,
-        include_unreviewed: Boolean(cmdOpts.includeUnreviewed),
-        validation_ratio: ratio,
-        training_rows: result.training.length,
-        validation_rows: result.validation.length,
-        ...result.stats,
-      };
-      writeFileSync(files.manifest, JSON.stringify(manifest, null, 2) + "\n");
-      const datasetPrebuilt = {
-        training: toSpecRelative(specPath, files.training),
-        validation: toSpecRelative(specPath, files.validation),
-      };
+        validationRatio: Number(cmdOpts.validationRatio),
+        force: Boolean(cmdOpts.force),
+        onProgress: isJsonMode()
+          ? undefined
+          : (fetched, total) => process.stderr.write(`\rFetching rows ${fetched}/${total}   `),
+      }, opts);
+      if (!isJsonMode()) process.stderr.write("\n");
 
-      if (isJsonMode()) return printJson({ ...manifest, files, dataset_prebuilt: datasetPrebuilt });
+      if (isJsonMode()) return printJson(result);
+      const { manifest } = result;
       printSuccess(
-        `Exported ${result.training.length} training and ${result.validation.length} validation rows to ${outDir}`,
+        `Downloaded ${manifest.training_rows} training and ${manifest.validation_rows} validation rows to ${result.out_dir}`,
       );
-      const s = result.stats;
       console.log(
-        `Skipped: ${s.skipped_unreviewed} unreviewed · ${s.skipped_rejected_or_failed} rejected/failed/pending · `
-        + `${s.skipped_blocked} blocked · ${s.skipped_empty_output} empty · `
-        + `${s.dropped_duplicate_inputs} duplicate · ${s.dropped_conflicting_inputs} conflicting-label rows`,
+        `Skipped: ${manifest.skipped_unreviewed} unreviewed · ${manifest.skipped_rejected_or_failed} rejected/failed/pending · `
+        + `${manifest.skipped_blocked} blocked · ${manifest.skipped_empty_output} empty · `
+        + `${manifest.dropped_duplicate_inputs} duplicate · ${manifest.dropped_conflicting_inputs} conflicting-label rows`,
       );
-      if (!instructionsMatch) {
-        console.error(
-          "Warning: the teacher labeled under different instructions than this spec's system_prompt, guidelines and constraints. "
-          + "Check that the labels still fit before training.",
-        );
+      if (!manifest.teacher_instructions_match_spec) {
+        console.error(`Warning: ${INSTRUCTIONS_MISMATCH_WARNING}`);
       }
-      console.log(`\nAdd this to ${specPath}, then run \`tt pipeline run --spec ${specPath}\`:`);
-      console.log(JSON.stringify({ dataset_prebuilt: datasetPrebuilt }, null, 2));
+      console.log(`\nAdd this to ${cmdOpts.spec}, then run \`tt pipeline run --spec ${cmdOpts.spec}\`:`);
+      console.log(JSON.stringify({ dataset_prebuilt: result.dataset_prebuilt }, null, 2));
     });
 
   label

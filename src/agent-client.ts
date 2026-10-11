@@ -21,6 +21,9 @@ export interface AgentAction {
   method?: string;
   path?: string;
   cloud_context?: CloudActionContext;
+  /** Compact outcome of an approved action the model has not been told yet. */
+  result?: unknown;
+  result_reported?: boolean;
 }
 
 /** Non-secret binding of a local approval to one TT account credential and API origin. */
