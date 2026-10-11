@@ -71,7 +71,7 @@ export function registerUsageCommand(parent: Command): void {
         ["Usage reported", `${data.usage_reported_requests} / ${data.requests} requests`],
         ["Provider cost reported", data.provider_cost_usd === null ? "Unknown" : `$${data.provider_cost_usd.toFixed(6)}`],
         ["Cost coverage", `${data.cost_reported_requests} / ${data.requests} requests`],
-        ["Billing", "Included daily allowance"],
+        ["Billing", "Included allowance (weekly limit and daily requests)"],
       ]);
       console.log("\nEach model request, including tool follow-ups, uses the allowance. Failed and cancelled requests also count. When the weekly limit is used up, managed requests pause until the reset; your own provider key keeps working. BYO provider usage is reported by that provider.\nUse `tt balance` for cloud training credits.");
     });
