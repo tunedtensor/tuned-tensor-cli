@@ -330,10 +330,18 @@ function projectHuggingFaceResult(kind: HuggingFaceKind, value: unknown) {
   }).filter(([, entry]) => entry !== undefined)) as { id: string; downloads?: number; tags: string[] };
 }
 
-/** Distinct keywords from a multi-word query, longest first, for the per-term fallback. */
+/** Words that describe almost every repo and would drown out the topic. */
+const GENERIC_SEARCH_TERMS = new Set([
+  "corpus", "corpora", "data", "dataset", "datasets", "set", "raw", "unlabeled", "unlabelled",
+  "labeled", "labelled", "collection", "public", "open", "large", "small", "model", "models",
+  "the", "and", "for", "with",
+]);
+
+/** Distinct topical keywords from a multi-word query, longest first, for the per-term fallback. */
 export function huggingFaceSearchTerms(query: string): string[] {
-  const terms = query.toLowerCase().split(/[^a-z0-9._-]+/).filter((term) => term.length >= 3);
-  return [...new Set(terms)].sort((a, b) => b.length - a.length).slice(0, 3);
+  const terms = [...new Set(query.toLowerCase().split(/[^a-z0-9._-]+/).filter((term) => term.length >= 3))];
+  const topical = terms.filter((term) => !GENERIC_SEARCH_TERMS.has(term));
+  return (topical.length > 0 ? topical : terms).sort((a, b) => b.length - a.length).slice(0, 3);
 }
 
 const HUGGING_FACE_EMPTY_NOTE = "Hugging Face search matches every query word against repository names, not descriptions. "
@@ -356,7 +364,7 @@ async function searchHuggingFace(
   // as "raw email corpus" return nothing. Fall back to each keyword and rank
   // repos matching more of them first.
   const terms = huggingFaceSearchTerms(query);
-  if (terms.length < 2) {
+  if (terms.length === 0 || (terms.length === 1 && terms[0] === query.trim().toLowerCase())) {
     return { source: "huggingface.co", kind, query, results: [], note: HUGGING_FACE_EMPTY_NOTE };
   }
   const byId = new Map<string, NonNullable<ReturnType<typeof projectHuggingFaceResult>>>();

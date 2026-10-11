@@ -450,10 +450,9 @@ exit 1
 
   it("falls back to individual keywords when no repo name contains every word", async () => {
     const byQuery: Record<string, unknown[]> = {
-      "raw email corpus": [],
-      corpus: [{ id: "x/phishing-email-corpus", downloads: 5, tags: [] }, { id: "y/news-corpus", downloads: 900 }],
-      email: [{ id: "z/enron-emails", downloads: 50, tags: ["language:en"] }, { id: "x/phishing-email-corpus", downloads: 5 }],
-      raw: [],
+      "raw email support corpus": [],
+      support: [{ id: "x/support-email-tickets", downloads: 5, tags: [] }, { id: "y/support-chat", downloads: 900 }],
+      email: [{ id: "z/enron-emails", downloads: 50, tags: ["language:en"] }, { id: "x/support-email-tickets", downloads: 5 }],
     };
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const query = new URL(String(input)).searchParams.get("search")!;
@@ -464,16 +463,33 @@ exit 1
       fetchImpl: fetchImpl as unknown as typeof fetch,
     }).find((candidate) => candidate.name === "search_hugging_face")!;
 
-    const output = await search.execute("fallback", { kind: "dataset", query: "raw email corpus" });
+    const output = await search.execute("fallback", { kind: "dataset", query: "raw email support corpus" });
     const details = output.details as { results: Array<{ id: string }>; match?: string; note?: string };
 
     expect(fetchImpl.mock.calls.map(([input]) => new URL(String(input)).searchParams.get("search")))
-      .toEqual(["raw email corpus", "corpus", "email", "raw"]);
+      .toEqual(["raw email support corpus", "support", "email"]);
     expect(details.match).toBe("any_keyword");
     expect(details.results.map((item) => item.id)).toEqual([
-      "x/phishing-email-corpus", "y/news-corpus", "z/enron-emails",
+      "x/support-email-tickets", "y/support-chat", "z/enron-emails",
     ]);
-    expect(details.note).toMatch(/match any of: corpus, email, raw/);
+    expect(details.note).toMatch(/match any of: support, email/);
+  });
+
+  it("drops generic words so a descriptive query searches its topic", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const query = new URL(String(input)).searchParams.get("search");
+      return new Response(JSON.stringify(query === "email" ? [{ id: "corbt/enron-emails" }] : []), { status: 200 });
+    });
+    const search = createTunedTensorTools(fakeApi(), {
+      localOnly: true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    }).find((candidate) => candidate.name === "search_hugging_face")!;
+
+    const output = await search.execute("topic", { kind: "dataset", query: "raw email corpus" });
+    expect(fetchImpl.mock.calls.map(([input]) => new URL(String(input)).searchParams.get("search")))
+      .toEqual(["raw email corpus", "email"]);
+    expect((output.details as { results: Array<{ id: string }> }).results.map((item) => item.id))
+      .toEqual(["corbt/enron-emails"]);
   });
 
   it("explains how to search when nothing matches", async () => {
