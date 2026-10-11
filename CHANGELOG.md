@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.23.0] - 2026-10-11
 
 ### Added
 
@@ -10,7 +10,6 @@
   `get_agent_usage` tool description mentions the weekly limit. Older servers
   retain daily-only billing guidance; missing weekly costs display as unknown,
   and weekly output explains that the total can include estimates.
-
 - The local agent runs teacher labeling for raw adapter data. With a TT token,
   `prepare_label_job` proposes labeling a workspace `.jsonl` or `.csv` file;
   approval pushes the spec (as `tt cloud push`), uploads the file and starts
@@ -35,6 +34,12 @@
 
 ### Fixed
 
+- The agent now explains adapter dataset setup and download commands, reuses
+  an existing dataset configuration, and asks for missing filenames, columns,
+  or revisions instead of inventing them. It distinguishes adapter JSONL
+  downloads from foundation and decision data workflows, and explains that
+  prefetch and real adapter runs can download files while dry-runs do not.
+  Workflow evaluations cover these command handoffs and engine boundaries.
 - Labeling approvals stay bound to the original workspace and downloaded
   data uses the approved spec and output directory. Uploads use the source
   bytes checked at approval, even if the file changes during the cloud spec
@@ -50,9 +55,9 @@
   (for example `ENOTFOUND`), rate limits say so, one retry absorbs transient
   network, 429 and 5xx failures, and the timeout is 10 seconds. Failed agent
   tools now show their reason in the terminal instead of only "failed".
-- `tt cloud label upload` checks the same rules the service enforces before
-  uploading: empty inputs, empty or non-string outputs, the 50,000-row and 50 MB
-  limits. A `.json` file with JSON Lines content is no longer rejected after
+- `tt cloud label upload` rejects invalid JSONL inputs and outputs, enforces
+  the 50,000-row JSONL limit and the 50 MB upload limit, and checks CSV column
+  selection before uploading. A `.json` file with JSON Lines content is no longer rejected after
   validation. `tt cloud label watch` retries transient network and server errors.
 
 ## [0.22.1] - 2026-10-10
