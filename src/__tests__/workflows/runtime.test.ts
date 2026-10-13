@@ -64,12 +64,34 @@ let trainedModelDir: string | undefined;
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "tt-workflow-"));
+  vi.stubEnv("TUNED_TENSOR_HOME", join(root, "tt-home"));
   regressGeneral = false;
   trainedPrompts = [];
   trainedModelDir = undefined;
   vi.mocked(runLoggedProcess).mockReset();
   vi.mocked(runLoggedProcess).mockImplementation(async (args) => {
     expect(args.command).toBe("uv");
+    if (args.stage === "model_prefetch") {
+      const input = await json(args.commandArgs[args.commandArgs.indexOf("--input") + 1]!);
+      const repository = join(args.env!.HF_HUB_CACHE!, "models--Qwen--Qwen3.5-2B");
+      const snapshot = join(repository, "snapshots", input.revision);
+      await mkdir(snapshot, { recursive: true });
+      await mkdir(join(repository, "blobs"), { recursive: true });
+      await writeFile(join(snapshot, "config.json"), JSON.stringify({
+        architectures: ["Qwen3_5ForConditionalGeneration"], model_type: "qwen3_5",
+        text_config: { model_type: "qwen3_5_text", hidden_size: 2048, num_hidden_layers: 24,
+          num_attention_heads: 8, num_key_value_heads: 2, intermediate_size: 6144, vocab_size: 248320 },
+      }));
+      await writeFile(join(snapshot, "tokenizer_config.json"), "{}");
+      await writeFile(join(snapshot, "tokenizer.json"), "{}");
+      await writeFile(join(snapshot, "model.safetensors"), "fixture base weights");
+      await writeFile(args.commandArgs[args.commandArgs.indexOf("--output") + 1]!, JSON.stringify({
+        ok: true, base_model: input.base_model, snapshot_revision: input.revision,
+        snapshot_path: snapshot, file_count: 4, model_cache: args.env!.HF_HOME,
+        hf_home: args.env!.HF_HOME, hub_cache: args.env!.HF_HUB_CACHE,
+      }));
+      return { exitCode: 0, stderr: "" };
+    }
     expect(args.env?.HF_HUB_OFFLINE).toBe("1");
     expect(args.env?.TRANSFORMERS_OFFLINE).toBe("1");
     if (args.logPath) await writeFile(args.logPath, "Simulated model process for workflow testing.\n");
@@ -108,6 +130,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -285,6 +308,10 @@ it("executes the approved adapter spec through CLI, dataset compiler, trainer pr
     const result = JSON.parse(String(log.mock.calls.at(-1)![0]));
     expect(result.spec.sha256).toBe((await inspectLocalSpec(root)).sha256);
     const calls = vi.mocked(runLoggedProcess).mock.calls.map(([args]) => args);
+    expect(calls[0]!.stage).toBe("model_prefetch");
+    const lock = await json(join(root, "tunedtensor.lock.json"));
+    expect(lock.base_model.repo).toBe("Qwen/Qwen3.5-2B");
+    expect(lock.base_model.files["model.safetensors"]).toMatch(/^sha256:/);
     const training = calls.find(args => args.stage === "training")!;
     const hp = await json(training.env!.TT_HYPERPARAMETERS_PATH!);
     expect(hp.n_epochs).toBe("3");

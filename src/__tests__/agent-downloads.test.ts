@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { approvePreparedAction } from "../agent-approval.js";
 import type { AgentAction } from "../agent-client.js";
 import { createTunedTensorTools, type AgentToolApi } from "../agent-tools.js";
+import { resolveProjectConfig } from "../local-runtime/project-workflow.js";
 
 const spec = {
   name: "Chat",
@@ -24,7 +25,7 @@ function workspace(document: unknown = spec): string {
   return root;
 }
 
-async function prepare(root: string, kind: "dataset" | "base_model"): Promise<AgentAction> {
+async function prepare(root: string, kind: "dataset" | "base_model", source?: Record<string, unknown>): Promise<AgentAction> {
   const api: AgentToolApi = {
     get: vi.fn(),
     postRead: vi.fn(),
@@ -32,9 +33,15 @@ async function prepare(root: string, kind: "dataset" | "base_model"): Promise<Ag
   };
   const tool = createTunedTensorTools(api, { workspaceRoot: root, localOnly: true })
     .find((candidate) => candidate.name === "prepare_download")!;
-  await tool.execute("download", { kind });
+  await tool.execute("download", { kind, ...(source ? { source } : {}) });
   return vi.mocked(api.propose).mock.calls[0]![0];
 }
+
+const approve = (action: AgentAction, root: string, runPipelineCommand: (...args: never[]) => unknown) =>
+  approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+    workspaceRoot: root,
+    runPipelineCommand: runPipelineCommand as never,
+  });
 
 describe("agent downloads", () => {
   it("prepares a dataset download and runs tt datasets prefetch only on approval", async () => {
@@ -56,7 +63,7 @@ describe("agent downloads", () => {
         workspaceRoot: root,
         runPipelineCommand,
       });
-      expect(runPipelineCommand).toHaveBeenCalledWith(["datasets", "prefetch", expect.stringContaining("tt-agent-prefetch-")], expect.objectContaining({ cwd: expect.any(String) }));
+      expect(runPipelineCommand).toHaveBeenCalledWith(["datasets", "prefetch", expect.stringContaining(".tt-agent-")], expect.objectContaining({ cwd: expect.any(String) }));
       expect(output).toMatchObject({ completed: true, kind: "dataset" });
       expect(action.status).toBe("completed");
     } finally {
@@ -74,7 +81,7 @@ describe("agent downloads", () => {
         workspaceRoot: root,
         runPipelineCommand,
       })).rejects.toThrow(/models prefetch tunedtensor\.json exited with code 1/);
-      expect(runPipelineCommand).toHaveBeenCalledWith(["models", "prefetch", expect.stringContaining("tt-agent-prefetch-")], expect.anything());
+      expect(runPipelineCommand).toHaveBeenCalledWith(["models", "prefetch", expect.stringContaining(".tt-agent-")], expect.anything());
       expect(action.status).toBe("failed");
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -96,6 +103,97 @@ describe("agent downloads", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("downloads a dataset the spec does not name without editing the spec", async () => {
+    const root = workspace();
+    try {
+      const before = readFileSync(join(root, "tunedtensor.json"), "utf8");
+      const action = await prepare(root, "dataset", { repo: "org/new-data", training: "train.jsonl", test: "test.jsonl" });
+      expect(action.preview).toMatchObject({
+        repo: "org/new-data",
+        revision: "latest (resolved by the download)",
+        files: { training: "train.jsonl", test: "test.jsonl" },
+        command: ["tt", "datasets", "prefetch", "./tunedtensor.json", "--repo", "org/new-data", "--training", "train.jsonl", "--test", "test.jsonl"],
+      });
+      const runner = vi.fn(async (args: string[]) => {
+        // The spec only supplies the cache location; the source comes from the flags.
+        expect(args.slice(3)).toEqual(["--repo", "org/new-data", "--training", "train.jsonl", "--test", "test.jsonl"]);
+        return { exitCode: 0, signal: null };
+      });
+      expect(await approve(action, root, runner)).toMatchObject({ completed: true, repo: "org/new-data" });
+      expect(runner).toHaveBeenCalledOnce();
+      expect(readFileSync(join(root, "tunedtensor.json"), "utf8")).toBe(before);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("downloads a model by repo even when the spec is a decision spec", async () => {
+    const root = workspace({ name: "Router", engine: "decision", base_model: "convaiinnovations/laya", decision: { type: "noul" }, examples: [] });
+    try {
+      const action = await prepare(root, "base_model", { repo: "org/other-model" });
+      expect(action.preview).toMatchObject({ base_model: "org/other-model", certified: false });
+      const runner = vi.fn(async (args: string[]) => {
+        // No adapter spec: a snapshot path that does not exist selects the default cache.
+        expect(existsSync(args[2]!)).toBe(false);
+        expect(args.slice(3)).toEqual(["--repo", "org/other-model"]);
+        return { exitCode: 0, signal: null };
+      });
+      await approve(action, root, runner);
+      expect(runner).toHaveBeenCalledOnce();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("returns the revision from this download's report for a follow-up spec edit", async () => {
+    const root = workspace();
+    try {
+      const revision = "1".repeat(40);
+      const action = await prepare(root, "dataset", { repo: "org/data", training: "train.jsonl", revision });
+      const runner = vi.fn(async (_args: string[], options: { captureJson?: boolean }) => {
+        expect(options.captureJson).toBe(true);
+        return { exitCode: 0, stdout: JSON.stringify({ repo: "org/data", revision, snapshot_path: "/cache/snapshot", files: { training: { path: "train.jsonl" } } }) };
+      });
+      expect(await approve(action, root, runner)).toMatchObject({ revision, files: ["train.jsonl"], snapshot_path: "/cache/snapshot" });
+      const wrong = await prepare(root, "base_model", { repo: "org/model", revision });
+      await expect(approve(wrong, root, vi.fn(async () => ({ exitCode: 0, stdout: JSON.stringify({ base_model: "org/model", snapshot_revision: "2".repeat(40) }) })))).rejects.toThrow(/different revision/);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("downloads a source before a spec exists, and refuses a spec added after review", async () => {
+    const root = workspace();
+    try {
+      rmSync(join(root, "tunedtensor.json"));
+      const source = { repo: "org/data", training: "train.jsonl" };
+      const action = await prepare(root, "dataset", source);
+      expect(await approve(action, root, vi.fn(async () => ({ exitCode: 0 })))).toMatchObject({ completed: true });
+      expect(existsSync(join(root, "tunedtensor.json"))).toBe(false);
+      const stale = await prepare(root, "dataset", source);
+      writeFileSync(join(root, "tunedtensor.json"), JSON.stringify(spec));
+      const runner = vi.fn();
+      await expect(approve(stale, root, runner)).rejects.toThrow(/spec changed/);
+      expect(runner).not.toHaveBeenCalled();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("uses the sealed cache configuration despite a legacy config beside the snapshot", async () => {
+    const root = workspace();
+    try {
+      writeFileSync(join(root, "local-runner.json"), JSON.stringify({ paths: { modelCache: "./reviewed-cache" } }));
+      const action = await prepare(root, "dataset");
+      const runner = vi.fn(async (args: string[]) => {
+        writeFileSync(join(root, "local-runner.json"), JSON.stringify({ paths: { modelCache: "./changed-cache" } }));
+        expect((await resolveProjectConfig(args[2]!)).config.paths.modelCache).toBe(join(root, "reviewed-cache"));
+        return { exitCode: 0 };
+      });
+      await approve(action, root, runner);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("rejects a dataset source without a training file", async () => {
+    const root = workspace();
+    try {
+      await expect(prepare(root, "dataset", { repo: "org/new-data" })).rejects.toThrow(/source\.training/);
+      await expect(prepare(root, "dataset", { repo: "org/new-data", training: "../escape.jsonl" })).rejects.toThrow(/inside the repo/);
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   it("explains when there is nothing to download", async () => {

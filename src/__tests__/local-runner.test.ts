@@ -125,6 +125,19 @@ async function testRoot(): Promise<string> {
 }
 
 describe("runLocalCommand", () => {
+  it("forwards a direct download even when the workspace spec is invalid JSON", async () => {
+    const root = await testRoot();
+    const entrypoint = join(root, "download.mjs");
+    await writeFile(entrypoint, 'console.log(JSON.stringify({ args: process.argv.slice(2) }));');
+    await writeFile(join(root, "tunedtensor.json"), "{unfinished");
+    const result = await runLocalCommand(["datasets", "prefetch", "--repo", "org/data", "--training", "train.jsonl"], {
+      entrypoint, cwd: root, jsonMode: true,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.json).toMatchObject({ args: ["datasets", "prefetch", "--repo", "org/data", "--training", "train.jsonl"] });
+    expect(await readFile(join(root, "tunedtensor.json"), "utf8")).toBe("{unfinished");
+  });
+
   it("forwards the complete argument vector and numeric exit code", async () => {
     const root = await testRoot();
     const entrypoint = await fakeEntrypoint(root);

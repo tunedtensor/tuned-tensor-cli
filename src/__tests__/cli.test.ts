@@ -45,6 +45,17 @@ describe("extractPassthroughOptions", () => {
 });
 
 describe("unified command routing", () => {
+  it("captures the approved download's JSON while preserving its exit status", async () => {
+    const root = mkdtempSync(join(tmpdir(), "tt-command-json-"));
+    try {
+      const entrypoint = join(root, "report.cjs");
+      writeFileSync(entrypoint, 'console.log(JSON.stringify({ args: process.argv.slice(2), revision: "abc" }));');
+      const result = await runSelfCommand(["datasets", "prefetch"], { entrypoint, captureJson: true });
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout!)).toEqual({ args: ["--json", "datasets", "prefetch"], revision: "abc" });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it("terminates a self command when an approved pipeline is interrupted", async () => {
     const controller = new AbortController();
     const pending = runSelfCommand(

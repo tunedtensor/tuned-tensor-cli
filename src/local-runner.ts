@@ -60,6 +60,11 @@ interface SpecArgument {
 
 const VALUE_OPTIONS = new Set([
   "--config",
+  "--repo",
+  "--revision",
+  "--training",
+  "--validation",
+  "--test",
   "--name",
   "--model",
   "--output",
@@ -219,8 +224,18 @@ async function projectSpecArguments(
     };
   }
 
-  const raw = JSON.parse(await readFile(sourcePath, "utf8")) as unknown;
+  const source = await readFile(sourcePath, "utf8");
+  const directDownload = ["models", "datasets"].includes(args[0] ?? "") && args[1] === "prefetch"
+    && args.some((arg) => arg === "--repo" || arg.startsWith("--repo="));
+  let raw: unknown;
+  try {
+    raw = JSON.parse(source);
+  } catch (error) {
+    if (!directDownload) throw error;
+    return { args, droppedSpecKeys: [], pathReplacements: [], cleanup: async () => {} };
+  }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    if (directDownload) return { args, droppedSpecKeys: [], pathReplacements: [], cleanup: async () => {} };
     throw new Error(`${sourcePath} must contain a JSON object.`);
   }
   const body = raw as Record<string, unknown>;

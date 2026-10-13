@@ -108,10 +108,12 @@ export interface SelfCommandOptions {
   env?: NodeJS.ProcessEnv;
   entrypoint?: string;
   signal?: AbortSignal;
+  captureJson?: boolean;
 }
 
 export interface SelfCommandResult extends ShellCommandResult {
   signal: NodeJS.Signals | null;
+  stdout?: string;
 }
 
 export type SelfCommandRunner = (
@@ -185,6 +187,7 @@ async function createDefaultAgentClient(
       env,
       entrypoint: runtime.argv?.[1],
       signal: options.signal,
+      ...(options.captureJson ? { captureJson: true } : {}),
     }),
     createAgent: runtime.createPiAgent,
   });
@@ -265,12 +268,17 @@ export async function runSelfCommand(
   }
 
   return await new Promise<SelfCommandResult>((resolve, reject) => {
-    const child = spawn(process.execPath, [entrypoint, ...args], {
+    const child = spawn(process.execPath, [entrypoint, ...(options.captureJson ? ["--json"] : []), ...args], {
       cwd: options.cwd,
       env: options.env ?? process.env,
-      stdio: "inherit",
+      stdio: options.captureJson ? ["inherit", "pipe", "inherit"] : "inherit",
       detached: process.platform !== "win32",
     });
+    let stdout = "";
+    if (options.captureJson) {
+      child.stdout!.setEncoding("utf8");
+      child.stdout!.on("data", (chunk: string) => { stdout += chunk; });
+    }
     const forwardSignal = (signal: NodeJS.Signals) => {
       // The child command may own another process subtree. Translate a
       // terminal/SSH hangup into SIGTERM so it can run its normal cleanup.
@@ -312,6 +320,7 @@ export async function runSelfCommand(
           typeof signalNumber === "number" ? 128 + signalNumber : 1
         ),
         signal,
+        ...(options.captureJson ? { stdout } : {}),
       });
     });
   });

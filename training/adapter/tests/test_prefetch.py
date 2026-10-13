@@ -7,7 +7,8 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from prefetch import verify_snapshot
+from model_contract import CERTIFIED_BASE_MODEL
+from prefetch import check_requested_revision, verify_snapshot
 
 
 class UncertifiedPrefetchTests(unittest.TestCase):
@@ -63,3 +64,14 @@ class UncertifiedPrefetchTests(unittest.TestCase):
             (root / "model.safetensors").write_bytes(b"weights")
             files, _ = verify_snapshot(root, "example/model")
             self.assertIn(root / "model.safetensors", files)
+
+
+class RequestedRevisionTests(unittest.TestCase):
+    def test_only_direct_uncertified_downloads_may_resolve_the_latest_commit(self):
+        check_requested_revision("example/model", None, resolve_latest=True)
+        check_requested_revision("example/model", "a" * 40, resolve_latest=False)
+        with self.assertRaises(ValueError):
+            check_requested_revision("example/model", None, resolve_latest=False)
+        # A certified model never trades its reviewed revision for the latest one.
+        with self.assertRaises(ValueError):
+            check_requested_revision(CERTIFIED_BASE_MODEL, None, resolve_latest=True)

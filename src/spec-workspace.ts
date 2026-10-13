@@ -96,9 +96,12 @@ async function readSpecSource(location: Awaited<ReturnType<typeof specLocation>>
   }
 }
 
-export async function inspectLocalSpec(workspaceRoot: string, specPath = "tunedtensor.json") {
+export async function inspectLocalSpec(workspaceRoot: string, specPath = "tunedtensor.json", options: { allowMissing?: boolean } = {}) {
   const location = await specLocation(workspaceRoot, specPath);
-  const source = await readSpecSource(location);
+  const source = await readSpecSource(location).catch((error: NodeJS.ErrnoException) => {
+    if (options.allowMissing && error.code === "ENOENT") return "";
+    throw error;
+  });
   let document: unknown;
   let validation: SpecValidation;
   try {

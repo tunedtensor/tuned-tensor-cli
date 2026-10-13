@@ -729,7 +729,7 @@ export function createTunedTensorTools(
           dataset_prebuilt: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
             description: "Local chat JSONL files ({training, validation|test}), or a Hugging Face dataset: "
               + "{huggingface: {repo, revision?: 40-char commit, columns?: {input, output} | {messages}}, training: 'repo/path.jsonl|.parquet', test|validation: ...}. "
-              + "Parquet files require columns. Download it afterwards with prepare_download.",
+              + "Parquet files require columns. Pin revision to the commit a prepare_download reported.",
           })),
         }, { additionalProperties: false }),
       }, { additionalProperties: false }),
@@ -825,13 +825,23 @@ export function createTunedTensorTools(
     define(
       "prepare_download",
       "Prepare download",
-      "Prepare downloading the adapter spec's Hugging Face dataset (kind \"dataset\", from dataset_prebuilt.huggingface) or its base model (kind \"base_model\") into the local Hugging Face cache. Approval runs `tt datasets prefetch` or `tt models prefetch` on the reviewed spec; edit the spec first if it does not name the right source. Never downloads until /approve.",
+      "Prepare downloading a Hugging Face dataset (kind \"dataset\") or model (kind \"base_model\") into the local Hugging Face cache. "
+        + "Omit source to download what the spec names (dataset_prebuilt.huggingface or base_model) and pin it in tunedtensor.lock.json. "
+        + "Pass source to download any repo without editing the spec first; the result reports the resolved revision to adopt with prepare_update_local_spec. "
+        + "Approval runs `tt datasets prefetch` or `tt models prefetch`. Never downloads until /approve.",
       Type.Object({
         kind: Type.Union([Type.Literal("dataset"), Type.Literal("base_model")]),
         spec_path: Type.Optional(Type.String({ minLength: 1, maxLength: 500, description: "Workspace-relative tunedtensor.json; defaults to tunedtensor.json" })),
+        source: Type.Optional(Type.Object({
+          repo: Type.String({ minLength: 3, maxLength: 200, description: "Hugging Face repo id, org/name" }),
+          revision: Type.Optional(Type.String({ pattern: "^[0-9a-fA-F]{40}$", description: "40-character commit; omit for the latest" })),
+          training: Type.Optional(Type.String({ minLength: 1, maxLength: 500, description: "Dataset only, required: repo-relative .jsonl or .parquet file" })),
+          validation: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+          test: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+        }, { additionalProperties: false })),
       }, { additionalProperties: false }),
       async (p) => {
-        const prepared = await prepareLocalPrefetch(workspaceRoot, p.kind, p.spec_path);
+        const prepared = await prepareLocalPrefetch(workspaceRoot, p.kind, p.spec_path, p.source);
         return await api.propose(proposal(
           "prefetch_local",
           p.kind === "dataset" ? "Download dataset" : "Download base model",

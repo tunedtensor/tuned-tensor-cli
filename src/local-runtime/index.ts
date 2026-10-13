@@ -1,5 +1,5 @@
 import { pipelineForRunInput } from "../pipeline.js";
-import { resolveProjectConfig } from "./project-workflow.js";
+import { resolveDownloadConfig, resolveProjectConfig } from "./project-workflow.js";
 import { readFileSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
@@ -10,7 +10,7 @@ import { compareRuns } from "./compare.js";
 import { auditRun } from "./audit.js";
 import { createRunConsoleReporter } from "./console-reporter.js";
 import { assertArtifactManifest } from "./artifacts.js";
-import { fineTuneRunRequestSchema, isDecisionSpecFile, isFoundationSpecFile, localBehaviorSpecFileSchema, localRunnerConfigSchema, type FineTuneRunRequest, type LocalRunnerConfig, type SpecSnapshot } from "./contracts.js";
+import { fineTuneRunRequestSchema, huggingFaceDatasetSourceSchema, isDecisionSpecFile, isRepoRelativePath, isFoundationSpecFile, localBehaviorSpecFileSchema, localRunnerConfigSchema, type FineTuneRunRequest, type LocalRunnerConfig, type SpecSnapshot } from "./contracts.js";
 import { buildSystemMessage } from "./dataset.js";
 import {
   fingerprintLocalBaseModel,
@@ -30,6 +30,17 @@ import {
   type LocalModelServerLaunch,
 } from "./model-server.js";
 import { prefetchBaseModel } from "./prefetch.js";
+import {
+  applySpecLock,
+  enforceSpecLock,
+  findAsset,
+  listAssets,
+  readSpecLock,
+  snapshotDigests,
+  specLockPath,
+  verifyAsset,
+  writeSpecLockEntry,
+} from "./assets.js";
 import { DatasetNotDownloadedError, ensureDatasetCached, huggingFaceDataset, prefetchHuggingFaceDataset } from "./dataset-prefetch.js";
 import { createLocalStore, type LocalModelRecord, type LocalStore } from "./store.js";
 import {
@@ -111,7 +122,8 @@ Commands:
   serve <model-id|active|base|foundation> [--config local-runner.json] [--host 127.0.0.1] [--port 8000]
   runs list|get|events|report|compare|audit [args] [--config local-runner.json]
   models list|get|verify|prefetch|verify-base|active|activate|rollback|serve [args] [--config local-runner.json]
-  datasets prefetch|verify [tunedtensor.json]
+  datasets prefetch|verify [tunedtensor.json] [--repo org/name --training path ...]
+  assets list|path|verify [org/name[@revision]]
 
 Global options:
   -h, --help                       Show help
@@ -154,6 +166,11 @@ interface ParsedCli {
 const CONFIG_OPTION = { name: "--config", value: "path", description: "Legacy runner config (prefer runtime/evaluation in tunedtensor.json)" } as const;
 const VERBOSE_OPTION = { name: "--verbose", description: "Stream subprocess output" } as const;
 const QUIET_OPTION = { name: "--quiet", description: "Suppress progress output on stderr" } as const;
+const REPO_OPTION = { name: "--repo", value: "org/name", description: "Download this Hugging Face repo instead of the spec's (records a manifest; leaves the lock alone)" } as const;
+const REVISION_OPTION = { name: "--revision", value: "sha", description: "40-character commit to download with --repo (default: latest)" } as const;
+const SPLIT_OPTIONS = (["training", "validation", "test"] as const).map((split) => (
+  { name: `--${split}`, value: "path", description: `Repo-relative ${split} file (.jsonl or .parquet) to download with --repo` }
+));
 const MODEL_SERVE_OPTIONS = [
   CONFIG_OPTION,
   { name: "--checkpoint", value: "path", description: "Foundation model directory (target: foundation)" },
@@ -266,9 +283,9 @@ const COMMAND_GROUPS: Record<string, CliCommandGroup> = {
         missingPositionalsMessage: "models verify requires <model-id-or-artifact-path>",
       },
       prefetch: {
-        usage: "tt models prefetch [tunedtensor.json] [options]",
-        description: "Download the configured base model before a run.",
-        options: [CONFIG_OPTION, VERBOSE_OPTION, QUIET_OPTION],
+        usage: "tt models prefetch [tunedtensor.json] [--repo org/name [--revision sha]] [options]",
+        description: "Download the spec's base model and pin it in tunedtensor.lock.json, or download any model with --repo.",
+        options: [CONFIG_OPTION, REPO_OPTION, REVISION_OPTION, VERBOSE_OPTION, QUIET_OPTION],
         maxPositionals: 1,
       },
       "verify-base": {
@@ -312,15 +329,36 @@ const COMMAND_GROUPS: Record<string, CliCommandGroup> = {
     defaultSubcommand: "prefetch",
     subcommands: {
       prefetch: {
-        usage: "tt datasets prefetch [tunedtensor.json] [options]",
-        description: "Download dataset_prebuilt.huggingface files into the local Hugging Face cache. Resumes after interruption.",
-        options: [CONFIG_OPTION, VERBOSE_OPTION, QUIET_OPTION],
+        usage: "tt datasets prefetch [tunedtensor.json] [--repo org/name --training path [--test path]] [options]",
+        description: "Download dataset_prebuilt.huggingface files and pin them in tunedtensor.lock.json, or download any dataset files with --repo. Resumes after interruption.",
+        options: [CONFIG_OPTION, REPO_OPTION, REVISION_OPTION, ...SPLIT_OPTIONS, VERBOSE_OPTION, QUIET_OPTION],
         maxPositionals: 1,
       },
       verify: {
         usage: "tt datasets verify [tunedtensor.json] [options]",
         description: "Verify the cached dataset files and checksums without network access.",
         options: [CONFIG_OPTION, QUIET_OPTION],
+        maxPositionals: 1,
+      },
+    },
+  },
+  assets: {
+    description: "Find and verify downloaded Hugging Face datasets and models (manifests under ~/.tuned-tensor/assets).",
+    defaultSubcommand: "list",
+    subcommands: {
+      list: { usage: "tt assets list", description: "List downloads, newest first.", options: [], maxPositionals: 0 },
+      path: {
+        usage: "tt assets path <org/name[@revision]>",
+        description: "Print where a download lives on disk.",
+        options: [],
+        minPositionals: 1,
+        maxPositionals: 1,
+        missingPositionalsMessage: "assets path requires <org/name[@revision]>",
+      },
+      verify: {
+        usage: "tt assets verify [org/name[@revision]]",
+        description: "Re-hash downloaded files and compare them with their manifests (all downloads by default).",
+        options: [],
         maxPositionals: 1,
       },
     },
@@ -451,6 +489,30 @@ function parseCli(argv: string[]): ParsedCli {
     positionals: parseCommandArguments(argv.slice(tokenStart), subcommandDefinition),
     help: "top",
     definition: subcommandDefinition,
+  };
+}
+
+/** `--repo` with split files names a dataset to download without a spec. */
+function datasetSourceFromArgv(argv: string[]) {
+  const repo = readOption(argv, "--repo");
+  if (!repo) return undefined;
+  const revision = readOption(argv, "--revision");
+  const splits = Object.fromEntries((["training", "validation", "test"] as const)
+    .flatMap((split) => {
+      const path = readOption(argv, `--${split}`);
+      return path ? [[split, path]] : [];
+    })) as { training?: string; validation?: string; test?: string };
+  if (!splits.training) {
+    throw new Error("--repo needs --training <path> (a repo-relative .jsonl or .parquet file); --validation and --test are optional.");
+  }
+  const invalid = Object.values(splits).find((path) => !isRepoRelativePath(path));
+  if (invalid) throw new Error(`Dataset files must be paths inside the repo, such as data/train.jsonl: ${invalid}`);
+  // Downloads need no column mapping or evaluation split; adopting the files into a spec does.
+  return {
+    format: "chat_jsonl" as const,
+    huggingface: huggingFaceDatasetSourceSchema.parse({ repo, ...(revision ? { revision } : {}) }),
+    ...splits,
+    training: splits.training,
   };
 }
 
@@ -1174,7 +1236,9 @@ async function main(argv: string[]): Promise<void> {
       verbose: hasFlag(argv, "--verbose"),
       quiet: hasFlag(argv, "--quiet"),
     });
-    const ensured = await ensureDatasetCached({ request: input.request, config, reporter });
+    // A projection of the spec that `tt` hands us sits beside it, so the lock path is the same.
+    const lock = await readSpecLock(input.path);
+    const ensured = await ensureDatasetCached({ request: applySpecLock(input.request, lock), config, reporter });
     const validated = await validateLocalFineTuneInput({
       request: ensured.request,
       config,
@@ -1201,6 +1265,8 @@ async function main(argv: string[]): Promise<void> {
         },
       });
     }
+    // Check after the base-model prefetch above, so a fresh cache still downloads first.
+    if (!config.dryRun) await enforceSpecLock({ specPath: input.path, request, config, reporter });
     // `tt` may hand us a temporary projection of the spec (cloud-only keys
     // removed); its path and bytes are not the user's file, so record only the
     // spec snapshot digest in that case.
@@ -1286,19 +1352,56 @@ async function main(argv: string[]): Promise<void> {
   if (command === "datasets") {
     const subcommand = cli.subcommand!;
     const inputPath = resolve(cli.positionals[0] ?? DEFAULT_LOCAL_SPEC_PATH);
-    const config = await configFromArgv(argv, inputPath);
-    const input = await loadCliBehaviorSpec(inputPath);
+    const config = readOption(argv, "--repo")
+      ? await resolveDownloadConfig(inputPath, readOption(argv, "--config"), (message) => console.error(message))
+      : await configFromArgv(argv, inputPath);
     if (subcommand !== "prefetch" && subcommand !== "verify") throw new Error(`Unknown datasets command: ${subcommand}`);
+    const reporter = createConsoleReporter({
+      verbose: hasFlag(argv, "--verbose"),
+      quiet: hasFlag(argv, "--quiet"),
+    });
+    const source = datasetSourceFromArgv(argv);
+    if (source) {
+      if (subcommand !== "prefetch") throw new Error("--repo applies to `tt datasets prefetch`; use `tt assets verify` for downloads.");
+      return printJson(await prefetchHuggingFaceDataset({ request: { dataset_prebuilt: source }, config, reporter }));
+    }
+    const input = await loadCliBehaviorSpec(inputPath);
+    // An unpinned spec dataset keeps its locked commit; pin a new revision in the spec to move it.
     const report = await prefetchHuggingFaceDataset({
-      request: input.request,
+      request: applySpecLock(input.request, await readSpecLock(input.path)),
       config,
       localOnly: subcommand === "verify",
-      reporter: createConsoleReporter({
-        verbose: hasFlag(argv, "--verbose"),
-        quiet: hasFlag(argv, "--quiet"),
-      }),
+      reporter,
     });
-    return printJson({ ...report, input_path: input.path });
+    if (subcommand === "prefetch") {
+      await writeSpecLockEntry(input.path, "dataset", {
+        repo: report.repo,
+        revision: report.revision,
+        files: (await snapshotDigests(report.snapshot_path, Object.values(report.files).flatMap((file) => file ? [file.path] : []))).files,
+      });
+    }
+    return printJson({ ...report, input_path: input.path, ...(subcommand === "prefetch" ? { lock_path: specLockPath(input.path) } : {}) });
+  }
+
+  if (command === "assets") {
+    const subcommand = cli.subcommand!;
+    if (subcommand === "list") return printJson(await listAssets());
+    if (subcommand === "path") {
+      const asset = await findAsset(cli.positionals[0]!);
+      console.log(asset.snapshot_path);
+      return;
+    }
+    if (subcommand === "verify") {
+      const assets = cli.positionals[0] ? [await findAsset(cli.positionals[0])] : await listAssets();
+      const results = [];
+      for (const asset of assets) {
+        results.push({ kind: asset.kind, repo: asset.repo, revision: asset.revision, ...await verifyAsset(asset) });
+      }
+      printJson({ ok: results.every((result) => result.ok), assets: results });
+      if (!results.every((result) => result.ok)) process.exitCode = 2;
+      return;
+    }
+    throw new Error(`Unknown assets command: ${subcommand}`);
   }
 
   if (command === "models") {
@@ -1306,7 +1409,9 @@ async function main(argv: string[]): Promise<void> {
     const modelInputPath = subcommand === "prefetch" || subcommand === "verify-base"
       ? resolve(cli.positionals[0] ?? DEFAULT_LOCAL_SPEC_PATH)
       : undefined;
-    const config = await configFromArgv(argv, modelInputPath);
+    const config = subcommand === "prefetch" && readOption(argv, "--repo")
+      ? await resolveDownloadConfig(modelInputPath!, readOption(argv, "--config"), (message) => console.error(message))
+      : await configFromArgv(argv, modelInputPath);
     const store = createLocalStore(config.storeRoot);
     if (subcommand === "list") return printJson(await store.listModels());
     if (subcommand === "get") {
@@ -1363,19 +1468,35 @@ async function main(argv: string[]): Promise<void> {
       return printJson({ active: pointer.model_id ?? "base", pointer });
     }
     if (subcommand === "prefetch" || subcommand === "verify-base") {
+      const reporter = createConsoleReporter({
+        verbose: hasFlag(argv, "--verbose"),
+        quiet: hasFlag(argv, "--quiet"),
+      });
+      const repo = readOption(argv, "--repo");
+      if (repo) {
+        if (subcommand !== "prefetch") throw new Error("--repo applies to `tt models prefetch`; use `tt assets verify` for downloads.");
+        const revision = readOption(argv, "--revision");
+        return printJson(await prefetchBaseModel({ source: { repo, ...(revision ? { revision } : {}) }, config, reporter }));
+      }
       const input = await loadCliBehaviorSpec(modelInputPath!);
       const report = await prefetchBaseModel({
         request: input.request,
         config,
         localOnly: subcommand === "verify-base",
-        reporter: createConsoleReporter({
-          verbose: hasFlag(argv, "--verbose"),
-          quiet: hasFlag(argv, "--quiet"),
-        }),
+        reporter,
       });
+      const locked = subcommand === "prefetch" && report.snapshot_path && report.snapshot_revision;
+      if (locked) {
+        await writeSpecLockEntry(input.path, "base_model", {
+          repo: report.base_model,
+          revision: report.snapshot_revision!,
+          files: (await snapshotDigests(report.snapshot_path!)).files,
+        });
+      }
       return printJson({
         ...report,
         input_path: input.path,
+        ...(locked ? { lock_path: specLockPath(input.path) } : {}),
       });
     }
     if (subcommand === "serve") {
