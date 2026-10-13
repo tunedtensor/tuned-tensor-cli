@@ -217,7 +217,11 @@ export async function preflightPreparedAction(
     }
   } else if (action.operation === "prefetch_local") {
     if (!options.workspaceRoot) throw new Error("A local workspace is required to download.");
-    await revalidateLocalPrefetch(options.workspaceRoot, args(action));
+    try { await revalidateLocalPrefetch(options.workspaceRoot, args(action)); }
+    catch (error) {
+      if (error instanceof SpecWorkspaceMismatchError) throw new PreparedActionWorkspaceMismatchError(error.message, error);
+      throw error;
+    }
   } else if (action.operation === "run_local_pipeline") {
     try {
       await prepareLocalPipelineApproval(action, options);

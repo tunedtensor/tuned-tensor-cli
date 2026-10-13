@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
+import { gzipSync, zstdCompressSync } from "node:zlib";
 import { parquetWriteBuffer } from "hyparquet-writer";
 import {
   fineTuneRunRequestSchema,
@@ -298,6 +299,23 @@ test("Parquet splits convert only the mapped columns across row groups", async (
     await rm(root, { recursive: true, force: true });
   }
 });
+
+for (const [codec, compress] of [["GZIP", gzipSync], ["ZSTD", zstdCompressSync]] as const) {
+  test(`mapped Parquet supports ${codec} compression`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "tt-dataset-codec-"));
+    try {
+      const parquet = (text: string) => new Uint8Array(parquetWriteBuffer({
+        columnData: [{ name: "text", data: [text], type: "STRING" }, { name: "label", data: ["answer"], type: "STRING" }],
+        codec, compressors: { [codec]: compress },
+      }));
+      await cacheDataset(join(root, "hf"), { "train.parquet": parquet("train"), "test.parquet": parquet("test") });
+      const resolved = await resolveRequestDataset(request({
+        huggingface: { repo, columns: { input: "text", output: "label" } }, training: "train.parquet", test: "test.parquet",
+      }), config(root));
+      assert.equal(resolved.dataset_source?.conversion?.training.kept, 1);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+}
 
 test("a messages column maps each conversation's first exchange", async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-dataset-messages-"));

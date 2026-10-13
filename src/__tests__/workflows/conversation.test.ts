@@ -108,6 +108,40 @@ function conversation(replies: Reply[] | ((context: Context, call: number) => Re
 }
 
 describe("conversation workflow contracts (scripted provider, real agent and tools)", () => {
+  it.each(["dataset", "base_model"] as const)("resumes and approves a %s download exactly once", async (kind) => {
+    writeFileSync(join(root, "tunedtensor.json"), JSON.stringify({
+      ...spec,
+      dataset_prebuilt: {
+        huggingface: { repo: "org/dataset", columns: { input: "text", output: "label" } },
+        training: "train.parquet", test: "test.parquet",
+      },
+    }));
+    const runner = vi.fn<LocalPipelineCommandRunner>(async (args) => {
+      expect(args.slice(0, 2)).toEqual([kind === "dataset" ? "datasets" : "models", "prefetch"]);
+      expect(JSON.parse(readFileSync(args[2]!, "utf8")).base_model).toBe(spec.base_model);
+      return { exitCode: 0, signal: null };
+    });
+    const c = conversation([
+      { tool: "prepare_download", args: { kind } },
+      "The download is ready for approval.",
+    ], runner);
+    await c.session.handleLine(`Download the ${kind} in my spec.`);
+    expect(c.errors).toEqual([]);
+    expect(runner).not.toHaveBeenCalled();
+    const resumed = c.newSession();
+    await resumed.handleLine(`/resume ${c.session.snapshot().thread!.id}`);
+    expect(resumed.snapshot().pendingActions[0].operation).toBe("prefetch_local");
+    await resumed.handleLine("/approve");
+    expect(c.errors).toEqual([]);
+    expect(c.output.join("")).toContain("Download finished.");
+    expect((await c.store.list())[0].actions[0].status).toBe("completed");
+    expect(resumed.snapshot().pendingActions).toEqual([]);
+    await resumed.handleLine("/approve");
+    expect(runner).toHaveBeenCalledTimes(1);
+    expect(c.streamSimple).toHaveBeenCalledTimes(2);
+    expect(c.forbidden).not.toHaveBeenCalled();
+  });
+
   it("creates a reviewed project, resumes the conversation, and approves the same plan through the real CLI", async () => {
     const plans: Array<{ dry_run: boolean; steps: Array<{ id: string; uses: string }> }> = [];
     const runCommand = vi.fn<LocalPipelineCommandRunner>(async (args, options) => {

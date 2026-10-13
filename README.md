@@ -548,9 +548,15 @@ tt pipeline run --spec tunedtensor.json # downloads automatically if still missi
 In `tt agent`, ask it to download the dataset or the base model. It proposes the
 same `tt datasets prefetch` or `tt models prefetch` command for the reviewed spec
 and runs it after you approve.
+Approval checks the workspace, spec and adjacent legacy runner configuration,
+then runs a private snapshot of the reviewed settings. Later edits cannot redirect
+the running download. After a failure or cancellation, ask for a new download
+proposal to resume from the cache.
 
 - Split paths are files inside the repo: one `.jsonl` or `.parquet` file per
   split (pick one shard of a sharded split). CSV is not supported yet.
+- Parquet supports Snappy, gzip, zstd, Brotli and LZ4 compression, as well as
+  uncompressed files.
 - Without `columns`, files must already be TT chat JSONL whose system message
   matches the spec. With `columns`, each record's `input` and `output` fields
   become chat rows that use the spec's instruction. Parquet files require

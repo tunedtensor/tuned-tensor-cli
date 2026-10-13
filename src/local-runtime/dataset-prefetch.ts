@@ -4,6 +4,7 @@ import { mkdir, readFile, realpath, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { asyncBufferFromFile, parquetMetadataAsync, parquetReadObjects, parquetSchema } from "hyparquet";
+import { compressors } from "hyparquet-compressors";
 import {
   baseModelRevisionSchema,
   datasetSourceSchema,
@@ -234,7 +235,7 @@ async function* parquetRecords(path: string, split: Split, columns: DatasetColum
   let rowStart = 0;
   for (const group of metadata.row_groups) {
     const rowEnd = rowStart + Number(group.num_rows);
-    yield* await parquetReadObjects({ file, metadata, columns: columnNames(columns), rowStart, rowEnd });
+    yield* await parquetReadObjects({ file, metadata, compressors, columns: columnNames(columns), rowStart, rowEnd });
     rowStart = rowEnd;
   }
 }

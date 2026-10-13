@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { approvePreparedAction } from "../agent-approval.js";
@@ -56,7 +56,7 @@ describe("agent downloads", () => {
         workspaceRoot: root,
         runPipelineCommand,
       });
-      expect(runPipelineCommand).toHaveBeenCalledWith(["datasets", "prefetch", "tunedtensor.json"], expect.objectContaining({ cwd: expect.any(String) }));
+      expect(runPipelineCommand).toHaveBeenCalledWith(["datasets", "prefetch", expect.stringContaining("tt-agent-prefetch-")], expect.objectContaining({ cwd: expect.any(String) }));
       expect(output).toMatchObject({ completed: true, kind: "dataset" });
       expect(action.status).toBe("completed");
     } finally {
@@ -74,7 +74,7 @@ describe("agent downloads", () => {
         workspaceRoot: root,
         runPipelineCommand,
       })).rejects.toThrow(/models prefetch tunedtensor\.json exited with code 1/);
-      expect(runPipelineCommand).toHaveBeenCalledWith(["models", "prefetch", "tunedtensor.json"], expect.anything());
+      expect(runPipelineCommand).toHaveBeenCalledWith(["models", "prefetch", expect.stringContaining("tt-agent-prefetch-")], expect.anything());
       expect(action.status).toBe("failed");
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -106,5 +106,61 @@ describe("agent downloads", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("executes the reviewed snapshot even if the source changes during dispatch", async () => {
+    const root = workspace({ ...spec, runtime: { paths: { modelCache: "./cache" } } });
+    let executedPath = "";
+    try {
+      const action = await prepare(root, "dataset");
+      const runner = vi.fn(async (args: string[]) => {
+        writeFileSync(join(root, "tunedtensor.json"), JSON.stringify({ ...spec, base_model: "changed/model" }));
+        executedPath = args[2]!;
+        const executed = JSON.parse(readFileSync(executedPath.startsWith("/") ? executedPath : join(root, executedPath), "utf8"));
+        expect(executed.base_model).toBe(spec.base_model);
+        expect(executed.runtime.paths.modelCache).toBe(join(root, "cache"));
+        return { exitCode: 0, signal: null };
+      });
+      await approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, { workspaceRoot: root, runPipelineCommand: runner });
+      expect(existsSync(executedPath)).toBe(false);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("refuses to redirect approval to another workspace with an identical spec", async () => {
+    const root = workspace();
+    const other = workspace();
+    try {
+      const action = await prepare(root, "dataset");
+      const runner = vi.fn();
+      await expect(approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+        workspaceRoot: other, runPipelineCommand: runner,
+      })).rejects.toThrow(/workspace changed/i);
+      expect(runner).not.toHaveBeenCalled();
+    } finally { rmSync(root, { recursive: true, force: true }); rmSync(other, { recursive: true, force: true }); }
+  });
+
+  it("refuses changes to the adjacent legacy cache configuration", async () => {
+    const root = workspace();
+    try {
+      writeFileSync(join(root, "local-runner.json"), JSON.stringify({ paths: { modelCache: "./first" } }));
+      const action = await prepare(root, "dataset");
+      writeFileSync(join(root, "local-runner.json"), JSON.stringify({ paths: { modelCache: "./second" } }));
+      const runner = vi.fn();
+      await expect(approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+        workspaceRoot: root, runPipelineCommand: runner,
+      })).rejects.toThrow(/local-runner.json changed/);
+      expect(runner).not.toHaveBeenCalled();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("records a thrown command failure as failed instead of outcome unknown", async () => {
+    const root = workspace();
+    try {
+      const action = await prepare(root, "dataset");
+      await expect(approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+        workspaceRoot: root, runPipelineCommand: async () => { throw new Error("spawn failed"); },
+      })).rejects.toThrow(/spawn failed/);
+      expect(action.status).toBe("failed");
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });
