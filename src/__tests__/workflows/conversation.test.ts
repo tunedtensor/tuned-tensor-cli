@@ -81,8 +81,9 @@ function conversation(replies: Reply[] | ((context: Context, call: number) => Re
   });
   const forbidden = vi.fn(async (): Promise<never> => { throw new Error("Unexpected cloud API call"); });
   const store = new LocalAgentStore(join(root, "agent"));
-  const client = createLocalAgentClient({
+  const newClient = (cloudEnabled = false) => createLocalAgentClient({
     store,
+    cloudEnabled,
     workspaceRoot: root,
     selection: { provider: "fixture", model: "scripted", thinking: "off" },
     modelRuntime: {
@@ -96,13 +97,14 @@ function conversation(replies: Reply[] | ((context: Context, call: number) => Re
     mutationApi: { get: forbidden, post: forbidden, put: forbidden },
     runPipelineCommand: runCommand,
   });
+  const client = newClient();
   const output: string[] = [];
   const errors: string[] = [];
   const newSession = () => new TunedTensorAgentSession({
     client,
     io: { write: (text) => output.push(text), writeError: (text) => errors.push(text), clear: () => {} },
   });
-  return { client, store, session: newSession(), newSession, output, errors, contexts, streamSimple, forbidden };
+  return { client, newClient, store, session: newSession(), newSession, output, errors, contexts, streamSimple, forbidden };
 }
 
 describe("conversation workflow contracts (scripted provider, real agent and tools)", () => {
@@ -247,6 +249,31 @@ describe("conversation workflow contracts (scripted provider, real agent and too
     expect(sent).not.toContain("STALE PROMPT");
     expect(sent).toContain("local Tuned Tensor assistant");
     expect(c.contexts[1].messages.filter((message) => message.role === "system")).toHaveLength(1);
+    expect((await c.store.load(thread.id)).messages.map((message) => (message as { role: string }).role))
+      .toEqual(["user", "assistant", "user", "assistant"]);
+  });
+
+  it("refreshes account instructions and tool declarations when a thread resumes after logout", async () => {
+    const c = conversation(["Signed in.", "Signed out."]);
+    const signedIn = c.newClient(true);
+    const thread = await signedIn.createThread();
+    await signedIn.runTurn(thread.id, "Hello", () => {});
+    const initialSystem = c.contexts[0].messages.find((message) => message.role === "system")!;
+    expect(initialSystem.content).toContain("Account tools inspect cloud");
+    expect(initialSystem.toolsAdded?.some((tool) => tool.name === "list_specs")).toBe(true);
+
+    // Include both leading and mid-conversation system messages from Pi 1.x.
+    const saved = await c.store.load(thread.id);
+    saved.messages.unshift(initialSystem);
+    saved.messages.push({ ...initialSystem, content: "STALE ACCOUNT INSTRUCTIONS" });
+    await c.store.save(saved);
+    await c.newClient(false).runTurn(thread.id, "Again", () => {});
+    const systems = c.contexts[1].messages.filter((message) => message.role === "system");
+    expect(systems).toHaveLength(1);
+    expect(systems[0].content).toContain("No TT access token is configured");
+    expect(systems[0].toolsAdded?.map((tool) => tool.name)).toContain("get_local_spec");
+    expect(systems[0].toolsAdded?.map((tool) => tool.name)).not.toContain("list_specs");
+    expect(JSON.stringify(c.contexts[1].messages)).not.toContain("STALE ACCOUNT INSTRUCTIONS");
     expect((await c.store.load(thread.id)).messages.map((message) => (message as { role: string }).role))
       .toEqual(["user", "assistant", "user", "assistant"]);
   });

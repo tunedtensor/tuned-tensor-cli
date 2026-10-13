@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import type { AgentModelRuntime } from "../agent-model.js";
+import { unknownAgentProviderMessage } from "../agent-model.js";
 import {
   describeAgentModel,
   listAgentModels,
@@ -50,7 +51,7 @@ export function registerAgentCommands(parent: Command, options: AgentCommandsOpt
     .action(async (commandOptions: { provider?: string; all?: boolean }) => {
       const runtime = await options.getRuntime();
       if (commandOptions.provider && !runtime.getProviders().some((provider) => provider.id === commandOptions.provider)) {
-        throw new Error(`Unknown provider "${commandOptions.provider}".`);
+        throw new Error(unknownAgentProviderMessage(commandOptions.provider, "Run `tt agent models --all` to list providers and models."));
       }
       const models = listAgentModels(runtime, {
         provider: commandOptions.provider,

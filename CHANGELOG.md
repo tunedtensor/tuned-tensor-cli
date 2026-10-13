@@ -10,7 +10,9 @@
 - **Azure provider renamed:** Pi renamed `azure-openai-responses` to `azure`. If you use Azure,
   rename the provider in `~/.tuned-tensor/agent/auth.json` and `models.json`,
   then run `tt agent configure --provider azure --model <model>`. Until then,
-  `tt` reports the old provider as unknown.
+  `tt` reports the rename with migration instructions. Update
+  `TUNED_TENSOR_AGENT_PROVIDER` too if set; keep the `api` field
+  `azure-openai-responses` and `AZURE_OPENAI_*` environment variables unchanged.
 
 ## [0.23.0] - 2026-10-11
 

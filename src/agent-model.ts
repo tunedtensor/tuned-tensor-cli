@@ -31,8 +31,11 @@ export function missingProviderAuthMessage(): string {
   return "No API key is saved for the selected model. Run /login, or /model to pick a different one.";
 }
 
-export function unknownAgentProviderMessage(provider: string): string {
-  return `Unknown provider "${provider}". Use /login <id> or /model <id>.`;
+export function unknownAgentProviderMessage(provider: string, hint = "Use /login <id> or /model <id>."): string {
+  if (provider === "azure-openai-responses") {
+    return `Pi renamed provider "azure-openai-responses" to "azure". Rename the provider key in ${getAgentAuthPath()} and ${getAgentModelsPath()} if present, then run \`tt agent configure --provider azure --model <model>\`. If TUNED_TENSOR_AGENT_PROVIDER is set, update it to azure too. Keep the api field "azure-openai-responses" and AZURE_OPENAI_* environment variables unchanged.`;
+  }
+  return `Unknown provider "${provider}". ${hint}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -125,7 +128,7 @@ export function resolveAgentModelDefinition(
   );
   if (!provider) {
     throw new Error(
-      `Unknown provider "${selection.provider}". Run \`tt agent models --all\` to list providers and models.`,
+      unknownAgentProviderMessage(selection.provider, "Run `tt agent models --all` to list providers and models."),
     );
   }
   if (selection.provider === "openrouter" && !runtime.getModel(selection.provider, selection.model)) {
