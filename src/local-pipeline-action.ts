@@ -135,7 +135,7 @@ function errorCode(error: unknown): string | undefined {
     : undefined;
 }
 
-async function resolveAdjacentConfig(args: {
+export async function resolveAdjacentConfig(args: {
   workspaceRoot: string;
   specPath: string;
 }): Promise<{ path: string; displayPath: string; source: Buffer } | undefined> {

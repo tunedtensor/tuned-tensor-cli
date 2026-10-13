@@ -611,6 +611,7 @@ exit 1
         "prepare_update_local_spec",
         "prepare_create_local_spec",
         "prepare_pipeline_run",
+        "prepare_download",
       ]);
     } finally {
       rmSync(workspace, { recursive: true, force: true });

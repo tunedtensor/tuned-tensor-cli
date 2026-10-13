@@ -16,6 +16,7 @@ import {
   type LocalPipelineCommandRunner,
   validatePreparedLocalPipelineAction,
 } from "./local-pipeline-action.js";
+import { executeLocalPrefetch, LocalPrefetchError, revalidateLocalPrefetch } from "./local-prefetch-action.js";
 
 import {
   revalidateLabelDownload,
@@ -214,6 +215,13 @@ export async function preflightPreparedAction(
       if (error instanceof SpecWorkspaceMismatchError) throw new PreparedActionWorkspaceMismatchError(error.message, error);
       throw error;
     }
+  } else if (action.operation === "prefetch_local") {
+    if (!options.workspaceRoot) throw new Error("A local workspace is required to download.");
+    try { await revalidateLocalPrefetch(options.workspaceRoot, args(action)); }
+    catch (error) {
+      if (error instanceof SpecWorkspaceMismatchError) throw new PreparedActionWorkspaceMismatchError(error.message, error);
+      throw error;
+    }
   } else if (action.operation === "run_local_pipeline") {
     try {
       await prepareLocalPipelineApproval(action, options);
@@ -273,6 +281,13 @@ export async function approvePreparedAction(
           runCommand: prepared.runCommand,
           signal: prepared.signal,
         });
+        break;
+      }
+      case "prefetch_local": {
+        const runCommand = options.runPipelineCommand;
+        if (!options.workspaceRoot || !runCommand) throw new Error("Downloads need a local workspace and the tt command runner.");
+        const prepared = await revalidateLocalPrefetch(options.workspaceRoot, input);
+        execute = async () => await executeLocalPrefetch(prepared, runCommand, options.signal);
         break;
       }
       case "create_spec": {
@@ -350,6 +365,8 @@ export async function approvePreparedAction(
     if (
       (["create_local_spec", "update_local_spec"].includes(action.operation ?? "") && isKnownLocalSpecFailure(error))
       || (action.operation === "run_local_pipeline" && isKnownLocalPipelineFailure(error))
+      // Downloads resume into a content-addressed cache; retrying is safe.
+      || error instanceof LocalPrefetchError
       // A download only writes local files after every row is fetched; retrying is safe.
       || (action.operation as string | undefined) === "download_label_job"
       || (error instanceof Error && error.name === "LabelingNotStartedError")
@@ -378,6 +395,8 @@ export async function approvePreparedAction(
       ? "local workspace"
       : action.operation === "run_local_pipeline"
         ? "local run store"
+        : action.operation === "prefetch_local"
+          ? "local Hugging Face cache (tt datasets verify / tt models verify-base)"
         : action.operation === "start_label_job"
           ? "labeling jobs (tt cloud label list)"
           : action.operation === "download_label_job"

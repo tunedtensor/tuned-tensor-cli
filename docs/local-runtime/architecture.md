@@ -173,7 +173,7 @@ whose stderr is a pipe.
 
 Dataset runs resolve the cached snapshot in Node without network access.
 Each split file must link into the repo's blob store, and its digest must match
-the blob name. With `columns`, records are converted to chat rows under
+the blob name. With `columns`, JSONL or Parquet records are converted to chat rows under
 `<artifactRoot>/datasets/huggingface/`. The conversion path is keyed by the
 source digests, the mapping and the system message.
 

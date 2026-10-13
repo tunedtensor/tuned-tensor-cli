@@ -76,18 +76,22 @@ export const huggingFaceRepoIdSchema = z.string().regex(
  * `base_model` + `base_model_revision`, pin `revision` to an immutable commit
  * for reproducible runs; an unpinned source uses the cached `main` snapshot.
  */
-export const datasetColumnsSchema = z.object({
-  input: z.string().min(1),
-  output: z.string().min(1),
-}).strict();
+export const datasetColumnsSchema = z.union([
+  z.object({
+    input: z.string().min(1),
+    output: z.string().min(1),
+  }).strict(),
+  /** A chat column of `{role, content}` turns; its first user turn and reply become one example. */
+  z.object({ messages: z.string().min(1) }).strict(),
+]);
 
 export const huggingFaceDatasetSourceSchema = z.object({
   repo: huggingFaceRepoIdSchema,
   revision: baseModelRevisionSchema.optional(),
   /**
-   * Field names for plain JSONL records such as `{"text": ..., "label": ...}`.
-   * Each record becomes a chat row with the spec's compiled system message.
-   * Omit for files that are already TT chat JSONL.
+   * Field names for plain JSONL or Parquet records such as `{"text": ..., "label": ...}`,
+   * or `{messages}` for a chat column. Each record becomes a chat row with the
+   * spec's compiled system message. Omit for files that are already TT chat JSONL.
    */
   columns: datasetColumnsSchema.optional(),
 }).strict();
@@ -122,11 +126,19 @@ export const datasetPrebuiltSchema = z.object({
         path: [key],
         message: `With dataset_prebuilt.huggingface, ${key} must be a file path inside the dataset repo, such as data/${key}.jsonl`,
       });
+    } else if (value.toLowerCase().endsWith(".parquet")) {
+      if (!dataset.huggingface.columns) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `${key} is a Parquet file; set dataset_prebuilt.huggingface.columns to map its records`,
+        });
+      }
     } else if (!value.toLowerCase().endsWith(".jsonl")) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: [key],
-        message: `${key} must be a chat JSONL (.jsonl) file; Parquet, CSV and other formats are not supported yet`,
+        message: `${key} must be a .jsonl or .parquet file; CSV and other formats are not supported yet`,
       });
     }
   }

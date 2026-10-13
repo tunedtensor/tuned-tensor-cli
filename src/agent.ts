@@ -144,6 +144,8 @@ function approvalQuestion(action: AgentAction): string {
       return "Create this project?";
     case "run_local_pipeline":
       return "Run this dry-run preview?";
+    case "prefetch_local":
+      return "Start this download?";
     case "create_spec":
     case "update_spec":
       return "Apply this change to your TT account?";
@@ -164,6 +166,8 @@ function completionMessage(action: AgentAction | null): string {
       return "Project created.";
     case "run_local_pipeline":
       return "Dry-run preview finished.";
+    case "prefetch_local":
+      return "Download finished.";
     case "start_label_job":
       return "Labeling started. It runs in the cloud; ask me for its status any time.";
     case "download_label_job":
@@ -643,7 +647,7 @@ export class TunedTensorAgentSession {
         return context
           ? await this.options.client.approveAction(action.id, onEvent, signal, context)
           : await this.options.client.approveAction(action.id, onEvent, signal);
-      }, action.operation === "run_local_pipeline");
+      }, action.operation === "run_local_pipeline" || action.operation === "prefetch_local");
     } finally {
       // Approval is one-way once requested. Preflight failures, completed
       // actions, and unknown outcomes are all non-retryable under this ID.
