@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PassThrough } from "node:stream";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -84,6 +84,37 @@ describe("unified command routing", () => {
       const agent = program.commands.find((command) => command.name() === "agent")!;
       expect(agent.commands.find((command) => command.name() === "configure")?.options.map((option) => option.long))
         .not.toEqual(expect.arrayContaining(["--api-key", "--token", "--secret"]));
+    } finally {
+      delete process.env.TUNED_TENSOR_HOME;
+      rmSync(configRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["status"],
+    ["configure", "--provider", "azure-openai-responses", "--model", "gpt-5.2"],
+    ["models", "--provider", "azure-openai-responses", "--all"],
+  ])("explains Azure migration for agent %s", async (...args) => {
+    const configRoot = mkdtempSync(join(tmpdir(), "tt-agent-azure-migration-"));
+    process.env.TUNED_TENSOR_HOME = configRoot;
+    try {
+      const program = createProgram("test", {
+        env: {
+          TUNED_TENSOR_AGENT_PROVIDER: "azure-openai-responses",
+          TUNED_TENSOR_AGENT_MODEL: "gpt-5.2",
+          TUNED_TENSOR_AGENT_THINKING: "off",
+        },
+        modelRuntime: {
+          getProviders: () => [{ id: "azure" }],
+          getModels: () => [],
+          getModel: () => undefined,
+          hasConfiguredAuth: () => false,
+        },
+      });
+      program.exitOverride();
+      await expect(program.parseAsync(["node", "tt", "agent", ...args]))
+        .rejects.toThrow(/Pi renamed provider.*auth\.json.*models\.json.*tt agent configure --provider azure.*TUNED_TENSOR_AGENT_PROVIDER.*Keep the api field/);
+      expect(existsSync(join(configRoot, "config.json"))).toBe(false);
     } finally {
       delete process.env.TUNED_TENSOR_HOME;
       rmSync(configRoot, { recursive: true, force: true });

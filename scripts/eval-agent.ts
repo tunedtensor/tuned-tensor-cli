@@ -171,7 +171,7 @@ async function main(): Promise<void> {
       try {
         turn = await client.runTurn(thread.id, scenario.prompt, (event) => {
           // Abort synchronously: Pi awaits this listener before executing the
-          // tool, and checks the aborted signal before dispatch (pinned 0.84.1).
+          // tool, and checks the aborted signal before dispatch (pinned 1.2.0).
           guardAgentEvalEvent(event, controller, violations);
           if (!["text_delta", "reasoning_delta"].includes(event.type)) events.push(event);
         }, controller.signal);
