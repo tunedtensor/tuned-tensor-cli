@@ -403,8 +403,8 @@ describe("renderShellPrompt", () => {
 
   it.each([
     [1, "\u001b[100m"],
-    [2, "\u001b[48;5;238m"],
-    [3, "\u001b[48;2;50;52;67m"],
+    [2, "\u001b[48;5;239m"],
+    [3, "\u001b[48;2;60;62;84m"],
   ] as const)("repaints submitted input at color level %i", (level, background) => {
     const originalLevel = chalk.level;
     chalk.level = level;
@@ -418,8 +418,64 @@ describe("renderShellPrompt", () => {
       expect(renderSubmittedShellInput("too long", 5)).toBe("");
       const wrapped = renderSubmittedShellInput("a question that wraps", 10);
       expect(wrapped).toMatch(/^\u001b\[3A\r\u001b\[J/);
-      expect(wrapped).toContain("a question that wraps");
+      expect(stripVTControlCharacters(wrapped)).toContain(" › a ");
       expect(renderSubmittedShellInput("safe\u001b[31m", 80)).not.toContain("[31m");
+      const padded = renderSubmittedShellInput("hello", 20);
+      expect(padded).toContain(`${"▄".repeat(20)}\u001b[0m\r\n`);
+      expect(padded).toContain(`${"▀".repeat(20)}\u001b[0m\r\n`);
+      expect(padded.indexOf("▄")).toBeLessThan(padded.indexOf("hello"));
+      expect(padded.indexOf("hello")).toBeLessThan(padded.indexOf("▀"));
+      const hanging = renderSubmittedShellInput("the quick brown fox jumps over the lazy dog", 24);
+      expect(hanging).toMatch(/m {2}\u001b\[[\d;]+m jumps over the lazy ?\u001b\[K/);
+    } finally {
+      chalk.level = originalLevel;
+    }
+  });
+
+  it.each([
+    [10, "a question that wraps"],
+    [24, "https://example.com/a/very/long/unbroken/path"],
+    [24, "模型".repeat(20)],
+    [25, "模型".repeat(30)],
+    [24, "keep  repeated   spaces in the submitted command"],
+  ])("keeps submitted content inside a %i-column surface", (columns, input) => {
+    const originalLevel = chalk.level;
+    chalk.level = 3;
+    try {
+      const rendered = stripVTControlCharacters(renderSubmittedShellInput(input, columns));
+      const rows = rendered.split("\r\n").slice(0, -1).map((row) => row.replace(/^\r/, ""));
+      expect(rows[0]).toBe("▄".repeat(columns));
+      expect(rows.at(-1)).toBe("▀".repeat(columns));
+      const content = rows.slice(1, -1);
+      expect(content.length).toBeGreaterThan(1);
+      expect(content[0]).toMatch(/^ › /);
+      expect(content.slice(1).every((row) => row.startsWith("   "))).toBe(true);
+      expect(content.map((row) => row.slice(3)).join("")).toBe(input);
+      expect(content.every((row) => terminalWidth(row) < columns)).toBe(true);
+      if (columns === 25) expect(renderSubmittedShellInput(input, columns)).toMatch(/^\u001b\[6A/);
+    } finally {
+      chalk.level = originalLevel;
+    }
+  });
+
+  it.each([0, 1, 5, -1, 12.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "leaves readline input intact at an unusable width of %s",
+    (columns) => {
+      const originalLevel = chalk.level;
+      chalk.level = 3;
+      try {
+        expect(renderSubmittedShellInput("hello", columns)).toBe("");
+      } finally {
+        chalk.level = originalLevel;
+      }
+    },
+  );
+
+  it.each(["a\tb", "a\rb", "a\nb"])("leaves non-linear input intact: %j", (input) => {
+    const originalLevel = chalk.level;
+    chalk.level = 3;
+    try {
+      expect(renderSubmittedShellInput(input, 80)).toBe("");
     } finally {
       chalk.level = originalLevel;
     }

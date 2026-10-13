@@ -422,8 +422,15 @@ const ANSI_CLEAR_DOWN = "\u001b[J";
 const ANSI_CURSOR_UP = "\u001b[1A";
 const ANSI_RESET = "\u001b[0m";
 
+/**
+ * Submitted input is repainted as a lifted surface: a raised background with
+ * half-row padding above and below, drawn with ▄/▀ in the surface color so
+ * the block reads as one card without costing two full rows.
+ */
 function inputColorCodes(): {
   background: string;
+  /** Foreground in the surface color, for the half-row padding. */
+  edge: string;
   accent: string;
   text: string;
 } | null {
@@ -431,19 +438,22 @@ function inputColorCodes(): {
   if (chalk.level === 1) {
     return {
       background: "\u001b[100m",
+      edge: "\u001b[90m",
       accent: "\u001b[95m",
       text: "\u001b[97m",
     };
   }
   if (chalk.level === 2) {
     return {
-      background: "\u001b[48;5;238m",
+      background: "\u001b[48;5;239m",
+      edge: "\u001b[38;5;239m",
       accent: "\u001b[38;5;183m",
       text: "\u001b[38;5;255m",
     };
   }
   return {
-    background: "\u001b[48;2;50;52;67m",
+    background: "\u001b[48;2;60;62;84m",
+    edge: "\u001b[38;2;60;62;84m",
     accent: "\u001b[38;2;196;181;253m",
     text: "\u001b[38;2;245;243;255m",
   };
@@ -551,36 +561,81 @@ export function renderShellPrompt(): string {
   return `${accent.bold("›")} `;
 }
 
+/** Wrap literal input without losing spaces or letting long tokens overflow. */
+function wrapSubmittedInput(input: string, width: number): string[] {
+  const chars = Array.from(input);
+  const lines: string[] = [];
+  let start = 0;
+  while (start < chars.length) {
+    let end = start;
+    let cells = 0;
+    let lastSpace = start;
+    while (end < chars.length) {
+      const charWidth = terminalWidth(chars[end]!);
+      if (cells + charWidth > width) break;
+      cells += charWidth;
+      if (chars[end] === " ") lastSpace = end + 1;
+      end++;
+    }
+    // Prefer word boundaries, keeping the separating spaces on the old row.
+    if (end < chars.length && lastSpace > start) end = lastSpace;
+    lines.push(chars.slice(start, end).join(""));
+    start = end;
+  }
+  return lines.length ? lines : [""];
+}
+
 export function renderSubmittedShellInput(input: string, columns?: number): string {
   const colors = inputColorCodes();
   if (!colors) return "";
   const safeInput = stripVTControlCharacters(input)
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "");
+  // Tabs and explicit line breaks need cursor accounting beyond cell width.
+  if (/[\t\r\n]/.test(safeInput)) return "";
+  if (columns !== undefined && (!Number.isInteger(columns) || columns < 6)) return "";
   // Readline wrapped a long entry over several rows; repaint all of them so a
   // long question keeps the same surface as a short one.
-  const width = terminalWidth(`› ${safeInput}`);
   let rows = 1;
   if (columns) {
+    let width = 0;
+    for (const char of `› ${safeInput}`) {
+      const cells = terminalWidth(char);
+      // Readline leaves the final cell empty if a wide character cannot fit.
+      if (cells === 2 && width % columns === columns - 1) width++;
+      width += cells;
+    }
     // An entry that exactly fills its last row leaves the cursor in the
     // terminal's pending-wrap state, where the row count is ambiguous.
     if (width % columns === 0) return "";
     rows = Math.ceil(width / columns);
   }
+  // Wrap inside the surface so continuation rows hang under the text.
+  const lines = columns ? wrapSubmittedInput(safeInput, columns - 4) : [safeInput];
+  const content = lines.map((line, index) => {
+    return [
+      colors.background,
+      index === 0 ? `${colors.accent}${ANSI_BOLD} ›${ANSI_BOLD_OFF}` : "  ",
+      colors.text,
+      " ",
+      line,
+      // Wrapping reserves a right-hand cell, so erase never hits pending wrap.
+      ANSI_CLEAR_TO_END,
+      ANSI_RESET,
+      "\r\n",
+    ].join("");
+  }).join("");
+  // Half-row padding needs the terminal width; without it the content row
+  // alone still forms a closed surface.
+  const edge = (glyph: string) => columns
+    ? `${colors.edge}${glyph.repeat(columns)}${ANSI_RESET}\r\n`
+    : "";
   return [
     rows === 1 ? ANSI_CURSOR_UP : `\u001b[${rows}A`,
     "\r",
     rows === 1 ? ANSI_CLEAR_LINE : ANSI_CLEAR_DOWN,
-    colors.background,
-    colors.accent,
-    ANSI_BOLD,
-    "›",
-    ANSI_BOLD_OFF,
-    colors.text,
-    " ",
-    safeInput,
-    ANSI_CLEAR_TO_END,
-    ANSI_RESET,
-    "\r\n",
+    edge("▄"),
+    content,
+    edge("▀"),
   ].join("");
 }
 

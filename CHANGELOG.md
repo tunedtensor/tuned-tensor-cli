@@ -14,6 +14,12 @@
   `HuggingFaceH4/ultrachat_200k` work without manual conversion.
   Snappy, gzip, zstd, Brotli and LZ4 compressed Parquet files are supported.
 
+### Changed
+
+- Submitted shell input stands out more: a brighter surface with half-row
+  padding above and below, a small left inset, and long questions wrap with
+  continuation lines hanging under the text.
+
 ## [0.24.0] - 2026-10-13
 
 ### Changed
