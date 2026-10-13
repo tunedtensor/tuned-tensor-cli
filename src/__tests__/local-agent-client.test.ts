@@ -176,6 +176,7 @@ describe("local agent conversation client", () => {
       "prepare_update_local_spec",
       "prepare_create_local_spec",
       "prepare_pipeline_run",
+      "prepare_download",
     ]);
     expect(created[0]?.systemPrompt).toMatch(/sealed local pipeline dry-run/i);
     expect(created[0]?.systemPrompt).toContain("prepare_pipeline_run");
@@ -186,8 +187,8 @@ describe("local agent conversation client", () => {
     expect(created[0]?.systemPrompt).toContain("search_hugging_face");
     expect(created[0]?.systemPrompt).toMatch(/models or datasets/i);
     expect(created[0]?.systemPrompt).toMatch(/Hugging Face.*never include secrets or private data/is);
-    expect(created[0]?.systemPrompt).toContain("tt datasets prefetch tunedtensor.json");
-    expect(created[0]?.systemPrompt).toContain("writes and previews require the user's approval");
+    expect(created[0]?.systemPrompt).toContain('call prepare_download with kind "dataset"');
+    expect(created[0]?.systemPrompt).toContain("writes, previews and downloads require the user's approval");
     expect(created[0]?.systemPrompt).toContain("inspect_training_source");
     expect(created[0]?.systemPrompt).toMatch(/observed behavior.*inferred rationale/is);
     expect(created[0]?.systemPrompt).toContain("examine_hardware");

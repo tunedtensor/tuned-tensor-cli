@@ -123,9 +123,10 @@ Foundation supports `runtime.artifactRoot` and `runtime.gpu`; its evaluation
 and training settings remain under `foundation`.
 
 `dataset_prebuilt.huggingface` names a Hugging Face dataset repo, an optional
-pinned `revision` and optional `columns` (`input`/`output` field names). Its
-split paths are then files inside that repo. `tt datasets prefetch` downloads
-them, and `tt pipeline run` downloads them automatically if they are missing.
+pinned `revision` and optional `columns` (`input`/`output` field names, or
+`messages` for a chat column). Its split paths are then `.jsonl` or `.parquet`
+files inside that repo; Parquet requires `columns`. `tt datasets prefetch`
+downloads them (the agent's `prepare_download` runs it after approval), and `tt pipeline run` downloads them automatically if they are missing.
 Runs record the resolved commit and file digests in the report. See the README
 section "Train on a Hugging Face dataset".
 

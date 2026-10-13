@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, readFile, realpath, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
+import { asyncBufferFromFile, parquetMetadataAsync, parquetReadObjects, parquetSchema } from "hyparquet";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   baseModelRevisionSchema,
@@ -173,25 +174,39 @@ export async function resolveCachedHuggingFaceDataset(args: {
 
 type ConversionStats = NonNullable<NonNullable<DatasetSource["conversion"]>["validation"]>;
 
+type DatasetColumns = NonNullable<HuggingFaceDatasetSource["columns"]>;
+
 function mappedField(row: Record<string, unknown>, name: string): string | null {
   const value = row[name];
   if (typeof value === "string") return value.trim() ? value : null;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
   return null;
 }
 
-async function readMappedRecords(path: string, split: Split, columns: NonNullable<HuggingFaceDatasetSource["columns"]>) {
-  const examples: BehaviorSpecExample[] = [];
-  let records = 0;
-  let skipped = 0;
-  const availableFields = new Set<string>();
-  // Stream: Hub splits can exceed the maximum string length of a single read.
+/** The first user turn and the assistant reply that directly follows it. */
+function firstExchange(value: unknown): BehaviorSpecExample | null {
+  if (!Array.isArray(value)) return null;
+  const turn = (index: number, role: string) => {
+    const message = value[index] as { role?: unknown; content?: unknown } | undefined;
+    return message?.role === role && typeof message.content === "string" && message.content.trim() ? message.content : null;
+  };
+  const user = value.findIndex((message) => (message as { role?: unknown } | null)?.role === "user");
+  const input = user === -1 ? null : turn(user, "user");
+  const output = user === -1 ? null : turn(user + 1, "assistant");
+  return input !== null && output !== null ? { input, output } : null;
+}
+
+function columnNames(columns: DatasetColumns): string[] {
+  return "messages" in columns ? [columns.messages] : [columns.input, columns.output];
+}
+
+/** Stream JSONL objects: Hub splits can exceed the maximum string length of a single read. */
+async function* jsonlRecords(path: string, split: Split): AsyncGenerator<Record<string, unknown>> {
   const lines = createInterface({ input: createReadStream(path, { encoding: "utf8" }), crlfDelay: Infinity });
   let index = -1;
   for await (const line of lines) {
     index += 1;
     if (!line.trim()) continue;
-    records += 1;
     let value: unknown;
     try {
       value = JSON.parse(line);
@@ -201,20 +216,51 @@ async function readMappedRecords(path: string, split: Split, columns: NonNullabl
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error(`${split} line ${index + 1}: expected a JSON object in ${path}`);
     }
-    const row = value as Record<string, unknown>;
+    yield value as Record<string, unknown>;
+  }
+}
+
+/** Read only the mapped Parquet columns, one row group at a time to bound memory. */
+async function* parquetRecords(path: string, split: Split, columns: DatasetColumns): AsyncGenerator<Record<string, unknown>> {
+  const file = await asyncBufferFromFile(path);
+  const metadata = await parquetMetadataAsync(file);
+  const available = parquetSchema(metadata).children.map((child) => child.element.name);
+  const missing = columnNames(columns).find((name) => !available.includes(name));
+  if (missing) {
+    throw new Error(
+      `${split} records have no "${missing}" field (dataset_prebuilt.huggingface.columns). Available fields: ${available.join(", ")}`,
+    );
+  }
+  let rowStart = 0;
+  for (const group of metadata.row_groups) {
+    const rowEnd = rowStart + Number(group.num_rows);
+    yield* await parquetReadObjects({ file, metadata, columns: columnNames(columns), rowStart, rowEnd });
+    rowStart = rowEnd;
+  }
+}
+
+async function readMappedRecords(path: string, split: Split, columns: DatasetColumns) {
+  const examples: BehaviorSpecExample[] = [];
+  let records = 0;
+  let skipped = 0;
+  const availableFields = new Set<string>();
+  const rows = path.toLowerCase().endsWith(".parquet") ? parquetRecords(path, split, columns) : jsonlRecords(path, split);
+  for await (const row of rows) {
+    records += 1;
     for (const name of Object.keys(row)) availableFields.add(name);
-    const input = mappedField(row, columns.input);
-    const output = mappedField(row, columns.output);
-    if (input === null || output === null) {
+    const example = "messages" in columns
+      ? firstExchange(row[columns.messages])
+      : { input: mappedField(row, columns.input), output: mappedField(row, columns.output) };
+    if (example === null || example.input === null || example.output === null) {
       skipped += 1;
       continue;
     }
-    examples.push({ input, output });
+    examples.push({ input: example.input, output: example.output });
   }
   // Diagnose a misspelled mapping only after considering all records. A sparse
   // first record follows the same skip rule as a sparse record anywhere else.
   if (records > 0) {
-    for (const name of [columns.input, columns.output]) {
+    for (const name of columnNames(columns)) {
       if (!availableFields.has(name)) {
         throw new Error(
           `${split} records have no "${name}" field (dataset_prebuilt.huggingface.columns). `
@@ -227,7 +273,7 @@ async function readMappedRecords(path: string, split: Split, columns: NonNullabl
 }
 
 /**
- * Convert plain JSONL records into TT chat rows with the spec's compiled
+ * Convert plain JSONL or Parquet records into TT chat rows with the spec's compiled
  * system message. Hub datasets cannot be edited in place, so the conversion
  * applies three deterministic, recorded rules: records with a missing or blank
  * mapped field are skipped, evaluation splits keep the first of any duplicate
@@ -237,7 +283,7 @@ async function readMappedRecords(path: string, split: Split, columns: NonNullabl
  */
 async function convertMappedDataset(args: {
   resolved: ResolvedHuggingFaceDataset;
-  columns: NonNullable<HuggingFaceDatasetSource["columns"]>;
+  columns: DatasetColumns;
   spec: SpecSnapshot;
   outputRoot: string;
 }): Promise<{ localPaths: ResolvedHuggingFaceDataset["localPaths"]; conversion: NonNullable<DatasetSource["conversion"]> }> {

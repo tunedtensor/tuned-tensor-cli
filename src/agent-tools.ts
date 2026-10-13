@@ -22,6 +22,7 @@ import { warningsFromSnapshot } from "./local-runtime/capability.js";
 import { DECISION_MODELS } from "./local-runtime/decision-models.js";
 import { inspectLocalSpec, prepareSpecUpdate } from "./spec-workspace.js";
 import { prepareLocalPipelineAction } from "./local-pipeline-action.js";
+import { prepareLocalPrefetch } from "./local-prefetch-action.js";
 import {
   LabelDownloadInput,
   LabelJobInput,
@@ -727,8 +728,8 @@ export function createTunedTensorTools(
           pipeline: Type.Optional(Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Null()])),
           dataset_prebuilt: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
             description: "Local chat JSONL files ({training, validation|test}), or a Hugging Face dataset: "
-              + "{huggingface: {repo, revision?: 40-char commit, columns?: {input, output}}, training: 'repo/path.jsonl', test|validation: ...}. "
-              + "The user downloads it with `tt datasets prefetch tunedtensor.json`.",
+              + "{huggingface: {repo, revision?: 40-char commit, columns?: {input, output} | {messages}}, training: 'repo/path.jsonl|.parquet', test|validation: ...}. "
+              + "Parquet files require columns. Download it afterwards with prepare_download.",
           })),
         }, { additionalProperties: false }),
       }, { additionalProperties: false }),
@@ -818,6 +819,25 @@ export function createTunedTensorTools(
             config_sha256: prepared.configSha256 ?? null,
             execution: "not started",
           },
+        ));
+      },
+    ),
+    define(
+      "prepare_download",
+      "Prepare download",
+      "Prepare downloading the adapter spec's Hugging Face dataset (kind \"dataset\", from dataset_prebuilt.huggingface) or its base model (kind \"base_model\") into the local Hugging Face cache. Approval runs `tt datasets prefetch` or `tt models prefetch` on the reviewed spec; edit the spec first if it does not name the right source. Never downloads until /approve.",
+      Type.Object({
+        kind: Type.Union([Type.Literal("dataset"), Type.Literal("base_model")]),
+        spec_path: Type.Optional(Type.String({ minLength: 1, maxLength: 500, description: "Workspace-relative tunedtensor.json; defaults to tunedtensor.json" })),
+      }, { additionalProperties: false }),
+      async (p) => {
+        const prepared = await prepareLocalPrefetch(workspaceRoot, p.kind, p.spec_path);
+        return await api.propose(proposal(
+          "prefetch_local",
+          p.kind === "dataset" ? "Download dataset" : "Download base model",
+          prepared.summary,
+          prepared.args,
+          prepared.preview,
         ));
       },
     ),

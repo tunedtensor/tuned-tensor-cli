@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- The agent can download the spec's Hugging Face dataset or base model. It
+  proposes `tt datasets prefetch` or `tt models prefetch` for the reviewed spec
+  and runs it with progress after approval.
+- Hugging Face dataset splits can be Parquet files with `columns`. A new
+  `{ "messages": "<column>" }` mapping turns each conversation's first user turn
+  and assistant reply into one example, so chat datasets such as
+  `HuggingFaceH4/ultrachat_200k` work without manual conversion.
+
 ## [0.24.0] - 2026-10-13
 
 ### Changed

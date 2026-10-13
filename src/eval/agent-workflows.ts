@@ -53,12 +53,12 @@ export const agentWorkflowScenarios: readonly AgentWorkflowScenario[] = [
   },
   {
     id: "dataset-handoff",
-    prompt: "Can you download the Hugging Face dataset already configured in my spec? Inspect it and tell me exactly what to type in this TT shell if you cannot download it yourself. Do not change the spec or start training. Does a dry-run download it?",
+    prompt: "Can you download the Hugging Face dataset already configured in my spec? Do not change the spec or start training. Does a dry-run download it?",
     specSource: JSON.stringify({ ...adapterSpec, dataset_prebuilt: {
       huggingface: { repo: "SetFit/tweet_sentiment_extraction", columns: { input: "text", output: "label_text" } },
       training: "train.jsonl", test: "test.jsonl",
     } }, null, 2) + "\n",
-    humanReview: "Verify the response hands off datasets prefetch and verify, does not claim a download happened, and says dry-runs never download. The configured dataset needs no edit.",
+    humanReview: "Verify the response summarizes the proposed download, does not claim a download happened, and says dry-runs never download. The configured dataset needs no edit.",
   },
   {
     id: "foundation-dataset-handoff",
@@ -78,6 +78,7 @@ export const agentWorkflowScenarios: readonly AgentWorkflowScenario[] = [
 // tool. The live runner aborts at that event for anything outside this list.
 export const allowedAgentEvalTools = new Set([
   "describe_pipeline", "validate_pipeline", "prepare_pipeline_run", "get_local_spec", "prepare_update_local_spec",
+  "prepare_download",
 ]);
 
 export function guardAgentEvalEvent(
@@ -143,6 +144,14 @@ export function gradeAgentWorkflow(
       check("diff is visible for review", String(record(action?.preview).diff).includes("@@ constraints @@"));
       check("no pipeline requested", !calls.some(call => call.payload.name === "prepare_pipeline_run"));
     }
+  } else if (scenario.id === "dataset-handoff") {
+    const action = actions[0];
+    const args = record(action?.arguments);
+    check("dataset guidance inspects the current spec", calls.some(call => call.payload.name === "get_local_spec"));
+    check("one dataset download awaits approval", turn?.status === "waiting_for_approval"
+      && actions.length === 1 && action?.operation === "prefetch_local" && action.status === "proposed"
+      && args.kind === "dataset" && args.spec_sha256 === evidence.specSha256);
+    check("dataset guidance does not prepare a run or edit", !calls.some(call => ["prepare_pipeline_run", "prepare_update_local_spec"].includes(String(call.payload.name))));
   } else if (scenario.id === "adapter-dry-run" || scenario.id === "foundation-dry-run") {
     check("pipeline preparation tool used", calls.some((call) => call.payload.name === "prepare_pipeline_run"));
     const action = actions[0];
@@ -195,15 +204,10 @@ export function gradeAgentWorkflow(
     }
   } else {
     check("no mutation proposed", actions.length === 0 && evidence.persistedActions.length === 0);
-    if (scenario.id === "dataset-handoff" || scenario.id === "foundation-dataset-handoff") {
+    if (scenario.id === "foundation-dataset-handoff") {
       check("dataset guidance inspects the current spec", calls.some(call => call.payload.name === "get_local_spec"));
       check("dataset guidance does not prepare a run", !calls.some(call => call.payload.name === "prepare_pipeline_run"));
-      if (scenario.id === "dataset-handoff") {
-        check("download and offline verification commands provided", /\bdatasets\s+prefetch\b/.test(turn?.response ?? "")
-          && /\bdatasets\s+verify\b/.test(turn?.response ?? ""));
-      } else {
-        check("foundation workflow inspected", calls.some(call => call.payload.name === "describe_pipeline"));
-      }
+      check("foundation workflow inspected", calls.some(call => call.payload.name === "describe_pipeline"));
     }
     if (scenario.id === "serving-handoff") {
       // Catch observed invalid syntax; human review still checks the full handoff.

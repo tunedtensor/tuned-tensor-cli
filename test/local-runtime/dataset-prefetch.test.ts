@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
+import { parquetWriteBuffer } from "hyparquet-writer";
 import {
   fineTuneRunRequestSchema,
   localAdapterSpecFileSchema,
@@ -43,7 +44,7 @@ function chatRow(input: string, output: string, system = "Classify sentiment."):
 }
 
 /** Lay files out exactly as huggingface_hub does: snapshot symlinks into content-addressed blobs. */
-async function cacheDataset(hfHome: string, files: Record<string, string>, options: { ref?: boolean } = {}) {
+async function cacheDataset(hfHome: string, files: Record<string, string | Uint8Array>, options: { ref?: boolean } = {}) {
   const repository = join(hfHome, "hub", "datasets--org--tweets");
   const snapshot = join(repository, "snapshots", revision);
   await mkdir(join(repository, "blobs"), { recursive: true });
@@ -80,7 +81,7 @@ function config(root: string, overrides: Record<string, unknown> = {}) {
   });
 }
 
-test("a Hugging Face dataset source requires contained .jsonl repo paths", () => {
+test("a Hugging Face dataset source requires contained .jsonl or mapped .parquet repo paths", () => {
   const base = { ...spec, dataset_prebuilt: { huggingface: { repo }, training: "data/train.jsonl", test: "data/test.jsonl" } };
   assert.equal(localAdapterSpecFileSchema.safeParse(base).success, true);
   for (const training of ["/abs/train.jsonl", "../train.jsonl", "data/../../x.jsonl", "C:\\train.jsonl", "file:///x.jsonl", "data//x.jsonl"]) {
@@ -89,8 +90,12 @@ test("a Hugging Face dataset source requires contained .jsonl repo paths", () =>
     assert.match(JSON.stringify(parsed.error?.issues), /file path inside the dataset repo/);
   }
   const parquet = localAdapterSpecFileSchema.safeParse({ ...base, dataset_prebuilt: { ...base.dataset_prebuilt, training: "train.parquet" } });
-  assert.match(JSON.stringify(parquet.error?.issues), /Parquet, CSV and other formats are not supported yet/);
-  for (const huggingface of [{ repo: "no-slash" }, { repo, revision: "main" }, { repo, extra: true }, { repo, columns: { input: "text" } }]) {
+  assert.match(JSON.stringify(parquet.error?.issues), /Parquet file; set dataset_prebuilt.huggingface.columns/);
+  const mapped = { ...base.dataset_prebuilt, training: "train.parquet", huggingface: { repo, columns: { messages: "messages" } } };
+  assert.equal(localAdapterSpecFileSchema.safeParse({ ...base, dataset_prebuilt: mapped }).success, true);
+  const csv = localAdapterSpecFileSchema.safeParse({ ...base, dataset_prebuilt: { ...base.dataset_prebuilt, training: "train.csv" } });
+  assert.match(JSON.stringify(csv.error?.issues), /CSV and other formats are not supported yet/);
+  for (const huggingface of [{ repo: "no-slash" }, { repo, revision: "main" }, { repo, extra: true }, { repo, columns: { input: "text" } }, { repo, columns: { messages: "m", input: "text", output: "label" } }]) {
     assert.equal(localAdapterSpecFileSchema.safeParse({ ...base, dataset_prebuilt: { ...base.dataset_prebuilt, huggingface } }).success, false, JSON.stringify(huggingface));
   }
 });
@@ -258,6 +263,66 @@ test("column mapping converts records with recorded, deterministic cleanup", asy
       resolveRequestDataset(request({ huggingface: { repo, columns: { input: "txt", output: "label" } }, training: "train.jsonl", test: "test.jsonl" }), config(root)),
       /no "txt" field.*Available fields: text, label/,
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Parquet splits convert only the mapped columns across row groups", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-dataset-parquet-"));
+  try {
+    const parquet = (text: string[], label: bigint[]) => new Uint8Array(parquetWriteBuffer({
+      columnData: [
+        { name: "text", data: text, type: "STRING" },
+        { name: "label", data: label, type: "INT64" },
+        { name: "unused", data: text.map(() => "x"), type: "STRING" },
+      ],
+      rowGroupSize: 2,
+    }));
+    await cacheDataset(join(root, "hf"), {
+      "data/train.parquet": parquet(["one", "two", "three", ""], [1n, 2n, 3n, 4n]),
+      "data/test.parquet": parquet(["four"], [4n]),
+    });
+    const run = request({ huggingface: { repo, columns: { input: "text", output: "label" } }, training: "data/train.parquet", test: "data/test.parquet" });
+    const resolved = await resolveRequestDataset(run, config(root));
+    assert.deepEqual(resolved.dataset_source?.conversion?.training, {
+      records: 4, kept: 3, skipped_missing_fields: 1, dropped_duplicate_inputs: 0, dropped_eval_overlap: 0,
+    });
+    const rows = (await readFile(resolved.dataset_prebuilt!.training, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(rows.map((row) => [row.messages[1].content, row.messages[2].content]), [["one", "1"], ["two", "2"], ["three", "3"]]);
+    await assert.rejects(
+      resolveRequestDataset(request({ huggingface: { repo, columns: { input: "txt", output: "label" } }, training: "data/train.parquet", test: "data/test.parquet" }), config(root)),
+      /no "txt" field.*Available fields: text, label, unused/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a messages column maps each conversation's first exchange", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-dataset-messages-"));
+  try {
+    const records = (rows: unknown[]) => `${rows.map((messages) => JSON.stringify({ messages })).join("\n")}\n`;
+    const turn = (role: string, content: string) => ({ role, content });
+    await cacheDataset(join(root, "hf"), {
+      "train.jsonl": records([
+        [turn("system", "ignored"), turn("user", "hi"), turn("assistant", "hello"), turn("user", "more"), turn("assistant", "later")],
+        [turn("user", "unanswered")],
+        [turn("user", "first"), turn("user", "second"), turn("assistant", "reply")],
+        "not a list",
+      ]),
+      "test.jsonl": records([[turn("user", "q"), turn("assistant", "a")]]),
+    });
+    const run = request({ huggingface: { repo, columns: { messages: "messages" } }, training: "train.jsonl", test: "test.jsonl" });
+    const resolved = await resolveRequestDataset(run, config(root));
+    assert.equal(resolved.dataset_source?.conversion?.training.kept, 1);
+    assert.equal(resolved.dataset_source?.conversion?.training.skipped_missing_fields, 3);
+    const [row] = (await readFile(resolved.dataset_prebuilt!.training, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(row.messages, [
+      { role: "system", content: "Classify sentiment." },
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+    ]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
