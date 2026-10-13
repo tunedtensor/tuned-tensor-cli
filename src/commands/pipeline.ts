@@ -26,6 +26,7 @@ import { runDecisionPipeline } from "../local-runtime/decision-runner.js";
 import { warningsFromSnapshot } from "../local-runtime/capability.js";
 import { readHardwareSnapshot } from "../local-runtime/hardware-snapshot.js";
 import { ensureDatasetCached } from "../local-runtime/dataset-prefetch.js";
+import { applySpecLock, enforceSpecLock, readSpecLock } from "../local-runtime/assets.js";
 
 import { createRunConsoleReporter } from "../local-runtime/console-reporter.js";
 
@@ -298,7 +299,10 @@ export function registerPipelineCommands(parent: Command): void {
       };
       // Download a missing dataset before starting the recorded pipeline.
       const reporter = options.quiet ? undefined : createRunConsoleReporter({ verbose: options.verbose });
-      const { request } = await ensureDatasetCached({ request: input.request, config, reporter });
+      // The spec's lock pins dataset revisions and file digests (tunedtensor.lock.json).
+      const lock = spec ? await readSpecLock(spec.path) : undefined;
+      const { request } = await ensureDatasetCached({ request: applySpecLock(input.request, lock), config, reporter });
+      if (spec) await enforceSpecLock({ specPath: spec.path, request, config, reporter });
       const result = await runLocalPipeline({
         request,
         config,

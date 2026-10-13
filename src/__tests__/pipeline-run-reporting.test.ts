@@ -13,6 +13,12 @@ vi.mock("../local-runtime/orchestrator.js", async (importOriginal) => ({
     artifactDir: "/tmp/run",
   })),
 }));
+// These tests inspect CLI reporting; model downloads and lock enforcement are
+// exercised by the connected runtime workflow tests.
+vi.mock("../local-runtime/assets.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../local-runtime/assets.js")>(),
+  enforceSpecLock: vi.fn(),
+}));
 
 const { runLocalPipeline } = await import("../local-runtime/orchestrator.js");
 const { createProgram } = await import("../cli.js");

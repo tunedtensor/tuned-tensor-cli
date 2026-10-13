@@ -127,6 +127,10 @@ pinned `revision` and optional `columns` (`input`/`output` field names, or
 `messages` for a chat column). Its split paths are then `.jsonl` or `.parquet`
 files inside that repo; Parquet requires `columns`. `tt datasets prefetch`
 downloads them (the agent's `prepare_download` runs it after approval), and `tt pipeline run` downloads them automatically if they are missing.
+`prepare_download` and `--repo` also download sources the spec does not name yet;
+adopt them with a spec edit afterwards. Spec downloads and the first real run
+write `tunedtensor.lock.json` beside the spec, which pins the dataset and
+base-model commit and file digests; later runs stop when they disagree with it.
 Runs record the resolved commit and file digests in the report. See the README
 section "Train on a Hugging Face dataset".
 

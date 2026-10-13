@@ -42,11 +42,12 @@ export interface PreparedLocalPipelineAction {
 export interface LocalPipelineCommandResult {
   exitCode: number | null;
   signal?: NodeJS.Signals | null;
+  stdout?: string;
 }
 
 export type LocalPipelineCommandRunner = (
   args: string[],
-  options: { cwd: string; signal?: AbortSignal },
+  options: { cwd: string; signal?: AbortSignal; captureJson?: boolean },
 ) => Promise<LocalPipelineCommandResult>;
 
 export interface ValidatePreparedLocalPipelineActionArgs {

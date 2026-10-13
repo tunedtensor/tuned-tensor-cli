@@ -11,6 +11,7 @@ import { fileUri, writeJson } from "./artifacts.js";
 import {
   assertCertifiedBaseModelConfig,
   defaultBaseModelRevision,
+  isCertifiedTrainingModel,
   resolveRequestedBaseModelRevision,
   resolveTrainingModel,
 } from "./model-registry.js";
@@ -20,6 +21,7 @@ import {
   withBundledPythonEnvironment,
 } from "./process-runner.js";
 import type { LocalRunReporter } from "./run-reporter.js";
+import { recordAssetDownload } from "./assets.js";
 import {
   minimalMachineLearningEnvironment,
   resolveHuggingFaceCacheLayout,
@@ -31,6 +33,8 @@ export interface ModelPrefetchPayload {
   revision?: string;
   model_cache?: string;
   local_files_only?: boolean;
+  /** Resolve the latest commit of an uncertified model instead of requiring a pin. */
+  resolve_latest?: boolean;
 }
 
 export interface ModelPrefetchReport {
@@ -52,6 +56,7 @@ export interface ModelPrefetchReport {
   log_uri?: string;
   command?: string[];
   reason?: string;
+  manifest_path?: string;
 }
 
 type CertifiedFileDigest = { algorithm: "sha1" | "sha256"; digest: string };
@@ -300,6 +305,26 @@ export function buildModelPrefetchPayload(
   };
 }
 
+/**
+ * A download named directly by repo rather than by a spec. Certified models
+ * stay bound to their reviewed revision; an uncertified model without a pin
+ * resolves its latest commit, which the download then reports.
+ */
+export function buildModelSourcePrefetchPayload(
+  source: { repo: string; revision?: string },
+  config: LocalRunnerConfig,
+): ModelPrefetchPayload {
+  const model = resolveTrainingModel(source.repo);
+  const revision = source.revision || isCertifiedTrainingModel(model.id)
+    ? resolveRequestedBaseModelRevision(model.id, source.revision)
+    : undefined;
+  return {
+    base_model: model.id,
+    ...(revision ? { revision } : { resolve_latest: true }),
+    ...(config.paths.modelCache ? { model_cache: resolve(config.paths.modelCache) } : {}),
+  };
+}
+
 export function safeName(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "model";
 }
@@ -408,23 +433,29 @@ export async function verifyLocalBaseModel(
 }
 
 export async function prefetchBaseModel(args: {
-  request: FineTuneRunRequest;
+  /** Download the spec's base model ... */
+  request?: FineTuneRunRequest;
+  /** ... or a model named directly. */
+  source?: { repo: string; revision?: string };
   config: LocalRunnerConfig;
   reporter?: LocalRunReporter;
   localOnly?: boolean;
 }): Promise<ModelPrefetchReport> {
+  if (!args.request === !args.source) throw new Error("Model prefetch needs either a spec request or a source repo.");
   const payload: ModelPrefetchPayload = {
-    ...buildModelPrefetchPayload(args.request, args.config),
+    ...(args.source
+      ? buildModelSourcePrefetchPayload(args.source, args.config)
+      : buildModelPrefetchPayload(args.request!, args.config)),
     ...(args.localOnly ? { local_files_only: true } : {}),
   };
   const artifactDir = resolve(
     args.config.artifactRoot,
     args.localOnly ? "verify-base" : "prefetch",
-    `${safeName(args.request.spec_snapshot.base_model)}-${new Date().toISOString().replace(/[:.]/g, "-")}`,
+    `${safeName(payload.base_model)}-${new Date().toISOString().replace(/[:.]/g, "-")}`,
   );
   await mkdir(artifactDir, { recursive: true });
 
-  if (args.config.paths.baseModel) {
+  if (args.request && args.config.paths.baseModel) {
     const localPath = resolve(args.config.paths.baseModel);
     const verified = await verifyLocalBaseModel(
       localPath,
@@ -531,6 +562,12 @@ export async function prefetchBaseModel(args: {
       effectiveModelCache,
     );
   }
+  const recorded = args.localOnly ? undefined : await recordAssetDownload({
+    kind: "model",
+    repo: payload.base_model,
+    revision: snapshotRevision.data,
+    snapshotPath: output.snapshot_path!,
+  });
 
   await args.reporter?.onEvent?.({
     stage: "model_prefetch",
@@ -565,5 +602,6 @@ export async function prefetchBaseModel(args: {
     output_path: outputPath,
     log_uri: fileUri(logPath),
     command: entrypoint.displayCommand,
+    ...(recorded ? { manifest_path: recorded.path } : {}),
   };
 }

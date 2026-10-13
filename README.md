@@ -545,13 +545,60 @@ tt datasets verify tunedtensor.json     # offline checksum check of the cached f
 tt pipeline run --spec tunedtensor.json # downloads automatically if still missing
 ```
 
-In `tt agent`, ask it to download the dataset or the base model. It proposes the
-same `tt datasets prefetch` or `tt models prefetch` command for the reviewed spec
-and runs it after you approve.
+In `tt agent`, ask it to download a dataset or model. It proposes the same
+`tt datasets prefetch` or `tt models prefetch` command and runs it after you
+approve. The source does not have to be in the spec yet: download first, look at
+it, then ask the agent to adopt it, and it proposes a spec edit pinned to the
+commit the download resolved.
 Approval checks the workspace, spec and adjacent legacy runner configuration,
 then runs a private snapshot of the reviewed settings. Later edits cannot redirect
 the running download. After a failure or cancellation, ask for a new download
 proposal to resume from the cache.
+
+### Downloads and the lock file
+
+Any Hugging Face dataset files or model can be downloaded without editing a spec:
+
+```bash
+tt datasets prefetch --repo HuggingFaceH4/ultrachat_200k \
+  --training data/train_sft-00000-of-00003.parquet --test data/test_sft-00000-of-00001.parquet
+tt models prefetch --repo Qwen/Qwen3-4B-Instruct-2507   # add --revision <sha> to pin
+```
+
+Direct downloads also work before a spec exists or while it is invalid; those
+workspaces use the default cache. An approved agent download reports the commit
+from that command's result for a later spec edit.
+
+Files stay in the Hugging Face cache (`HF_HOME`, or `runtime.paths.modelCache`).
+Each download also writes a manifest with the repo, commit, file digests and
+location under `~/.tuned-tensor/assets/`, so downloads are easy to find later:
+
+```bash
+tt assets list                 # everything downloaded, newest first
+tt assets path org/name        # where it is on disk (org/name@<sha> for one revision)
+tt assets verify [org/name]    # re-hash the files against their manifests
+```
+
+`tunedtensor.lock.json` beside the spec pins what a project trains on, the way
+`.terraform.lock.hcl` pins providers: the dataset and base-model repo, commit,
+and each file's Hugging Face content digest (`sha256:` for LFS files,
+`git-sha1:` for small git files). `tt datasets prefetch` and `tt models prefetch`
+for the spec write it, and the first real run records any entry it is missing.
+After that, `tt pipeline run`:
+
+- uses the locked commit when the spec's dataset does not pin `revision`;
+- re-hashes the cached bytes and stops if the spec names another repo or revision,
+  a cached file's digest differs, or a locked model file is missing. If the change is intended, rerun the matching
+  `prefetch` command for the spec to update the lock.
+
+A first local run with an empty model cache downloads and locks the model before
+training starts. Dry runs never download assets or write the lock.
+
+An unpinned dataset stays on its locked commit, including for `tt datasets prefetch`.
+To move it to a newer commit, pin that `revision` in the spec and prefetch again.
+
+Commit the lock file with the spec. Runs that load the base model from
+`runtime.paths.baseModel` or on an AWS GPU host check only the dataset.
 
 - Split paths are files inside the repo: one `.jsonl` or `.parquet` file per
   split (pick one shard of a sharded split). CSV is not supported yet.

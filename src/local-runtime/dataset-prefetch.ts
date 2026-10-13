@@ -29,6 +29,7 @@ import {
   withBundledPythonEnvironment,
 } from "./process-runner.js";
 import type { LocalRunReporter } from "./run-reporter.js";
+import { recordAssetDownload } from "./assets.js";
 
 type Split = "training" | "validation" | "test";
 const SPLITS: readonly Split[] = ["training", "validation", "test"];
@@ -55,6 +56,7 @@ export interface DatasetPrefetchReport extends DatasetSource {
   artifact_dir?: string;
   log_uri?: string;
   command?: string[];
+  manifest_path?: string;
 }
 
 type HuggingFaceDatasetPrebuilt = NonNullable<FineTuneRunRequest["dataset_prebuilt"]> & {
@@ -479,6 +481,13 @@ export async function prefetchHuggingFaceDataset(args: {
     pinned: Boolean(dataset.huggingface.revision),
   });
   const sizeBytes = Object.values(source.files).reduce((total, file) => total + (file?.size_bytes ?? 0), 0);
+  const recorded = await recordAssetDownload({
+    kind: "dataset",
+    repo: source.repo,
+    revision: source.revision,
+    snapshotPath: source.snapshot_path,
+    paths: Object.values(source.files).flatMap((file) => file ? [file.path] : []),
+  });
   await args.reporter?.onEvent?.({
     stage: "dataset_prefetch",
     status: "completed",
@@ -495,6 +504,7 @@ export async function prefetchHuggingFaceDataset(args: {
     artifact_dir: artifactDir,
     log_uri: fileUri(logPath),
     command: entrypoint.displayCommand,
+    manifest_path: recorded.path,
   };
 }
 

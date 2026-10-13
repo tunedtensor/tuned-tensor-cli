@@ -417,6 +417,8 @@ function renderModelPrefetch(value: Record<string, unknown>): void {
     ["Files", text(value.file_count)],
     ["Size", displayBytes(value.size_bytes)],
     ["Cache", text(value.model_cache) ?? text(value.hf_home)],
+    ["Manifest", text(value.manifest_path)],
+    ...(value.lock_path ? [["Lock", text(value.lock_path)] as [string, string | undefined]] : []),
   ]);
 }
 
@@ -436,6 +438,8 @@ function renderDatasetPrefetch(value: Record<string, unknown>): void {
     }),
     ["Snapshot", text(value.snapshot_path)],
     ["Cache", text(value.hub_cache)],
+    ["Manifest", text(value.manifest_path)],
+    ...(value.lock_path ? [["Lock", text(value.lock_path)] as [string, string | undefined]] : []),
   ]);
 }
 

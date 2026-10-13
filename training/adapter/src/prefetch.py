@@ -137,6 +137,16 @@ def verify_snapshot(snapshot: Path, expected_model_id: str | None = None) -> tup
     return files, verified_blobs
 
 
+def check_requested_revision(base_model: str, revision: str | None, resolve_latest: bool) -> None:
+    """Certified models keep their reviewed revision. An uncertified model needs
+    a pinned commit, except for a direct download that resolves its latest
+    commit (`tt models prefetch --repo`); the resolved SHA is reported so the
+    spec can pin it."""
+    if resolve_latest and revision is None and not is_certified_base_model(base_model):
+        return
+    assert_certified_base_model_revision(base_model, revision, "Prefetch base model revision")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prefetch a TT Hugging Face base model for local use.")
     parser.add_argument("--input", required=True)
@@ -147,11 +157,7 @@ def main() -> None:
     base_model = str(payload["base_model"])
     assert_certified_base_model(base_model, "Prefetch base model")
     requested_revision = payload.get("revision")
-    assert_certified_base_model_revision(
-        base_model,
-        requested_revision,
-        "Prefetch base model revision",
-    )
+    check_requested_revision(base_model, requested_revision, bool(payload.get("resolve_latest")))
     cache_dir = payload.get("model_cache")
     configure_hugging_face_cache(cache_dir)
 

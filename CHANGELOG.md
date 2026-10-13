@@ -4,6 +4,18 @@
 
 ### Added
 
+- Download any Hugging Face dataset or model without editing the spec first:
+  `tt datasets prefetch --repo org/name --training <file>` and
+  `tt models prefetch --repo org/name`. The agent's `prepare_download` accepts
+  the same source, and its result reports the resolved commit to pin in a spec
+  edit. Uncertified models no longer need a commit SHA before downloading.
+- Every download writes a manifest under `~/.tuned-tensor/assets/`.
+  `tt assets list`, `tt assets path <org/name>` and `tt assets verify` find
+  downloads and re-hash them.
+- `tunedtensor.lock.json` beside the spec pins the dataset and base-model commit
+  and file digests. Spec prefetches write it, the first real run fills any gap,
+  and later runs use the locked dataset commit and stop when the spec or cache
+  disagrees with the lock.
 - The agent can download the spec's Hugging Face dataset or base model. It
   proposes `tt datasets prefetch` or `tt models prefetch` for the reviewed spec
   and runs it with progress after approval. Downloads use a private snapshot
