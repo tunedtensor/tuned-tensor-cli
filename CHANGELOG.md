@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- The local agent runs on Pi 1.2.0 (from 0.84.1). `tt agent models` lists newer
+  models such as Claude Opus 5.5 and Haiku 5.5, GPT-6, and Grok 4.7, and
+  includes Pi's provider fixes since 0.84.1.
+- **Azure provider renamed:** Pi renamed `azure-openai-responses` to `azure`. If you use Azure,
+  rename the provider in `~/.tuned-tensor/agent/auth.json` and `models.json`,
+  then run `tt agent configure --provider azure --model <model>`. Until then,
+  `tt` reports the old provider as unknown.
+
 ## [0.23.0] - 2026-10-11
 
 ### Added

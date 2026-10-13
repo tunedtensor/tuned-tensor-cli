@@ -15,7 +15,8 @@ import type { LocalPipelineCommandRunner } from "../../local-pipeline-action.js"
 const execFileAsync = promisify(execFile);
 type Context = Parameters<StreamFn>[1];
 type Message = Awaited<ReturnType<Awaited<ReturnType<StreamFn>>["result"]>>;
-type Reply = string | { tool: string; args: Record<string, unknown> } | { error: string };
+type ToolArgs = Extract<Message["content"][number], { type: "toolCall" }>["arguments"];
+type Reply = string | { tool: string; args: ToolArgs } | { error: string };
 
 const spec = {
   name: "Feedback labels",
@@ -229,6 +230,25 @@ describe("conversation workflow contracts (scripted provider, real agent and too
     expect(result).toMatchObject({ status: "failed", actions: [] });
     expect((await c.store.load(thread.id)).actions).toEqual([]);
     expect(c.streamSimple).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts every turn from the current system prompt and stores only the conversation", async () => {
+    const c = conversation(["First answer.", "Second answer."]);
+    const thread = await c.client.createThread();
+    await c.client.runTurn(thread.id, "Hello", () => {});
+    const saved = await c.store.load(thread.id);
+    expect(saved.messages.map((message) => (message as { role: string }).role)).toEqual(["user", "assistant"]);
+
+    // Threads saved with a system message must not pin an outdated prompt.
+    saved.messages.unshift({ role: "system", content: "STALE PROMPT", toolsAdded: [], timestamp: 0 });
+    await c.store.save(saved);
+    await c.client.runTurn(thread.id, "Again", () => {});
+    const sent = JSON.stringify(c.contexts[1].messages);
+    expect(sent).not.toContain("STALE PROMPT");
+    expect(sent).toContain("local Tuned Tensor assistant");
+    expect(c.contexts[1].messages.filter((message) => message.role === "system")).toHaveLength(1);
+    expect((await c.store.load(thread.id)).messages.map((message) => (message as { role: string }).role))
+      .toEqual(["user", "assistant", "user", "assistant"]);
   });
 
   it("stops a model that repeatedly calls tools at the production turn budget", async () => {

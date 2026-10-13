@@ -217,7 +217,9 @@ describe("live agent workflow grading", () => {
     expect(failedChecks("serving-handoff", evidence)).toContain("handoff avoids unsupported command syntax");
   });
 
-  it.each([
+  type Message = Awaited<ReturnType<Awaited<ReturnType<StreamFn>>["result"]>>;
+  type ToolArgs = Extract<Message["content"][number], { type: "toolCall" }>["arguments"];
+  it.each<{ name: string; args: ToolArgs }>([
     { name: "search_hugging_face", args: { kind: "model", query: "Qwen" } },
     { name: "examine_hardware", args: { full: true } },
   ])("aborts the real Pi loop before $name can dispatch", async ({ name, args }) => {
@@ -228,7 +230,6 @@ describe("live agent workflow grading", () => {
     const hardwareSpy = vi.spyOn(hardware, "assessHardware")
       .mockRejectedValue(new Error("Hardware probe must not be called"));
     const forbidden = vi.fn(async (): Promise<never> => { throw new Error("Unexpected API call"); });
-    type Message = Awaited<ReturnType<Awaited<ReturnType<StreamFn>>["result"]>>;
     const message: Message = {
       role: "assistant", api: "openai-completions", provider: "fixture", model: "scripted",
       timestamp: 0, stopReason: "toolUse",

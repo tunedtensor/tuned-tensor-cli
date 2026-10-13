@@ -70,6 +70,13 @@ async function systemPrompt(cloudEnabled: boolean): Promise<string> {
   return `${SYSTEM_PROMPT}\n${account}\nYou have no general filesystem tools. Workspace-scoped capabilities can review the spec, propose a validated edit, prepare one new spec folder, or prepare a sealed pipeline dry-run; writes and previews require the user's approval.\n${host}`;
 }
 
+// Pi keeps the system prompt as a transcript message and reuses a stored one
+// instead of the prompt passed in. The prompt depends on account and host state,
+// so threads store only the conversation and every turn starts from a fresh prompt.
+function withoutSystemMessages(messages: unknown[]): unknown[] {
+  return messages.filter((message) => (message as { role?: unknown } | null)?.role !== "system");
+}
+
 export interface LocalPiAgentOptions {
   model: AgentModelInfo;
   thinking: AgentSelection["thinking"];
@@ -231,7 +238,7 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
         model: selected.model,
         thinking: selected.thinking,
         systemPrompt: await systemPrompt(Boolean(options.cloudEnabled)),
-        messages: state.messages,
+        messages: withoutSystemMessages(state.messages),
         tools,
         streamSimple: options.modelRuntime.streamSimple?.bind(options.modelRuntime),
       });
@@ -282,7 +289,7 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
         signal?.removeEventListener("abort", abort);
         unsubscribe();
       }
-      state.messages = agent.state.messages;
+      state.messages = withoutSystemMessages(agent.state.messages);
       if (state.thread.title === "New conversation") state.thread.title = titleFrom(options.store.redact(prompt));
       state.thread.last_message_at = now();
       await persist(state);
