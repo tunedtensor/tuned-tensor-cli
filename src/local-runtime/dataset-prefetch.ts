@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, readFile, realpath, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
-import { asyncBufferFromFile, parquetMetadataAsync, parquetReadObjects, parquetSchema } from "hyparquet";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { asyncBufferFromFile, parquetMetadataAsync, parquetReadObjects, parquetSchema } from "hyparquet";
 import {
   baseModelRevisionSchema,
   datasetSourceSchema,
