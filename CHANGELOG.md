@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.24.0] - 2026-10-13
 
 ### Changed
 
@@ -13,6 +13,12 @@
   `tt` reports the rename with migration instructions. Update
   `TUNED_TENSOR_AGENT_PROVIDER` too if set; keep the `api` field
   `azure-openai-responses` and `AZURE_OPENAI_*` environment variables unchanged.
+
+### Fixed
+
+- Resumed conversations use the current account and hardware instructions and
+  available tools. Saved Pi system messages no longer keep an outdated prompt
+  or cloud tool declarations after logout.
 
 ## [0.23.0] - 2026-10-11
 
