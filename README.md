@@ -205,7 +205,16 @@ search public Hugging Face model or dataset metadata for foundation and
 fine-tuning discovery. A Hub search sends only the search query to
 `huggingface.co`; it uses no Hugging Face token, downloads nothing, and omits
 model-card and dataset-card text. Search results are discovery metadata, not a
-guarantee that a model or dataset is compatible with a TT workflow.
+guarantee that a model or dataset is compatible with a TT workflow. The agent
+can inspect a public dataset's exact JSONL/Parquet filenames, sizes, revision,
+and declared columns/splits before proposing a download. Declared schema comes
+from dataset-card metadata; it is not validation of the file contents.
+
+When a conversation approaches the model's context budget, TT omits older tool
+exchanges from the model request and shows a notice. The saved transcript and
+pending approvals remain intact. If the remaining conversation is too large, or
+the model stops at its token limit, TT reports the problem instead of silently
+returning to the prompt.
 
 For educational questions about how or why training works, the agent can read
 the exact Python implementation shipped with the running TT build. The source
@@ -549,7 +558,8 @@ In `tt agent`, ask it to download a dataset or model. It proposes the same
 `tt datasets prefetch` or `tt models prefetch` command and runs it after you
 approve. The source does not have to be in the spec yet: download first, look at
 it, then ask the agent to adopt it, and it proposes a spec edit pinned to the
-commit the download resolved.
+commit the download resolved. A download alone needs a training filename, not
+a validation split or column mapping; those are required when configuring training.
 Approval checks the workspace, spec and adjacent legacy runner configuration,
 then runs a private snapshot of the reviewed settings. Later edits cannot redirect
 the running download. After a failure or cancellation, ask for a new download

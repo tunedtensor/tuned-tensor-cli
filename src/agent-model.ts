@@ -16,6 +16,8 @@ export interface AgentModelInfo {
   provider: string;
   name?: string;
   reasoning?: boolean;
+  contextWindow?: number;
+  maxTokens?: number;
 }
 
 export interface AgentModelRuntime {

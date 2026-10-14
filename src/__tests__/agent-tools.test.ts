@@ -585,12 +585,53 @@ exit 1
     });
   });
 
+  it("inspects exact dataset paths and declared schema without fetching rows or proposing changes", async () => {
+    const api = fakeApi();
+    const fetchImpl = vi.fn(async (_url: unknown, _init?: unknown) => new Response(JSON.stringify({
+      sha: "a".repeat(40), gated: false,
+      siblings: [{ rfilename: "README.md" }, { rfilename: "data/train-000.parquet", size: 1234 }, { rfilename: "eval.jsonl", size: 456 }],
+      cardData: { dataset_info: { features: [{ name: "prompt", dtype: "string" }, { name: "completion", dtype: "string" }], splits: [{ name: "train", num_examples: 10 }] } },
+    })));
+    const inspect = createTunedTensorTools(api, { fetchImpl }).find(t => t.name === "inspect_hugging_face_dataset")!;
+    const result = await inspect.execute("inspect", { repo: "org/python" });
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe("https://huggingface.co/api/datasets/org/python?blobs=true");
+    expect(result.details).toMatchObject({
+      revision: "a".repeat(40),
+      files: [{ path: "data/train-000.parquet", size_bytes: 1234 }, { path: "eval.jsonl", size_bytes: 456 }],
+      declared_schema: [{ features: [{ name: "prompt" }, { name: "completion" }], splits: [{ name: "train", num_examples: 10 }] }],
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(api.propose).not.toHaveBeenCalled();
+    for (const repo of ["../secret", "https://evil.example/data", "org/repo?redirect=evil", "org/repo/extra"]) {
+      expect(Value.Check(inspect.parameters, { repo })).toBe(false);
+    }
+  });
+
+  it("does not invent missing schema and reports a bounded partial listing", async () => {
+    const inspect = createTunedTensorTools(fakeApi(), { fetchImpl: async () => new Response(JSON.stringify({
+      sha: "b".repeat(40), siblings: Array.from({ length: 105 }, (_, i) => ({ rfilename: `data/${i}.jsonl` })),
+    })) }).find(t => t.name === "inspect_hugging_face_dataset")!;
+    const result = await inspect.execute("inspect", { repo: "org/data" });
+    expect(result.details).toMatchObject({ declared_schema: [], files_truncated: true, total_supported_files: 105 });
+    expect((result.details as { files: unknown[] }).files).toHaveLength(100);
+  });
+
+  it.each([
+    [new Response("not json"), /invalid dataset inspection response/],
+    [new Response(JSON.stringify({ siblings: [] })), /invalid dataset metadata/],
+    [new Response("denied", { status: 403 }), /dataset inspection failed.*403/],
+    [new Response("", { headers: { "content-length": "300000" } }), /too large/],
+  ])("surfaces dataset inspection failures", async (response, error) => {
+    const inspect = createTunedTensorTools(fakeApi(), { fetchImpl: async () => response }).find(t => t.name === "inspect_hugging_face_dataset")!;
+    await expect(inspect.execute("inspect", { repo: "org/data" })).rejects.toThrow(error);
+  });
+
   it("exposes exactly the allowed hosted tool set", () => {
     expect(createTunedTensorTools(fakeApi()).map((candidate) => candidate.name)).toEqual([
       "list_specs", "get_spec", "list_runs", "get_run", "diagnose_run",
       "report_run", "estimate_run", "list_datasets", "get_dataset",
       "list_models", "get_model", "get_balance", "get_agent_usage", "list_transactions",
-      "examine_hardware", "describe_pipeline", "search_hugging_face", "inspect_training_source", "validate_pipeline",
+      "examine_hardware", "describe_pipeline", "search_hugging_face", "inspect_hugging_face_dataset", "inspect_training_source", "validate_pipeline",
       "prepare_create_spec", "prepare_update_spec",
     ]);
   });
@@ -605,6 +646,7 @@ exit 1
         "examine_hardware",
         "describe_pipeline",
         "search_hugging_face",
+        "inspect_hugging_face_dataset",
         "inspect_training_source",
         "validate_pipeline",
         "get_local_spec",

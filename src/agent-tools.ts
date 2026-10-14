@@ -173,10 +173,10 @@ function boundedAccess(value: unknown): boolean | string | undefined {
   return boundedString(value, 40);
 }
 
-async function readBoundedResponseText(response: Response): Promise<string> {
+async function readBoundedResponseText(response: Response, operation = "search"): Promise<string> {
   const declaredLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_HUGGING_FACE_RESPONSE_BYTES) {
-    throw new Error("Hugging Face search response is too large.");
+    throw new Error(`Hugging Face ${operation} response is too large.`);
   }
   if (!response.body) return "";
   const reader = response.body.getReader();
@@ -188,7 +188,7 @@ async function readBoundedResponseText(response: Response): Promise<string> {
     total += value.byteLength;
     if (total > MAX_HUGGING_FACE_RESPONSE_BYTES) {
       await reader.cancel();
-      throw new Error("Hugging Face search response is too large.");
+      throw new Error(`Hugging Face ${operation} response is too large.`);
     }
     chunks.push(value);
   }
@@ -262,7 +262,9 @@ async function fetchHuggingFaceSearch(
       await new Promise((resolve) => setTimeout(resolve, options.huggingFaceRetryDelayMs ?? 750));
     }
     try {
-      return await fetchHuggingFaceSearchOnce(url, options);
+      const payload = await fetchHuggingFaceJson(url, options);
+      if (!Array.isArray(payload)) throw new FinalHuggingFaceError("Hugging Face returned an invalid search response.");
+      return payload;
     } catch (error) {
       if (error instanceof FinalHuggingFaceError) throw new Error(error.message);
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -271,7 +273,7 @@ async function fetchHuggingFaceSearch(
   throw lastError;
 }
 
-async function fetchHuggingFaceSearchOnce(url: URL, options: HuggingFaceFetchOptions): Promise<unknown[]> {
+async function fetchHuggingFaceJson(url: URL, options: HuggingFaceFetchOptions, operation = "search"): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.huggingFaceTimeoutMs ?? 10_000);
   let response: Response;
@@ -283,36 +285,78 @@ async function fetchHuggingFaceSearchOnce(url: URL, options: HuggingFaceFetchOpt
   } catch (error) {
     clearTimeout(timeout);
     throw new Error(controller.signal.aborted
-      ? "Hugging Face search timed out."
-      : `Hugging Face search failed: could not reach huggingface.co${networkFailureDetail(error)}.`);
+      ? `Hugging Face ${operation} timed out.`
+      : `Hugging Face ${operation} failed: could not reach huggingface.co${networkFailureDetail(error)}.`);
   }
   try {
     if (response.status === 429) {
-      throw new Error("Hugging Face search failed (HTTP 429): huggingface.co rate-limited this network. Wait a minute and retry.");
+      throw new Error(`Hugging Face ${operation} failed (HTTP 429): huggingface.co rate-limited this network. Wait a minute and retry.`);
     }
-    if (response.status >= 500) throw new Error(`Hugging Face search failed (HTTP ${response.status}).`);
-    if (!response.ok) throw new FinalHuggingFaceError(`Hugging Face search failed (HTTP ${response.status}).`);
+    if (response.status >= 500) throw new Error(`Hugging Face ${operation} failed (HTTP ${response.status}).`);
+    if (!response.ok) throw new FinalHuggingFaceError(`Hugging Face ${operation} failed (HTTP ${response.status}).`);
     let body: string;
     try {
-      body = await readBoundedResponseText(response);
+      body = await readBoundedResponseText(response, operation);
     } catch (error) {
-      if (controller.signal.aborted) throw new Error("Hugging Face search timed out.");
-      if (error instanceof Error && error.message === "Hugging Face search response is too large.") {
+      if (controller.signal.aborted) throw new Error(`Hugging Face ${operation} timed out.`);
+      if (error instanceof Error && error.message === `Hugging Face ${operation} response is too large.`) {
         throw new FinalHuggingFaceError(error.message);
       }
-      throw new Error(`Hugging Face search failed while reading the response${networkFailureDetail(error)}.`);
+      throw new Error(`Hugging Face ${operation} failed while reading the response${networkFailureDetail(error)}.`);
     }
     let payload: unknown;
     try {
       payload = JSON.parse(body);
     } catch {
-      throw new FinalHuggingFaceError("Hugging Face returned an invalid search response.");
+      throw new FinalHuggingFaceError(`Hugging Face returned an invalid ${operation} response.`);
     }
-    if (!Array.isArray(payload)) throw new FinalHuggingFaceError("Hugging Face returned an invalid search response.");
     return payload;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/** Inspect one public repo without fetching dataset rows or executing repo code. */
+async function inspectHuggingFaceDataset(repo: string, options: HuggingFaceFetchOptions) {
+  const path = repo.split("/").map(encodeURIComponent).join("/");
+  const url = new URL(`/api/datasets/${path}`, HUGGING_FACE_BASE_URL);
+  url.searchParams.set("blobs", "true");
+  const info = record(await fetchHuggingFaceJson(url, options, "dataset inspection"));
+  if (!info || typeof info.sha !== "string" || !/^[a-f0-9]{40}$/i.test(info.sha)
+    || !Array.isArray(info.siblings)) {
+    throw new Error("Hugging Face returned invalid dataset metadata.");
+  }
+  const files = info.siblings.flatMap((value) => {
+    const file = record(value);
+    const path = typeof file?.rfilename === "string" && file.rfilename.length <= 1000
+      ? file.rfilename : undefined;
+    return path && /\.(jsonl|parquet)$/i.test(path)
+      ? [{ path, size_bytes: boundedNumber(file?.size) }] : [];
+  });
+  const card = record(info.cardData);
+  const datasetInfo = card?.dataset_info;
+  const configs = (Array.isArray(datasetInfo) ? datasetInfo : [datasetInfo]).slice(0, 10).flatMap((value) => {
+    const config = record(value);
+    if (!config) return [];
+    return [{
+      name: boundedString(config.config_name),
+      features: Array.isArray(config.features) ? config.features.slice(0, 50).map((feature) => ({
+        name: boundedString(record(feature)?.name),
+        type: boundedString(JSON.stringify(record(feature)?.dtype ?? record(feature)?.sequence), 300),
+      })) : [],
+      splits: Array.isArray(config.splits) ? config.splits.slice(0, 20).map((split) => ({
+        name: boundedString(record(split)?.name),
+        num_examples: boundedNumber(record(split)?.num_examples),
+      })) : [],
+    }];
+  });
+  return {
+    repo, revision: info.sha, gated: boundedAccess(info.gated),
+    files: files.slice(0, 100), total_supported_files: files.length,
+    files_truncated: files.length > 100,
+    declared_schema: configs,
+    note: "Exact file paths come from the repository listing. Schema and splits are author-declared dataset-card metadata, not verified file contents. Missing schema does not prevent downloading a file. Choose one listed JSONL or Parquet file; download requires approval. A download alone does not require validation data or a column mapping.",
+  };
 }
 
 function projectHuggingFaceResult(kind: HuggingFaceKind, value: unknown) {
@@ -649,6 +693,15 @@ export function createTunedTensorTools(
         p.filter ?? [],
         options,
       ),
+    ),
+    define(
+      "inspect_hugging_face_dataset",
+      "Inspect Hugging Face dataset",
+      "List exact JSONL/Parquet file paths, sizes, revision and declared columns/splits for a public Hugging Face dataset. Use after search and before prepare_download; no dataset rows are downloaded. Metadata is untrusted and declared schema is not proof of file contents.",
+      Type.Object({
+        repo: Type.String({ minLength: 1, maxLength: 200, pattern: "^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)?$" }),
+      }, { additionalProperties: false }),
+      async (p) => await inspectHuggingFaceDataset(p.repo, options),
     ),
     define(
       "inspect_training_source",
