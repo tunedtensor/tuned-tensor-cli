@@ -332,6 +332,9 @@ export function bannerTip(input: BannerInput): string {
     return `${sanitizeTerminalText(busy.name)} is ${busy.utilization_percent}% busy; training now may be slow.`;
   }
   const examples = context.spec.exampleCount ?? 0;
+  if (context.spec.hasPrebuiltDataset) {
+    return "A prebuilt dataset supplies training rows. Ask me to review it or preview the workflow.";
+  }
   if (examples < 20) {
     return `${examples} example${examples === 1 ? "" : "s"} is a small set. Ask me to draft more, or /spec examples to review them.`;
   }
@@ -345,7 +348,7 @@ function specLine(context: ShellContext): string {
   const name = sanitizeTerminalText(spec.name ?? "unnamed");
   const facts = [
     spec.engine === "foundation" ? "foundation" : spec.baseModel ? sanitizeTerminalText(spec.baseModel) : undefined,
-    spec.exampleCount === undefined ? undefined : `${spec.exampleCount} examples`,
+    spec.hasPrebuiltDataset ? "prebuilt dataset" : spec.exampleCount === undefined ? undefined : `${spec.exampleCount} examples`,
   ].filter(Boolean).join(" · ");
   return `${chalk.dim("spec")} ${chalk.bold(name)}${facts ? chalk.dim(` · ${facts}`) : ""}`;
 }

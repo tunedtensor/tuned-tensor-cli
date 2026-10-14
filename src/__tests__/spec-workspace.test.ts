@@ -159,6 +159,16 @@ describe("behavior spec review and editing", () => {
     expect(validateBehaviorSpec(parseLocalRunInput(spec, "tunedtensor.json"))).toMatchObject({ valid: true, warnings: [expect.stringMatching(/quality/)] });
   });
 
+  it("does not describe unused inline examples as a small training set after attaching prebuilt data", () => {
+    const input = parseLocalRunInput({ ...spec, dataset_prebuilt: {
+      huggingface: { repo: "org/data", columns: { input: "prompt", output: "completion" } },
+      training: "train.parquet", test: "test.parquet",
+    } }, "tunedtensor.json");
+    const result = validateBehaviorSpec(input);
+    expect(result.valid).toBe(true);
+    expect(result.warnings.join("\n")).not.toMatch(/small example set/);
+  });
+
   it("reviews the current spec, pending diff and history in the shell without a model call", async () => {
     const output: string[] = []; const errors: string[] = [];
     const prepared = await proposal();

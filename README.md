@@ -210,6 +210,17 @@ can inspect a public dataset's exact JSONL/Parquet filenames, sizes, revision,
 and declared columns/splits before proposing a download. Declared schema comes
 from dataset-card metadata; it is not validation of the file contents.
 
+To reuse a download, ask “Which datasets have we downloaded?” followed by
+“Use CodeAlpaca in this spec for fine-tuning.” The agent can list TT-recorded
+local datasets and inspect actual Parquet columns/row counts or sampled JSONL
+fields, plus two bounded sample rows. It proposes a `dataset_prebuilt` pointer
+with the cached revision, training file, separate validation/test file and
+column mapping. Approval saves the edit; listing and inspection need no
+download or approval. Existing examples and model settings stay in the spec,
+but prebuilt data supplies the training rows instead of automatically mixing
+in the inline examples. Samples do not establish full dataset quality, and a
+download with only a training split still needs distinct held-out data.
+
 When a conversation approaches the model's context budget, TT automatically
 summarizes earlier turns using Pi and the selected model, and shows progress.
 The summary preserves goals, decisions and action outcomes and is saved for

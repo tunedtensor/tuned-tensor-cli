@@ -134,6 +134,15 @@ base-model commit and file digests; later runs stop when they disagree with it.
 Runs record the resolved commit and file digests in the report. See the README
 section "Train on a Hugging Face dataset".
 
+In the agent, ask which datasets are downloaded, then ask to use one in the
+spec. `list_local_datasets` finds TT's local download records;
+`inspect_local_dataset` reads actual cached columns and a bounded sample.
+The agent can then prepare a `dataset_prebuilt` edit with the exact revision,
+training and held-out filenames, and column mapping, without asking you to
+paste a manifest or run a schema command. The edit still requires approval.
+Inline examples remain in the spec but are not automatically added to prebuilt
+training data. A training-only download needs a distinct evaluation split.
+
 Only `tunedtensor.json` is required. `tt pipeline init --spec tunedtensor.json`
 embeds an advanced recipe when needed; omit this step to keep automatic derivation.
 An explicit `--file` cannot override a conflicting embedded recipe.

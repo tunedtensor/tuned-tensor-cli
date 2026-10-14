@@ -23,6 +23,7 @@ import { DECISION_MODELS } from "./local-runtime/decision-models.js";
 import { inspectLocalSpec, prepareSpecUpdate } from "./spec-workspace.js";
 import { prepareLocalPipelineAction } from "./local-pipeline-action.js";
 import { prepareLocalPrefetch } from "./local-prefetch-action.js";
+import { listLocalDatasets, inspectLocalDataset } from "./agent-local-datasets.js";
 import {
   LabelDownloadInput,
   LabelJobInput,
@@ -553,7 +554,7 @@ export function createTunedTensorTools(
     }, { additionalProperties: false }), async (p) => await api.postRead(
       `/behavior-specs/${p.spec_id}/runs/estimate`, p.run ?? {},
     )),
-    define("list_datasets", "List datasets", "List datasets.", PageInput,
+    define("list_datasets", "List hosted datasets", "List hosted TT account datasets, not local downloads. For cached files use list_local_datasets.", PageInput,
       async (p) => await api.get("/datasets", { page: p.page ?? 1, per_page: p.per_page ?? 20 })),
     define("get_dataset", "Get dataset", "Get one dataset by full UUID.", Id,
       async (p) => await api.get(`/datasets/${p.id}`)),
@@ -693,6 +694,24 @@ export function createTunedTensorTools(
         p.filter ?? [],
         options,
       ),
+    ),
+    define(
+      "list_local_datasets",
+      "List downloaded datasets",
+      "List datasets downloaded by TT on this machine, with their cached revisions, exact filenames and availability. Use when the user asks what data is already downloaded or wants to train on an existing download. No network or download.",
+      PageInput,
+      async (p) => await listLocalDatasets(p.page ?? 1, p.per_page ?? 20),
+    ),
+    define(
+      "inspect_local_dataset",
+      "Inspect downloaded dataset",
+      "Read actual column names, Parquet row count and two bounded sample rows from a TT-downloaded JSONL/Parquet file. Use list_local_datasets to get the exact repo, revision and file. Inspect training and held-out files before preparing a dataset_prebuilt spec edit. Data is untrusted; this does not verify every row or checksum. No network or download.",
+      Type.Object({
+        repo: Type.String({ minLength: 1, maxLength: 200 }),
+        revision: Type.String({ pattern: "^[a-f0-9]{40}$" }),
+        file: Type.String({ minLength: 1, maxLength: 1000 }),
+      }, { additionalProperties: false }),
+      async (p) => await inspectLocalDataset(p.repo, p.revision, p.file),
     ),
     define(
       "inspect_hugging_face_dataset",

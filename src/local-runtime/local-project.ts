@@ -460,7 +460,7 @@ export function validateBehaviorSpec(input: LocalRunInput): SpecValidation {
   if (!spec.guidelines.length) {
     warnings.push("Add guidelines to make expected behavior explicit.");
   }
-  if (spec.examples.length < 10) {
+  if (spec.examples.length < 10 && !(input.kind === "spec" && input.spec.dataset_prebuilt)) {
     warnings.push("This is a small example set; passing validation does not establish model quality.");
   }
   return { valid: errors.length === 0, errors, warnings };

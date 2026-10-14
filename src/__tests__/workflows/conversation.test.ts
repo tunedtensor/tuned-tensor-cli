@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -11,6 +11,8 @@ import { inspectLocalSpec, readSpecHistory } from "../../spec-workspace.js";
 import { LocalAgentStore } from "../../agent-store.js";
 import { createLocalAgentClient } from "../../local-agent-client.js";
 import type { LocalPipelineCommandRunner } from "../../local-pipeline-action.js";
+import { parquetWriteBuffer } from "hyparquet-writer";
+import { recordAssetDownload } from "../../local-runtime/assets.js";
 
 const execFileAsync = promisify(execFile);
 type Context = Parameters<StreamFn>[1];
@@ -108,6 +110,49 @@ function conversation(replies: Reply[] | ((context: Context, call: number) => Re
 }
 
 describe("conversation workflow contracts (scripted provider, real agent and tools)", () => {
+  it("discovers cached Parquet data, inspects both splits and attaches it only after approval", async () => {
+    const repo = "org/downloaded-coding";
+    const revision = "c".repeat(40);
+    const snapshot = join(root, "hub", "datasets--org--downloaded-coding", "snapshots", revision);
+    mkdirSync(join(snapshot, "data"), { recursive: true });
+    for (const split of ["train", "test"]) writeFileSync(join(snapshot, `data/${split}.parquet`), new Uint8Array(parquetWriteBuffer({
+      columnData: [{ name: "prompt", data: [`${split} prompt`], type: "STRING" }, { name: "completion", data: ["result"], type: "STRING" }],
+    })));
+    await recordAssetDownload({ kind: "dataset", repo, revision, snapshotPath: snapshot });
+    const source = JSON.stringify(spec, null, 2) + "\n";
+    writeFileSync(join(root, "tunedtensor.json"), source);
+    const dataset = { huggingface: { repo, revision, columns: { input: "prompt", output: "completion" } },
+      training: "data/train.parquet", test: "data/test.parquet" };
+    const c = conversation([
+      { tool: "get_local_spec", args: {} },
+      { tool: "list_local_datasets", args: {} },
+      { tool: "inspect_local_dataset", args: { repo, revision, file: dataset.training } },
+      { tool: "inspect_local_dataset", args: { repo, revision, file: dataset.test } },
+      { tool: "prepare_update_local_spec", args: {
+        expected_sha256: createHash("sha256").update(source).digest("hex"), changes: { dataset_prebuilt: dataset },
+      } },
+      "The downloaded training and test files are ready to attach for approval.",
+      { tool: "get_local_spec", args: {} },
+      { tool: "prepare_pipeline_run", args: {} },
+      "The dry-run uses the saved dataset reference.",
+    ]);
+    await c.session.handleLine("Use our downloaded dataset for fine-tuning; preserve the rest of my spec.");
+    expect(c.errors).toEqual([]);
+    expect(c.session.snapshot().pendingActions).toHaveLength(1);
+    expect(readFileSync(join(root, "tunedtensor.json"), "utf8")).toBe(source);
+    expect(JSON.stringify(c.contexts[4])).toContain('parquet_metadata');
+    expect(JSON.stringify(c.contexts[4])).toContain('completion');
+    await c.session.handleLine("/approve");
+    expect(JSON.parse(readFileSync(join(root, "tunedtensor.json"), "utf8"))).toEqual({ ...spec, id: expect.any(String), dataset_prebuilt: dataset });
+    const resumed = c.newSession();
+    await resumed.handleLine(`/resume ${c.session.snapshot().thread!.id}`);
+    await resumed.handleLine("Preview the fine-tuning workflow without starting training.");
+    expect(c.errors).toEqual([]);
+    expect(resumed.snapshot().pendingActions).toMatchObject([{ operation: "run_local_pipeline", arguments: { dry_run: true } }]);
+    expect(JSON.stringify(c.contexts[7])).toContain('data/train.parquet');
+    expect(c.forbidden).not.toHaveBeenCalled();
+  });
+
   it("reports a failed summary visibly and retains the conversation for retry", async () => {
     const c = conversation([{ error: "Summary provider unavailable" }]);
     const thread = await c.client.createThread();
