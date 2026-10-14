@@ -216,6 +216,12 @@ export async function executeLocalPrefetch(
         }
         download = {
           revision, snapshot_path: report.snapshot_path, manifest_path: report.manifest_path,
+          ...(prepared.kind === "base_model" ? {
+            file_count: report.file_count,
+            size_bytes: report.size_bytes,
+            checksums_verified: typeof report.file_count === "number" && report.file_count > 0
+              && report.verified_blob_count === report.file_count,
+          } : {}),
           ...(prepared.kind === "dataset" && isRecord(report.files)
             ? { files: Object.values(report.files).flatMap((file) => isRecord(file) && typeof file.path === "string" ? [file.path] : []) }
             : {}),

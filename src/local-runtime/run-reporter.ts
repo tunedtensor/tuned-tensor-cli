@@ -31,6 +31,27 @@ export function reportInBackground(action: () => void | Promise<void>): void {
   }
 }
 
+/** Keep long checksum passes visible even when no bytes need downloading. */
+export async function withProgressHeartbeat<T>(
+  reporter: LocalRunReporter | undefined,
+  event: LocalRunProgressEvent,
+  run: () => Promise<T>,
+): Promise<T> {
+  if (!reporter?.onEvent) return await run();
+  reportInBackground(() => reporter.onEvent!(event));
+  const timer = setInterval(() => {
+    reportInBackground(() => reporter.onEvent!({
+      stage: event.stage, status: event.status, message: `Still working: ${event.message}`,
+    }));
+  }, 15_000);
+  timer.unref();
+  try {
+    return await run();
+  } finally {
+    clearInterval(timer);
+  }
+}
+
 export function sanitizeLogLine(line: string): string {
   return line
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]")

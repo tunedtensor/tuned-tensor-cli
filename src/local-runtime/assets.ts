@@ -68,7 +68,8 @@ export function snapshotDirectory(hubCache: string, kind: AssetKind, repo: strin
 async function contentDigest(path: string, algorithm: "sha256" | "git-sha1"): Promise<string> {
   const size = (await stat(path)).size;
   const hash = algorithm === "sha256" ? createHash("sha256") : createHash("sha1").update(`blob ${size}\0`);
-  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  // Match the bounded buffer used by model verification for large weight files.
+  for await (const chunk of createReadStream(path, { highWaterMark: 8 * 1024 * 1024 })) hash.update(chunk);
   return `${algorithm}:${hash.digest("hex")}`;
 }
 

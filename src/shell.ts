@@ -1274,27 +1274,43 @@ export async function startInteractiveShell(
     readline?.write(null, { ctrl: true, name: "u" });
   });
 
+  // The async iterator preserves input while an action is running. Acknowledge
+  // it immediately instead of leaving follow-up questions silently buffered.
+  let handlingLine = false;
+  let pendingLines = 0;
+  readline.on("line", (line: string) => {
+    const queued = handlingLine || pendingLines > 0;
+    pendingLines += 1;
+    if (queued) {
+      output.write("\nInput queued — waiting for the current operation to finish.\n");
+    } else {
+      // Repaint at submission time, before any intervening progress output.
+      output.write(renderSubmittedShellInput(
+        line,
+        (output as NodeJS.WritableStream & { columns?: number }).columns,
+      ));
+    }
+  });
+
   output.write(session.banner());
   readline.setPrompt(session.prompt());
   readline.prompt();
 
   try {
     for await (const line of readline) {
-      // Readline has already advanced to the next row. Repaint the submitted
-      // prompt above as a closed, full-row surface; the active prompt itself
-      // stays unstyled so it cannot bleed into streamed output.
-      output.write(renderSubmittedShellInput(
-        line,
-        (output as NodeJS.WritableStream & { columns?: number }).columns,
-      ));
+      pendingLines -= 1;
+      handlingLine = true;
       const action = await session.handleLine(line);
+      handlingLine = false;
       if (action === "exit") {
         readline.close();
         break;
       }
       output.write("\n");
-      readline.setPrompt(session.prompt());
-      readline.prompt();
+      if (pendingLines === 0) {
+        readline.setPrompt(session.prompt());
+        readline.prompt();
+      }
     }
   } finally {
     output.write(resetShellPromptStyle());

@@ -210,11 +210,15 @@ can inspect a public dataset's exact JSONL/Parquet filenames, sizes, revision,
 and declared columns/splits before proposing a download. Declared schema comes
 from dataset-card metadata; it is not validation of the file contents.
 
-When a conversation approaches the model's context budget, TT omits older tool
-exchanges from the model request and shows a notice. The saved transcript and
-pending approvals remain intact. If the remaining conversation is too large, or
-the model stops at its token limit, TT reports the problem instead of silently
-returning to the prompt.
+When a conversation approaches the model's context budget, TT automatically
+summarizes earlier turns using Pi and the selected model, and shows progress.
+The summary preserves goals, decisions and action outcomes and is saved for
+`/resume`; recent exchanges remain in context. Summarization uses an additional
+model request (or several for unusually long histories). The transcript stays
+in local history subject to the existing storage limits, and pending approvals
+remain intact. If the current request is still too large, summarization fails,
+or the model stops at its token limit, TT reports the problem instead of silently
+returning to the prompt. A failed summary does not replace the saved one.
 
 For educational questions about how or why training works, the agent can read
 the exact Python implementation shipped with the running TT build. The source

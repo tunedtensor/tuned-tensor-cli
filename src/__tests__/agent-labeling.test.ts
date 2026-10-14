@@ -335,7 +335,7 @@ describe("labeling through the agent client", () => {
     }) });
 
     await client.runTurn(thread.id, "How is it going?", () => {});
-    expect(prompts[1]).toContain("[Approved action results, recorded by tt]");
+    expect(prompts[1]).toContain("[Action outcomes, recorded by tt]");
     expect(prompts[1]).toContain(JOB_ID);
     expect(prompts[1]).toMatch(/How is it going\?$/);
     await client.runTurn(thread.id, "And now?", () => {});
@@ -344,6 +344,21 @@ describe("labeling through the agent client", () => {
 });
 
 describe("approvedResultsNote", () => {
+  it("carries durable outcomes even when an action has no model result payload", () => {
+    const actions = ["completed", "failed", "rejected", "outcome_unknown", "proposed", "executing"].map((status) => ({
+      id: status, operation: "update_local_spec", status, title: "", summary: "", risk: "medium",
+      arguments: { spec_path: "./tunedtensor.json", changes: { large: "do not repeat this diff" } },
+    })) as AgentAction[];
+    const note = approvedResultsNote(actions)!;
+    for (const status of ["completed", "failed", "rejected", "outcome_unknown"]) {
+      expect(note).toContain(`"status":"${status}"`);
+    }
+    expect(note).toContain('"spec_path":"./tunedtensor.json"');
+    expect(note).not.toMatch(/"proposed"|"executing"|do not repeat this diff/);
+    expect(approvedResultsNote(actions)).toBeUndefined();
+    expect(actions[4]?.result_reported).toBeUndefined();
+  });
+
   it("reports each result once", () => {
     const actions = [{ id: "a", title: "", summary: "", risk: "medium", result: { job_id: JOB_ID } }] as AgentAction[];
     expect(approvedResultsNote(actions)).toContain(JOB_ID);

@@ -108,6 +108,55 @@ function conversation(replies: Reply[] | ((context: Context, call: number) => Re
 }
 
 describe("conversation workflow contracts (scripted provider, real agent and tools)", () => {
+  it("reports a failed summary visibly and retains the conversation for retry", async () => {
+    const c = conversation([{ error: "Summary provider unavailable" }]);
+    const thread = await c.client.createThread();
+    const state = await c.store.load(thread.id);
+    state.messages = [{ role: "user", content: "Past discussion. ".repeat(3000), timestamp: 1 }];
+    await c.store.save(state);
+    const errors: string[] = [];
+    const result = await c.client.runTurn(thread.id, "Continue", (event) => {
+      if (event.type === "error") errors.push(String(event.payload.message));
+    });
+    expect(result.status).toBe("failed");
+    expect(errors.join("\n")).toContain("Summary provider unavailable");
+    const saved = await c.store.load(thread.id);
+    expect(saved.summary).toBeUndefined();
+    expect(saved.messages[0]).toEqual(state.messages[0]);
+  });
+
+  it("automatically summarizes long history, resumes it, and preserves pending approvals", async () => {
+    const c = conversation([
+      "Goal: Python coding agent. Muse is downloaded and verified. Never start training.",
+      "Yes, Muse is already verified in cache.",
+      "We are building a Python coding agent. Training remains unstarted.",
+    ]);
+    const thread = await c.client.createThread();
+    const state = await c.store.load(thread.id);
+    state.messages = [
+      { role: "user", content: "Python coding agent. Never train. " + "Past discussion. ".repeat(3000), timestamp: 1 },
+      { role: "assistant", content: [{ type: "text", text: "Muse verified in cache." }], timestamp: 2 },
+    ];
+    state.actions = [{ id: "pending-spec", title: "Edit spec", summary: "Awaiting approval", risk: "low", status: "proposed" }];
+    await c.store.save(state);
+    const events: string[] = [];
+    const result = await c.client.runTurn(thread.id, "Do we have Muse already?", (event) => { events.push(JSON.stringify(event)); });
+    expect(result.status).toBe("completed");
+    expect(result.response).toContain("verified in cache");
+    const saved = await c.store.load(thread.id);
+    expect(saved.summary).toMatchObject({ text: expect.stringContaining("Never start training"), messageCount: 2 });
+    expect(saved.messages.slice(0, 2)).toEqual(state.messages);
+    expect(saved.actions).toEqual(state.actions);
+    expect(events.join("\n")).toContain("Conversation summary saved");
+    const followup = await c.newClient().runTurn(thread.id, "What was my goal?", () => {});
+    expect(followup.status).toBe("completed");
+    expect(c.streamSimple).toHaveBeenCalledTimes(3);
+    expect(JSON.stringify(c.contexts[0])).toContain("context summarization assistant");
+    expect(JSON.stringify(c.contexts[2])).toContain("Earlier conversation summary");
+    expect(JSON.stringify(c.contexts[2])).not.toContain("Past discussion.");
+    expect((await c.store.load(thread.id)).actions).toEqual(state.actions);
+  });
+
   it.each(["dataset", "base_model"] as const)("resumes and approves a %s download exactly once", async (kind) => {
     writeFileSync(join(root, "tunedtensor.json"), JSON.stringify({
       ...spec,

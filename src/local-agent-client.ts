@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { trimAgentContext } from "./agent-context.js";
+import { createConversationContext, type ConversationSummary } from "./agent-context.js";
 import { Agent, type AgentTool } from "@earendil-works/pi-agent-core";
 import type {
   AgentAction,
@@ -22,7 +22,7 @@ import { createTunedTensorTools, type AgentToolApi } from "./agent-tools.js";
 import {
   approvedResultsNote,
   isLabelingOperation,
-  labelingResultForModel,
+  approvedResultForModel,
   type AgentLabelingExecutor,
 } from "./agent-labeling.js";
 import { LocalAgentStore, type StoredAgentThread } from "./agent-store.js";
@@ -43,7 +43,7 @@ Decision models use engine "decision" and their own certified registry. Call \`d
 When the user asks to discover public models or datasets, call \`search_hugging_face\`; it searches Hugging Face metadata for foundation and fine-tuning workflows. The query is sent to huggingface.co, so never include secrets or private data.
 Adapter datasets: adapter specs train on inline examples or dataset_prebuilt. Foundation and decision specs use their own data workflows; do not propose dataset_prebuilt or datasets prefetch for those engines. For dataset questions about those engines, call \`describe_pipeline\` with the matching engine before explaining their supported data workflow; do not defer the call to a follow-up. Explain the current engine rather than recommending an engine change unless the user asks.
 To download a dataset, call prepare_download with kind "dataset": omit source when the spec's dataset_prebuilt.huggingface already names it, or pass source {repo, training, and optionally validation or test} to download any dataset without editing the spec first. To train on a Hugging Face dataset, inspect the current spec, then prepare a dataset_prebuilt edit with huggingface.repo, a repo-relative training file and a distinct validation or test file, each one .jsonl or .parquet file (pick one shard per split). Use huggingface.columns {input, output} for plain records, or {messages} for a column of chat turns (the first user turn and its assistant reply become one example; later turns are not used); omit it only for TT chat JSONL. Parquet requires columns. CSV is not supported. After search, call inspect_hugging_face_dataset to discover exact supported file paths, sizes, revision and author-declared columns/splits. Choose a suitable listed file and prepare its download yourself; a download alone requires neither validation data nor columns. Do not ask the user to look up information this tool can supply. Declared columns are metadata, not verified file contents; never invent missing columns or claim training compatibility was validated. If a repo has no supported files, inspect another candidate. Pin huggingface.revision to the commit a completed download reported (or one the user supplies); never invent a commit SHA.
-Approving a dataset download runs \`tt datasets prefetch\` with progress. Never claim files were downloaded before that approval completes. The user can also run \`datasets prefetch\` in this shell; \`datasets verify\` checks cached files offline. For adapter specs, real \`tt pipeline run --spec tunedtensor.json\` also downloads missing dataset files automatically; \`--dry-run\` never downloads. Local JSONL files need no prefetch.
+Approving a dataset download runs \`tt datasets prefetch\` with progress. Never claim files were downloaded before that approval completes. Use the recorded download result to confirm its repository, revision and local paths after approval. A failed or interrupted download does not prove files are absent: they may already be cached or partially downloaded. The user can also run \`datasets prefetch\` in this shell; \`datasets verify\` checks cached files offline. For adapter specs, real \`tt pipeline run --spec tunedtensor.json\` also downloads missing dataset files automatically; \`--dry-run\` never downloads. Local JSONL files need no prefetch.
 Downloading the spec's own sources, and the first real adapter run, record tunedtensor.lock.json beside the spec: it pins the dataset and base-model revisions and file digests, and later runs stop if the cache differs. When a run reports a lock mismatch after an intended source change, prepare_download without source updates the lock. Users find and check downloads with \`tt assets list\`, \`tt assets path <org/name>\` and \`tt assets verify\`.
 Teacher labeling of raw adapter data: when the user has unlabeled inputs (their own emails, a raw corpus) and wants a stronger teacher model to label them, run the workflow with tools. It needs a TT token and uses TT credits. 1) Call get_local_spec: the teacher follows the spec's instructions and examples, so suggest adding a few high-quality examples first if there are none or they do not show the exact output format. 2) Call prepare_label_job with the workspace file ({"input": ...} JSON Lines, or CSV with input_column); the user approves the upload, spec push and job start. Only send data the user may share with a third-party model. 3) When the user asks about progress, call get_label_job (or list_label_jobs to find it) and report status, percent done and cost; jobs keep running in the cloud, and you cannot poll in the background. 4) When it reaches awaiting_review, ask whether to use only rows they accepted or edited (\`tt cloud label rows <job-id>\`, \`tt cloud label accept\`) or also unreviewed teacher drafts, then call prepare_label_download. 5) After that download is approved, propose a dataset_prebuilt edit with the training and validation paths it reports. Without a TT token, give the equivalent shell commands: \`tt cloud label upload <file> --spec <cloud-spec-id>\`, \`tt cloud label status <job-id>\`, \`tt cloud label download <job-id>\`.
 For educational questions about how or why training works, call \`inspect_training_source\` before answering. Ground the explanation in the returned code and distinguish observed behavior from inferred rationale; do not invent author intent.
@@ -87,6 +87,9 @@ export interface LocalPiAgentOptions {
   tools: AgentTool[];
   streamSimple?: (...args: any[]) => any;
   onContextTrim?: () => void;
+  summary?: ConversationSummary;
+  onSummarizing?: (waiting?: boolean) => void;
+  onSummary?: (summary: ConversationSummary) => Promise<void>;
 }
 
 export interface LocalPiAgent {
@@ -129,11 +132,16 @@ function defaultAgent(options: LocalPiAgentOptions): LocalPiAgent {
     },
     streamFn: options.streamSimple as never,
     toolExecution: "sequential",
-    transformContext: async (messages) => trimAgentContext(messages, {
+    transformContext: createConversationContext({
       contextWindow: options.model.contextWindow ?? 32_768,
       maxTokens: options.model.maxTokens ?? 4096,
       tools: options.tools,
       onTrim: options.onContextTrim,
+      model: options.model as never,
+      stream: options.streamSimple as never,
+      summary: options.summary,
+      onSummarizing: options.onSummarizing ?? (() => {}),
+      onSummary: options.onSummary ?? (async () => {}),
     }),
     beforeToolCall: async () => {
       calls += 1;
@@ -243,14 +251,32 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
         localOnly: !options.cloudEnabled,
       });
       const toolLabels = new Map(tools.map((tool) => [tool.name, tool.label]));
+      state.messages = withoutSystemMessages(state.messages);
       let contextTrimmed = false;
       const agent = createAgent({
         model: selected.model,
         thinking: selected.thinking,
         systemPrompt: await systemPrompt(Boolean(options.cloudEnabled)),
-        messages: withoutSystemMessages(state.messages),
+        messages: state.messages,
+        summary: state.summary,
         tools,
         streamSimple: options.modelRuntime.streamSimple?.bind(options.modelRuntime),
+        onSummarizing: (waiting) => {
+          onEvent({ type: "text_delta", payload: { delta: waiting
+            ? "Still summarizing earlier conversation…\n"
+            : "Summarizing earlier conversation to make room…\n" } });
+        },
+        onSummary: async (summary) => {
+          const previous = state.summary;
+          state.summary = options.store.redact(summary);
+          try {
+            await persist(state);
+          } catch (error) {
+            state.summary = previous;
+            throw error;
+          }
+          onEvent({ type: "text_delta", payload: { delta: "Conversation summary saved. Continuing…\n" } });
+        },
         onContextTrim: () => {
           if (contextTrimmed) return;
           contextTrimmed = true;
@@ -364,7 +390,7 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
             labeling: options.labeling,
           },
         );
-        const result = labelingResultForModel(action.operation, output);
+        const result = approvedResultForModel(action.operation, output);
         if (result) {
           action.result = options.store.redact(result);
           await persist(state);
