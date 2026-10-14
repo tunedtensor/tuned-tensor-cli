@@ -12,6 +12,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { AgentAction, AgentThread } from "./agent-client.js";
+import type { ConversationSummary } from "./agent-context.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_MAX_THREAD_BYTES = 1_000_000;
@@ -24,6 +25,7 @@ export interface StoredAgentThread {
   thread: AgentThread;
   messages: unknown[];
   actions: AgentAction[];
+  summary?: ConversationSummary;
 }
 
 export interface LocalAgentStoreOptions {
@@ -120,10 +122,15 @@ export class LocalAgentStore {
       thread: state.thread,
       messages: state.messages.slice(-this.maxMessages),
       actions: [...active, ...terminal.slice(-Math.max(0, this.maxActions - active.length))],
+      ...(state.summary ? { summary: {
+        ...state.summary,
+        messageCount: Math.max(0, state.summary.messageCount - Math.max(0, state.messages.length - this.maxMessages)),
+      } } : {}),
     });
     let serialized = `${JSON.stringify(compact, null, 2)}\n`;
     while (Buffer.byteLength(serialized) > this.maxThreadBytes && compact.messages.length > 0) {
       compact.messages.shift();
+      if (compact.summary) compact.summary.messageCount = Math.max(0, compact.summary.messageCount - 1);
       serialized = `${JSON.stringify(compact, null, 2)}\n`;
     }
     if (Buffer.byteLength(serialized) > this.maxThreadBytes) {
@@ -236,6 +243,12 @@ export class LocalAgentStore {
     if (!isRecord(parsed) || !isRecord(parsed.thread) || parsed.thread.id !== id ||
       !Array.isArray(parsed.messages) || !Array.isArray(parsed.actions)) {
       throw new Error("Local agent thread file is malformed.");
+    }
+    if (parsed.summary !== undefined && (!isRecord(parsed.summary)
+      || typeof parsed.summary.text !== "string" || !parsed.summary.text.trim()
+      || !Number.isInteger(parsed.summary.messageCount) || (parsed.summary.messageCount as number) < 0
+      || (parsed.summary.messageCount as number) > parsed.messages.length)) {
+      throw new Error("Local agent conversation summary is malformed.");
     }
     return parsed as unknown as StoredAgentThread;
   }

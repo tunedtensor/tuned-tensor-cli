@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { trimAgentContext } from "./agent-context.js";
+import { createConversationContext, type ConversationSummary } from "./agent-context.js";
 import { Agent, type AgentTool } from "@earendil-works/pi-agent-core";
 import type {
   AgentAction,
@@ -87,6 +87,9 @@ export interface LocalPiAgentOptions {
   tools: AgentTool[];
   streamSimple?: (...args: any[]) => any;
   onContextTrim?: () => void;
+  summary?: ConversationSummary;
+  onSummarizing?: (waiting?: boolean) => void;
+  onSummary?: (summary: ConversationSummary) => Promise<void>;
 }
 
 export interface LocalPiAgent {
@@ -129,11 +132,16 @@ function defaultAgent(options: LocalPiAgentOptions): LocalPiAgent {
     },
     streamFn: options.streamSimple as never,
     toolExecution: "sequential",
-    transformContext: async (messages) => trimAgentContext(messages, {
+    transformContext: createConversationContext({
       contextWindow: options.model.contextWindow ?? 32_768,
       maxTokens: options.model.maxTokens ?? 4096,
       tools: options.tools,
       onTrim: options.onContextTrim,
+      model: options.model as never,
+      stream: options.streamSimple as never,
+      summary: options.summary,
+      onSummarizing: options.onSummarizing ?? (() => {}),
+      onSummary: options.onSummary ?? (async () => {}),
     }),
     beforeToolCall: async () => {
       calls += 1;
@@ -243,14 +251,32 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
         localOnly: !options.cloudEnabled,
       });
       const toolLabels = new Map(tools.map((tool) => [tool.name, tool.label]));
+      state.messages = withoutSystemMessages(state.messages);
       let contextTrimmed = false;
       const agent = createAgent({
         model: selected.model,
         thinking: selected.thinking,
         systemPrompt: await systemPrompt(Boolean(options.cloudEnabled)),
-        messages: withoutSystemMessages(state.messages),
+        messages: state.messages,
+        summary: state.summary,
         tools,
         streamSimple: options.modelRuntime.streamSimple?.bind(options.modelRuntime),
+        onSummarizing: (waiting) => {
+          onEvent({ type: "text_delta", payload: { delta: waiting
+            ? "Still summarizing earlier conversation…\n"
+            : "Summarizing earlier conversation to make room…\n" } });
+        },
+        onSummary: async (summary) => {
+          const previous = state.summary;
+          state.summary = options.store.redact(summary);
+          try {
+            await persist(state);
+          } catch (error) {
+            state.summary = previous;
+            throw error;
+          }
+          onEvent({ type: "text_delta", payload: { delta: "Conversation summary saved. Continuing…\n" } });
+        },
         onContextTrim: () => {
           if (contextTrimmed) return;
           contextTrimmed = true;

@@ -16,6 +16,23 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("local agent store", () => {
+  it.each([5000, 1000])("keeps summaries aligned and redacted after message/byte pruning (%i bytes)", async (maxThreadBytes) => {
+    const store = new LocalAgentStore(root, { maxMessages: 4, maxThreadBytes, secretValues: ["secret-value"] });
+    const state = {
+      thread: { id: THREAD_ID, title: "Summary", status: "active", last_message_at: null,
+        created_at: "2026-10-14T00:00:00Z", updated_at: "2026-10-14T00:00:00Z" },
+      messages: Array.from({ length: 8 }, (_, index) => ({ role: "user", content: `${index}: ${"x".repeat(200)}` })),
+      actions: [], summary: { text: "Keep secret-value private; Muse downloaded.", messageCount: 6 },
+    };
+    await store.save(state);
+    const saved = await store.load(THREAD_ID);
+    expect(saved.summary).toEqual({ text: "Keep [REDACTED] private; Muse downloaded.",
+      messageCount: Math.max(0, 6 - (8 - saved.messages.length)) });
+    expect(saved.messages.slice(saved.summary!.messageCount)).toEqual(state.messages.slice(6));
+    expect(state.summary.messageCount).toBe(6);
+    expect(statSync(join(root, "threads", `${THREAD_ID}.json`)).size).toBeLessThanOrEqual(maxThreadBytes);
+  });
+
   it("atomically persists resumable transcript/action state with private modes", async () => {
     const store = new LocalAgentStore(root, { secretValues: ["tt_super_secret"] });
     await store.save({
