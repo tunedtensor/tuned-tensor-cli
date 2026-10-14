@@ -110,6 +110,10 @@ describe("local agent conversation client", () => {
         async prompt(prompt) {
           prompts.push(prompt);
           state.messages.push({ role: "user", content: prompt });
+          if (prompt === "Length") {
+            for (const listener of listeners) await listener({ type: "turn_end", message: { role: "assistant", content: [], stopReason: "length" } });
+            return;
+          }
           if (prompt === "Fail") {
             for (const listener of listeners) await listener({
               type: "turn_end",
@@ -170,6 +174,7 @@ describe("local agent conversation client", () => {
       "examine_hardware",
       "describe_pipeline",
       "search_hugging_face",
+      "inspect_hugging_face_dataset",
       "inspect_training_source",
       "validate_pipeline",
       "get_local_spec",
@@ -209,6 +214,10 @@ describe("local agent conversation client", () => {
     );
     expect(failed.status).toBe("failed");
     expect(failureEvents).toEqual(["turn_started", "error", "final"]);
+    const lengthEvents: unknown[] = [];
+    const limited = await client.runTurn(thread.id, "Length", event => lengthEvents.push(event));
+    expect(limited.status).toBe("failed");
+    expect(lengthEvents).toContainEqual({ type: "error", payload: { message: expect.stringContaining("model reached its response or context limit") } });
   });
 
   it("propagates post-dispatch uncertainty as a non-retryable outcome", async () => {
