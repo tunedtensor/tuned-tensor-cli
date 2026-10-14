@@ -2,8 +2,19 @@
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-14
+
 ### Added
 
+- The agent can list downloaded datasets and inspect actual Parquet columns,
+  row counts and bounded samples, or sampled JSONL fields, without a network
+  request. It can propose a pinned `dataset_prebuilt` reference using cached
+  train/evaluation files and observed column mappings, then save it after
+  approval while preserving the rest of the spec.
+- Long agent conversations automatically summarize earlier turns using Pi and
+  the selected model, retaining recent exchanges and saving the summary for
+  `/resume`. Summarization shows progress and uses additional model requests;
+  transcript storage limits and approval records are unchanged.
 - Download any Hugging Face dataset or model without editing the spec first:
   `tt datasets prefetch --repo org/name --training <file>` and
   `tt models prefetch --repo org/name`. The agent's `prepare_download` accepts
@@ -31,6 +42,20 @@
 - Submitted shell input stands out more: a brighter surface with half-row
   padding above and below, a small left inset, and long questions wrap with
   continuation lines hanging under the text.
+
+### Fixed
+
+- Managed agent conversations budget context and reply tokens explicitly.
+  Oversized requests and failed summaries report an error instead of returning
+  silently to the prompt; failed summaries do not replace saved ones.
+- Cached model downloads report snapshot verification progress. Approved action
+  outcomes remain available to follow-up questions, and input submitted during
+  an operation is visibly queued until it finishes.
+- Hugging Face dataset inspection discovers exact repository filenames and
+  revisions before proposing downloads, reducing guesses about split paths.
+- Specs using prebuilt adapter datasets no longer show a small-inline-example
+  warning. The shell identifies prebuilt training data, and the agent explains
+  that inline examples are not automatically mixed into it.
 
 ## [0.24.0] - 2026-10-13
 
