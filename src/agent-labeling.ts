@@ -300,10 +300,19 @@ export function isLabelingOperation(action: AgentAction): boolean {
   return (LABELING_OPERATIONS as readonly string[]).includes(action.operation ?? "");
 }
 
-/** The parts of an approved labeling action the model needs for the next step. */
-export function labelingResultForModel(operation: string | undefined, output: unknown): Record<string, unknown> | undefined {
+/** The parts of an approved action the model needs for the next step. */
+export function approvedResultForModel(operation: string | undefined, output: unknown): Record<string, unknown> | undefined {
   const value = record(output);
   if (!value) return undefined;
+  if (operation === "prefetch_local") {
+    return {
+      operation, kind: value.kind, repo: value.repo, revision: value.revision,
+      snapshot_path: value.snapshot_path, manifest_path: value.manifest_path,
+      lock_path: value.lock_path, files: value.files,
+      status: value.status, local_base_model_path: value.local_base_model_path,
+      reason: value.reason,
+    };
+  }
   if (operation === "start_label_job") {
     return {
       operation,

@@ -6,6 +6,8 @@ import { approvePreparedAction } from "../agent-approval.js";
 import type { AgentAction } from "../agent-client.js";
 import { createTunedTensorTools, type AgentToolApi } from "../agent-tools.js";
 import { resolveProjectConfig } from "../local-runtime/project-workflow.js";
+import { LocalAgentStore } from "../agent-store.js";
+import { createLocalAgentClient } from "../local-agent-client.js";
 
 const spec = {
   name: "Chat",
@@ -44,6 +46,50 @@ const approve = (action: AgentAction, root: string, runPipelineCommand: (...args
   });
 
 describe("agent downloads", () => {
+  it.each(["base_model", "dataset"] as const)("carries a completed %s download into the next conversation turn", async (kind) => {
+    const root = workspace();
+    try {
+      const prompts: string[] = [];
+      const store = new LocalAgentStore(join(root, ".agent"));
+      const repo = kind === "base_model" ? "org/model" : "org/data";
+      const revision = "1".repeat(40);
+      const client = createLocalAgentClient({
+        store, workspaceRoot: root,
+        selection: { provider: "test", model: "test", thinking: "off" },
+        modelRuntime: {
+          getProviders: () => [{ id: "test" }], getModels: () => [{ id: "test", provider: "test" }],
+          getModel: () => ({ id: "test", provider: "test" }), hasConfiguredAuth: () => true,
+        },
+        toolApi: { get: vi.fn(), postRead: vi.fn(), propose: async (action) => action },
+        mutationApi: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
+        runPipelineCommand: async () => ({ exitCode: 0, stdout: JSON.stringify({
+          repo, revision, snapshot_path: "/cache/snapshot", manifest_path: "/assets/manifest.json",
+          files: { training: { path: "train.jsonl" } },
+        }) }),
+        createAgent: (options) => ({
+          state: { messages: [] }, subscribe: () => () => {}, abort: () => {},
+          prompt: async (text) => {
+            prompts.push(text);
+            if (prompts.length === 1) await options.tools.find((tool) => tool.name === "prepare_download")!
+              .execute("download", { kind, source: { repo, ...(kind === "dataset" ? { training: "train.jsonl" } : {}) } });
+          },
+        }),
+      });
+      const thread = await client.createThread();
+      const turn = await client.runTurn(thread.id, "Download it", () => {});
+      await client.approveAction(turn.actions[0]!.id, () => {});
+      expect((await store.load(thread.id)).actions[0]?.result).toMatchObject({ repo, revision, snapshot_path: "/cache/snapshot" });
+      await client.runTurn(thread.id, "Do we have it already?", () => {});
+      expect(prompts[1]).toContain('"status":"completed"');
+      expect(prompts[1]).toContain(repo);
+      expect(prompts[1]).toContain(revision);
+      expect(prompts[1]).toContain("/cache/snapshot");
+      if (kind === "dataset") expect(prompts[1]).toContain("train.jsonl");
+      await client.runTurn(thread.id, "hello", () => {});
+      expect(prompts[2]).toBe("hello");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it("prepares a dataset download and runs tt datasets prefetch only on approval", async () => {
     const root = workspace();
     try {
