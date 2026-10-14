@@ -25,6 +25,7 @@ export interface ShellSpecContext {
   baseModel?: string;
   engine?: string;
   exampleCount?: number;
+  hasPrebuiltDataset?: boolean;
   /** AWS instance ID when runtime.gpu sends training to a remote GPU. */
   remoteGpu?: string;
   parseError: boolean;
@@ -234,6 +235,7 @@ export async function discoverShellContext(
       warnings.push("tunedtensor.json could not be parsed.");
     } else {
       const examples = specJson.value.examples;
+      const dataset = specJson.value.dataset_prebuilt;
       const runtime = specJson.value.runtime;
       const gpu = runtime && typeof runtime === "object" && !Array.isArray(runtime)
         ? (runtime as Record<string, unknown>).gpu
@@ -245,6 +247,9 @@ export async function discoverShellContext(
         baseModel: stringField(specJson.value, "base_model"),
         engine: stringField(specJson.value, "engine"),
         exampleCount: Array.isArray(examples) ? examples.length : undefined,
+        ...(dataset && typeof dataset === "object" && !Array.isArray(dataset)
+          && typeof (dataset as Record<string, unknown>).training === "string"
+          ? { hasPrebuiltDataset: true } : {}),
         remoteGpu: gpu && typeof gpu === "object" && !Array.isArray(gpu)
           ? stringField(gpu as Record<string, unknown>, "instanceId")
           : undefined,

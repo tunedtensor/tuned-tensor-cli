@@ -326,6 +326,7 @@ describe("renderShellBanner", () => {
     [undefined, /No tunedtensor\.json here yet/],
     [{ path: "/p/tunedtensor.json", parseError: true }, /doesn't parse/],
     [{ path: "/p/tunedtensor.json", name: "Tiny", exampleCount: 4, parseError: false }, /4 examples is a small set/],
+    [{ path: "/p/tunedtensor.json", name: "Dataset", exampleCount: 3, hasPrebuiltDataset: true, parseError: false }, /prebuilt dataset supplies training rows/],
   ])("suggests the next step for %o", (spec, message) => {
     const banner = renderShellBanner({
       mode: "local",
