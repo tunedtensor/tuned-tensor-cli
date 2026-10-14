@@ -309,6 +309,7 @@ export function approvedResultForModel(operation: string | undefined, output: un
       operation, kind: value.kind, repo: value.repo, revision: value.revision,
       snapshot_path: value.snapshot_path, manifest_path: value.manifest_path,
       lock_path: value.lock_path, files: value.files,
+      file_count: value.file_count, size_bytes: value.size_bytes, checksums_verified: value.checksums_verified,
       status: value.status, local_base_model_path: value.local_base_model_path,
       reason: value.reason,
     };

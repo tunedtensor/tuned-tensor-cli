@@ -64,6 +64,7 @@ describe("agent downloads", () => {
         mutationApi: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
         runPipelineCommand: async () => ({ exitCode: 0, stdout: JSON.stringify({
           repo, revision, snapshot_path: "/cache/snapshot", manifest_path: "/assets/manifest.json",
+          file_count: 13, size_bytes: 59581829216, verified_blob_count: 13,
           files: { training: { path: "train.jsonl" } },
         }) }),
         createAgent: (options) => ({
@@ -85,6 +86,7 @@ describe("agent downloads", () => {
       expect(prompts[1]).toContain(revision);
       expect(prompts[1]).toContain("/cache/snapshot");
       if (kind === "dataset") expect(prompts[1]).toContain("train.jsonl");
+      else expect(prompts[1]).toContain('"checksums_verified":true');
       await client.runTurn(thread.id, "hello", () => {});
       expect(prompts[2]).toBe("hello");
     } finally { rmSync(root, { recursive: true, force: true }); }
