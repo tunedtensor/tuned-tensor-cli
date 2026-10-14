@@ -41,6 +41,7 @@ import {
   verifyAsset,
   writeSpecLockEntry,
 } from "./assets.js";
+import { DEFAULT_PREVIEW_ROWS, MAX_PREVIEW_ROWS, previewDataset } from "./dataset-preview.js";
 import { DatasetNotDownloadedError, ensureDatasetCached, huggingFaceDataset, prefetchHuggingFaceDataset } from "./dataset-prefetch.js";
 import { createLocalStore, type LocalModelRecord, type LocalStore } from "./store.js";
 import {
@@ -107,6 +108,19 @@ function readOption(argv: string[], name: string): string | undefined {
 
 function hasFlag(argv: string[], name: string): boolean {
   return argv.includes(name);
+}
+
+function previewColumnsFromArgv(argv: string[]) {
+  const input = readOption(argv, "--input");
+  const output = readOption(argv, "--output");
+  const messages = readOption(argv, "--messages");
+  if (messages !== undefined) {
+    if (input !== undefined || output !== undefined) throw new Error("Use either --messages or --input with --output, not both.");
+    return { messages };
+  }
+  if (input === undefined && output === undefined) return undefined;
+  if (input === undefined || output === undefined) throw new Error("--input and --output must be given together.");
+  return { input, output };
 }
 
 function printHelp(): void {
@@ -354,6 +368,20 @@ const COMMAND_GROUPS: Record<string, CliCommandGroup> = {
         minPositionals: 1,
         maxPositionals: 1,
         missingPositionalsMessage: "assets path requires <org/name[@revision]>",
+      },
+      preview: {
+        usage: "tt assets preview <org/name[@revision]> [--file path] [--rows n] [--input col --output col | --messages col]",
+        description: "Show sample rows and quality statistics for a downloaded dataset file, without network access.",
+        options: [
+          { name: "--file", value: "path", description: "Repo-relative .jsonl or .parquet file (default: the training file)" },
+          { name: "--rows", value: "count", description: `Sample rows to show (default ${DEFAULT_PREVIEW_ROWS}, max ${MAX_PREVIEW_ROWS})` },
+          { name: "--input", value: "column", description: "Input column to check, with --output" },
+          { name: "--output", value: "column", description: "Output column to check, with --input" },
+          { name: "--messages", value: "column", description: "Chat-turns column to check" },
+        ],
+        minPositionals: 1,
+        maxPositionals: 1,
+        missingPositionalsMessage: "assets preview requires <org/name[@revision]>",
       },
       verify: {
         usage: "tt assets verify [org/name[@revision]]",
@@ -1390,6 +1418,16 @@ async function main(argv: string[]): Promise<void> {
       const asset = await findAsset(cli.positionals[0]!);
       console.log(asset.snapshot_path);
       return;
+    }
+    if (subcommand === "preview") {
+      const rows = readOption(argv, "--rows");
+      if (rows !== undefined && !/^[1-9][0-9]*$/.test(rows)) throw new Error("--rows must be a positive integer.");
+      return printJson(await previewDataset({
+        asset: await findAsset(cli.positionals[0]!, undefined, "dataset"),
+        file: readOption(argv, "--file"),
+        rows: rows === undefined ? undefined : Number(rows),
+        columns: previewColumnsFromArgv(argv),
+      }));
     }
     if (subcommand === "verify") {
       const assets = cli.positionals[0] ? [await findAsset(cli.positionals[0])] : await listAssets();

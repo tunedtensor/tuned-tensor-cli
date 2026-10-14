@@ -175,6 +175,7 @@ describe("local agent conversation client", () => {
       "describe_pipeline",
       "search_hugging_face",
       "inspect_hugging_face_dataset",
+      "preview_dataset",
       "inspect_training_source",
       "validate_pipeline",
       "get_local_spec",

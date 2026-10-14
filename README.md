@@ -586,8 +586,20 @@ location under `~/.tuned-tensor/assets/`, so downloads are easy to find later:
 ```bash
 tt assets list                 # everything downloaded, newest first
 tt assets path org/name        # where it is on disk (org/name@<sha> for one revision)
+tt assets preview org/name     # sample rows and quality statistics for a dataset file
 tt assets verify [org/name]    # re-hash the files against their manifests
 ```
+
+`tt assets preview` reads a downloaded `.jsonl` or `.parquet` file offline
+(the training file by default, or `--file <path>`) and prints a deterministic
+sample of rows (`--rows`, up to 20) with per-field presence, blank values, types
+and length distribution, exact duplicate records and malformed JSONL lines.
+Add `--input <col> --output <col>` or `--messages <col>` to check a
+`columns` mapping before training: it reports how many records are usable,
+skipped for missing fields, duplicate inputs, or have an output equal to the
+input. Statistics cover the first 50,000 records (`scan_complete` says whether
+that was all of them). The agent's `preview_dataset` tool returns the same
+report after an approved download, so it can judge a dataset from its real rows.
 
 `tunedtensor.lock.json` beside the spec pins what a project trains on, the way
 `.terraform.lock.hcl` pins providers: the dataset and base-model repo, commit,

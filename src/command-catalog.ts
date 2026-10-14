@@ -52,6 +52,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   { path: "datasets verify", description: "Verify the cached Hugging Face dataset files.", group: "Workflow", modes: LOCAL },
   { path: "assets list", description: "List downloaded Hugging Face datasets and models.", group: "Inspect", modes: LOCAL },
   { path: "assets path", description: "Print where a downloaded dataset or model lives.", group: "Inspect", modes: LOCAL },
+  { path: "assets preview", description: "Show sample rows and quality statistics for a downloaded dataset.", group: "Inspect", modes: LOCAL },
   { path: "assets verify", description: "Re-hash downloaded files against their manifests.", group: "Inspect", modes: LOCAL },
   { path: "models active", description: "Show the active local model.", group: "Serving", modes: LOCAL },
   { path: "models activate", description: "Activate a verified local model.", group: "Serving", modes: LOCAL },

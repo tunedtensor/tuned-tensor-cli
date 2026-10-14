@@ -168,12 +168,21 @@ export async function listAssets(env?: NodeJS.ProcessEnv): Promise<Array<AssetMa
   return found.sort((a, b) => b.fetched_at.localeCompare(a.fetched_at));
 }
 
+export class AssetNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AssetNotFoundError";
+  }
+}
+
 /** Find a download by `org/name` or `org/name@revision`; newest first. */
-export async function findAsset(reference: string, env?: NodeJS.ProcessEnv) {
+export async function findAsset(reference: string, env?: NodeJS.ProcessEnv, kind?: AssetKind) {
   const [repo, revision] = reference.split("@");
   const match = (await listAssets(env)).find((asset) =>
-    asset.repo === repo && (!revision || asset.revision.startsWith(revision.toLowerCase())));
-  if (!match) throw new Error(`No downloaded asset matches ${reference}. Run \`tt assets list\` to see downloads.`);
+    asset.repo === repo && (!kind || asset.kind === kind) && (!revision || asset.revision.startsWith(revision.toLowerCase())));
+  if (!match) {
+    throw new AssetNotFoundError(`No downloaded ${kind ?? "asset"} matches ${reference}. Run \`tt assets list\` to see downloads.`);
+  }
   return match;
 }
 

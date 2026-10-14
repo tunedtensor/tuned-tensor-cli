@@ -177,9 +177,9 @@ export async function resolveCachedHuggingFaceDataset(args: {
 
 type ConversionStats = NonNullable<NonNullable<DatasetSource["conversion"]>["validation"]>;
 
-type DatasetColumns = NonNullable<HuggingFaceDatasetSource["columns"]>;
+export type DatasetColumns = NonNullable<HuggingFaceDatasetSource["columns"]>;
 
-function mappedField(row: Record<string, unknown>, name: string): string | null {
+export function mappedField(row: Record<string, unknown>, name: string): string | null {
   const value = row[name];
   if (typeof value === "string") return value.trim() ? value : null;
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
@@ -187,7 +187,7 @@ function mappedField(row: Record<string, unknown>, name: string): string | null 
 }
 
 /** The first user turn and the assistant reply that directly follows it. */
-function firstExchange(value: unknown): BehaviorSpecExample | null {
+export function firstExchange(value: unknown): BehaviorSpecExample | null {
   if (!Array.isArray(value)) return null;
   const turn = (index: number, role: string) => {
     const message = value[index] as { role?: unknown; content?: unknown } | undefined;

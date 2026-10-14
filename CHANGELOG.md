@@ -4,6 +4,12 @@
 
 ### Added
 
+- `tt assets preview <org/name>` and the agent's `preview_dataset` tool read a
+  downloaded dataset file offline and report sample rows, per-field presence,
+  blank values, types and lengths, duplicate records and malformed JSONL lines.
+  An optional `columns` mapping shows how many records would be usable for
+  training. The agent now assesses dataset quality from real rows instead of
+  file metadata alone.
 - Download any Hugging Face dataset or model without editing the spec first:
   `tt datasets prefetch --repo org/name --training <file>` and
   `tt models prefetch --repo org/name`. The agent's `prepare_download` accepts
