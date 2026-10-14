@@ -729,7 +729,10 @@ export function createTunedTensorTools(
       async (p) => {
         const asset = await findAsset(p.repo, undefined, "dataset").catch((error: unknown) => {
           if (!(error instanceof AssetNotFoundError)) throw error;
-          throw new Error(`Dataset ${p.repo} has not been downloaded. Download it with prepare_download (kind "dataset") first, then preview it.`);
+          const [repo, revision] = p.repo.split("@");
+          throw new Error(revision
+            ? `No downloaded revision of dataset ${repo} starts with ${revision}. Preview ${repo} without a revision to use its newest download, or download that revision with prepare_download.`
+            : `Dataset ${repo} has not been downloaded. Download it with prepare_download (kind "dataset") first, then preview it.`);
         });
         return await previewDataset({ asset, file: p.file, rows: p.rows, columns: p.columns });
       },

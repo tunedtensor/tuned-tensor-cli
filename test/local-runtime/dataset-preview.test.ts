@@ -73,6 +73,7 @@ test("JSONL preview reports fields, quality problems and a mapping check", async
       skipped_missing_fields: 1,
       duplicate_inputs: 1,
       input_equals_output: 1,
+      blocked_by_malformed_lines: true,
     });
     assert.deepEqual(preview.samples.map((sample) => sample.index), [0, 1, 2, 3, 4]);
   });
@@ -103,6 +104,34 @@ test("chat rows with many long turns stay inside the tool-output budget", async 
     assert.ok(JSON.stringify(preview).length < 32_000);
     assert.equal(preview.mapping?.usable, 40);
     assert.equal(preview.duplicate_records, 39);
+  });
+});
+
+test("duplicates ignore key order, and the default file is the training split", async () => {
+  await withRoot(async (root) => {
+    const asset = await download(root, {
+      "training_data/test.jsonl": jsonl([{ a: 1 }]),
+      "training_data/train-0.jsonl": jsonl([{ input: "a", output: "b" }, { output: "b", input: "a" }]),
+      "training_data/validation.jsonl": jsonl([{ a: 1 }]),
+    });
+    const preview = await previewDataset({ asset, columns: { input: "input", output: "output" } });
+    assert.equal(preview.file, "training_data/train-0.jsonl");
+    assert.equal(preview.duplicate_records, 1);
+    assert.equal(preview.mapping?.blocked_by_malformed_lines, undefined);
+  });
+});
+
+test("very wide nested rows and many shards still fit the tool-output limit", async () => {
+  await withRoot(async (root) => {
+    const nested = Object.fromEntries(Array.from({ length: 20 }, (_, key) => [`k${key}`,
+      Array.from({ length: 8 }, () => Object.fromEntries(Array.from({ length: 20 }, (_, inner) => [`i${inner}`, "z".repeat(200)])))]));
+    const files: Record<string, string> = { "train.jsonl": jsonl(Array.from({ length: 20 }, (_, index) => ({ index, ...nested }))) };
+    for (let shard = 0; shard < 300; shard += 1) files[`shards/part-${String(shard).padStart(5, "0")}.jsonl`] = jsonl([{ a: 1 }]);
+    const preview = await previewDataset({ asset: await download(root, files), rows: 20 });
+    assert.ok(JSON.stringify(preview).length <= 30_000);
+    assert.ok((preview.samples_omitted ?? 0) > 0);
+    assert.equal(preview.other_files.length, 20);
+    assert.equal(preview.other_files_omitted, 280);
   });
 });
 
@@ -147,7 +176,6 @@ test("preview only reads downloaded dataset files", async () => {
     await assert.rejects(previewDataset({ asset, file: "../../etc/passwd" }), /not a downloaded \.jsonl or \.parquet file.*train\.jsonl/);
     await assert.rejects(previewDataset({ asset, file: "notes.csv" }), /not a downloaded/);
     await assert.rejects(previewDataset({ asset: { ...asset, files: { "notes.csv": "sha256:x" } } }), /no downloaded \.jsonl or \.parquet files/);
-    await assert.rejects(previewDataset({ asset: { ...asset, kind: "model" } }), /model, not a dataset/);
     await rm(join(asset.snapshot_path, "train.jsonl"));
     await assert.rejects(previewDataset({ asset }), /missing from/);
   });

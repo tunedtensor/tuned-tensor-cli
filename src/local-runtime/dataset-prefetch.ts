@@ -199,7 +199,7 @@ export function firstExchange(value: unknown): BehaviorSpecExample | null {
   return input !== null && output !== null ? { input, output } : null;
 }
 
-function columnNames(columns: DatasetColumns): string[] {
+export function columnNames(columns: DatasetColumns): string[] {
   return "messages" in columns ? [columns.messages] : [columns.input, columns.output];
 }
 

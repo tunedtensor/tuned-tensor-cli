@@ -3,11 +3,11 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
-import { asyncBufferFromFile, parquetMetadataAsync, parquetReadObjects, parquetSchema } from "hyparquet";
+import { asyncBufferFromFile, parquetMetadataAsync, parquetReadObjects } from "hyparquet";
 import { compressors } from "hyparquet-compressors";
 import type { AssetManifest } from "./assets.js";
 import { datasetInputIdentity } from "./dataset.js";
-import { firstExchange, mappedField, type DatasetColumns } from "./dataset-prefetch.js";
+import { columnNames, firstExchange, mappedField, type DatasetColumns } from "./dataset-prefetch.js";
 
 /**
  * Read a downloaded Hugging Face dataset file and summarize what is in it:
@@ -26,6 +26,9 @@ const MAX_VALUE_CHARACTERS = 800;
 const MIN_VALUE_CHARACTERS = 40;
 /** Wide tables report statistics for the first fields only. */
 const MAX_REPORTED_FIELDS = 50;
+const MAX_LISTED_FILES = 20;
+/** Below the agent's 32,000-character tool-output limit. */
+const MAX_REPORT_CHARACTERS = 30_000;
 const SUPPORTED_FILE = /\.(jsonl|parquet)$/i;
 
 type Format = "jsonl" | "parquet";
@@ -61,6 +64,8 @@ export interface DatasetPreviewMapping {
   skipped_missing_fields: number;
   duplicate_inputs: number;
   input_equals_output: number;
+  /** Training rejects JSONL files with malformed lines; fix them before using this mapping. */
+  blocked_by_malformed_lines?: boolean;
 }
 
 export interface DatasetPreview {
@@ -79,7 +84,9 @@ export interface DatasetPreview {
   duplicate_records: number;
   mapping?: DatasetPreviewMapping;
   samples: Array<{ index: number; record: Record<string, unknown> }>;
+  samples_omitted?: number;
   other_files: string[];
+  other_files_omitted?: number;
 }
 
 function valueType(value: unknown): string {
@@ -100,11 +107,16 @@ function distribution(values: number[]): Distribution | undefined {
   return { min: sorted[0]!, median: at(0.5), p95: at(0.95), max: sorted.at(-1)! };
 }
 
+/** Record identity that ignores key order, so reordered duplicates still match. */
 function stableJson(value: unknown): string {
-  return JSON.stringify(value, (_key, item: unknown) =>
-    typeof item === "bigint" ? item.toString()
-      : item instanceof Uint8Array ? createHash("sha256").update(item).digest("hex")
-        : item);
+  return JSON.stringify(value, (_key, item: unknown) => {
+    if (typeof item === "bigint") return item.toString();
+    if (item instanceof Uint8Array) return createHash("sha256").update(item).digest("hex");
+    if (item && typeof item === "object" && !Array.isArray(item) && !(item instanceof Date)) {
+      return Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+    }
+    return item;
+  });
 }
 
 /** Bound a sampled value for display: long strings, wide objects and binary columns are elided. */
@@ -152,13 +164,12 @@ async function scanParquet(path: string, limit: number): Promise<Scan> {
   const file = await asyncBufferFromFile(path);
   const metadata = await parquetMetadataAsync(file);
   const total = Number(metadata.num_rows);
-  const columns = parquetSchema(metadata).children.map((child) => child.element.name);
   async function* records() {
     let rowStart = 0;
     for (const group of metadata.row_groups) {
       if (rowStart >= limit) return;
       const rowEnd = Math.min(rowStart + Number(group.num_rows), limit);
-      yield* await parquetReadObjects({ file, metadata, compressors, columns, rowStart, rowEnd });
+      yield* await parquetReadObjects({ file, metadata, compressors, rowStart, rowEnd });
       rowStart += Number(group.num_rows);
     }
   }
@@ -166,6 +177,22 @@ async function scanParquet(path: string, limit: number): Promise<Scan> {
     records: records(),
     finish: async (scanned) => ({ records: total, malformed: 0, complete: scanned >= total }),
   };
+}
+
+async function countNonEmptyLines(path: string): Promise<number> {
+  let count = 0;
+  let content = false;
+  for await (const chunk of createReadStream(path) as AsyncIterable<Buffer>) {
+    for (const byte of chunk) {
+      if (byte === 0x0a) {
+        if (content) count += 1;
+        content = false;
+      } else if (byte !== 0x20 && byte !== 0x09 && byte !== 0x0d) {
+        content = true;
+      }
+    }
+  }
+  return content ? count + 1 : count;
 }
 
 async function scanJsonl(path: string, limit: number): Promise<Scan> {
@@ -196,16 +223,13 @@ async function scanJsonl(path: string, limit: number): Promise<Scan> {
   }
   return {
     records: records(),
-    // Count the rest of the file without parsing it, so the total stays exact.
     finish: async () => {
-      let complete = true;
-      for (let next = await lines.next(); !next.done; next = await lines.next()) {
-        if (next.value.trim()) {
-          nonEmpty += 1;
-          complete = false;
-        }
-      }
-      return { records: nonEmpty - malformed, malformed, complete };
+      const next = await lines.next();
+      await lines.return?.();
+      if (next.done) return { records: nonEmpty - malformed, malformed, complete: true };
+      // Stopped at the scan limit: count lines on raw bytes instead of
+      // decoding and splitting the rest of a possibly huge file.
+      return { records: await countNonEmptyLines(path) - malformed, malformed, complete: false };
     },
   };
 }
@@ -221,7 +245,8 @@ function chooseFile(asset: AssetManifest, requested?: string): { file: string; s
     }
     return { file: requested, supported };
   }
-  const training = supported.find((file) => /(^|[/_.-])train/i.test(file));
+  const training = supported.find((file) => /^train/i.test(file.split("/").at(-1)!))
+    ?? supported.find((file) => file.split("/").slice(0, -1).some((part) => /^train(ing)?$/i.test(part)));
   return { file: training ?? supported[0]!, supported };
 }
 
@@ -232,7 +257,6 @@ export async function previewDataset(args: {
   columns?: DatasetColumns;
   scanLimit?: number;
 }): Promise<DatasetPreview> {
-  if (args.asset.kind !== "dataset") throw new Error(`${args.asset.repo} is a downloaded model, not a dataset.`);
   const { file, supported } = chooseFile(args.asset, args.file);
   const path = join(args.asset.snapshot_path, ...file.split("/"));
   const metadata = await stat(path).catch(() => null);
@@ -245,11 +269,12 @@ export async function previewDataset(args: {
   const scan = format === "parquet" ? await scanParquet(path, scanLimit) : await scanJsonl(path, scanLimit);
 
   const fields = new Map<string, FieldStats>();
+  const omittedFields = new Set<string>();
   const seenRecords = new Set<string>();
   let duplicateRecords = 0;
-  const mappingColumns = args.columns ? ("messages" in args.columns ? [args.columns.messages] : [args.columns.input, args.columns.output]) : [];
+  const mappingColumns = args.columns ? columnNames(args.columns) : [];
   const seenInputs = new Set<string>();
-  const mapping = args.columns ? {
+  const mapping: DatasetPreviewMapping | undefined = args.columns ? {
     columns: args.columns, missing_columns: [] as string[], usable: 0, skipped_missing_fields: 0, duplicate_inputs: 0, input_equals_output: 0,
   } : undefined;
   const random = mulberry32(0x5eed);
@@ -262,6 +287,10 @@ export async function previewDataset(args: {
     for (const [name, value] of Object.entries(record)) {
       let stats = fields.get(name);
       if (!stats) {
+        if (fields.size >= MAX_REPORTED_FIELDS) {
+          omittedFields.add(name);
+          continue;
+        }
         stats = { present: 0, blank: 0, types: new Set(), chars: [], items: [] };
         fields.set(name, stats);
       }
@@ -302,7 +331,10 @@ export async function previewDataset(args: {
     }
   }
   const finished = await scan.finish(scanned);
-  if (mapping) mapping.missing_columns = mappingColumns.filter((name) => !fields.has(name));
+  if (mapping) mapping.missing_columns = mappingColumns.filter((name) => !fields.has(name) && !omittedFields.has(name));
+  // Training conversion stops at the first malformed JSONL line, so a usable
+  // count would overstate what a run can use.
+  if (mapping && finished.malformed > 0) mapping.blocked_by_malformed_lines = true;
 
   // Nested chat turns hold many strings per field, so shrink the per-value
   // limit until the serialized sample fits rather than estimating it.
@@ -313,8 +345,8 @@ export async function previewDataset(args: {
     valueLimit = Math.max(MIN_VALUE_CHARACTERS, Math.floor(valueLimit / 2));
     samples = boundSamples(reservoir, valueLimit);
   }
-  const reported = [...fields.entries()].slice(0, MAX_REPORTED_FIELDS);
-  return {
+  const otherFiles = supported.filter((name) => name !== file);
+  const report: DatasetPreview = {
     repo: args.asset.repo,
     revision: args.asset.revision,
     file,
@@ -324,7 +356,7 @@ export async function previewDataset(args: {
     scanned,
     scan_complete: finished.complete,
     malformed_lines: finished.malformed,
-    fields: reported.map(([name, stats]) => {
+    fields: [...fields.entries()].map(([name, stats]) => {
       const chars = distribution(stats.chars);
       const items = distribution(stats.items);
       return {
@@ -336,10 +368,18 @@ export async function previewDataset(args: {
         ...(items ? { items } : {}),
       };
     }),
-    ...(fields.size > reported.length ? { fields_omitted: fields.size - reported.length } : {}),
+    ...(omittedFields.size > 0 ? { fields_omitted: omittedFields.size } : {}),
     duplicate_records: duplicateRecords,
     ...(mapping ? { mapping } : {}),
     samples,
-    other_files: supported.filter((name) => name !== file),
+    other_files: otherFiles.slice(0, MAX_LISTED_FILES),
+    ...(otherFiles.length > MAX_LISTED_FILES ? { other_files_omitted: otherFiles.length - MAX_LISTED_FILES } : {}),
   };
+  // Value truncation cannot bound deeply nested or very wide rows on its own;
+  // drop trailing samples until the whole report fits.
+  while (report.samples.length > 0 && JSON.stringify(report).length > MAX_REPORT_CHARACTERS) {
+    report.samples = report.samples.slice(0, -1);
+    report.samples_omitted = reservoir.length - report.samples.length;
+  }
+  return report;
 }
