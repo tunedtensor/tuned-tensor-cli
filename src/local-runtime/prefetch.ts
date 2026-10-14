@@ -128,7 +128,8 @@ async function certifiedFileDigest(path: string, expected: CertifiedFileDigest):
   const metadata = await stat(path);
   const digest = createHash(expected.algorithm);
   if (expected.algorithm === "sha1") digest.update(`blob ${metadata.size}\0`);
-  for await (const chunk of createReadStream(path)) digest.update(chunk);
+  // Weight shards are tens of GB; avoid a read/async iteration per 64 KiB.
+  for await (const chunk of createReadStream(path, { highWaterMark: 8 * 1024 * 1024 })) digest.update(chunk);
   return digest.digest("hex");
 }
 
