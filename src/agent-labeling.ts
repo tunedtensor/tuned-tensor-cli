@@ -332,8 +332,20 @@ export function labelingResultForModel(operation: string | undefined, output: un
 
 /** A note the next turn carries so the model can continue from approved results. */
 export function approvedResultsNote(actions: AgentAction[]): string | undefined {
-  const pending = actions.filter((action) => action.result !== undefined && action.result_reported !== true);
+  const settled = new Set(["completed", "failed", "rejected", "outcome_unknown"]);
+  const pending = actions.filter((action) => action.result_reported !== true
+    && (action.result !== undefined || settled.has(action.status ?? "")));
   if (pending.length === 0) return undefined;
   for (const action of pending) action.result_reported = true;
-  return `[Approved action results, recorded by tt]\n${pending.map((action) => JSON.stringify(action.result)).join("\n")}`;
+  const outcomes = pending.map((action) => {
+    const args = record(action.arguments);
+    return JSON.stringify({
+      action_id: action.id, operation: action.operation, status: action.status,
+      // The proposal is already in the transcript. Carry its durable outcome,
+      // not another copy of the spec or preview, into the next model turn.
+      spec_path: args?.spec_path,
+      result: action.result,
+    });
+  });
+  return `[Action outcomes, recorded by tt]\n${outcomes.join("\n")}\nThese are historical action outcomes. Read the current spec before describing its current contents or proposing another edit.`;
 }

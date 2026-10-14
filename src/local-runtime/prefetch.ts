@@ -20,7 +20,7 @@ import {
   runLoggedProcess,
   withBundledPythonEnvironment,
 } from "./process-runner.js";
-import type { LocalRunReporter } from "./run-reporter.js";
+import { withProgressHeartbeat, type LocalRunReporter } from "./run-reporter.js";
 import { recordAssetDownload } from "./assets.js";
 import {
   minimalMachineLearningEnvironment,
@@ -457,11 +457,15 @@ export async function prefetchBaseModel(args: {
 
   if (args.request && args.config.paths.baseModel) {
     const localPath = resolve(args.config.paths.baseModel);
-    const verified = await verifyLocalBaseModel(
+    const modelId = args.request.spec_snapshot.base_model;
+    const verified = await withProgressHeartbeat(args.reporter, {
+      stage: "model_prefetch", status: "running",
+      message: "Verifying local model checksums. Large cached models can take several minutes.",
+    }, () => verifyLocalBaseModel(
       localPath,
-      args.request.spec_snapshot.base_model,
+      modelId,
       args.config.paths.modelCache,
-    );
+    ));
     return {
       ok: true,
       status: args.localOnly ? "completed" : "skipped",
@@ -486,19 +490,19 @@ export async function prefetchBaseModel(args: {
     ["--input", inputPath, "--output", outputPath],
   );
 
-  await args.reporter?.onEvent?.({
+  const downloadEvent = {
     stage: "model_prefetch",
     status: "running",
     message: args.localOnly
-      ? "Verifying the Hugging Face base model is available in the local cache."
-      : "Prefetching Hugging Face base model.",
+      ? "Verifying cached model files. Large models can take several minutes."
+      : "Downloading and verifying model files. Cached files still need checksum verification; large models can take several minutes.",
     details: {
       base_model: payload.base_model,
       model_cache: payload.model_cache ?? null,
       command: entrypoint.displayCommand,
       log_path: logPath,
     },
-  });
+  };
 
   const cacheEnvironment = withHuggingFaceCacheEnvironment(
     minimalMachineLearningEnvironment(process.env),
@@ -508,7 +512,7 @@ export async function prefetchBaseModel(args: {
   const effectiveHubCache = resolveHuggingFaceCacheLayout(effectiveModelCache).hubCache;
   const env = withBundledPythonEnvironment(cacheEnvironment);
 
-  const { exitCode } = await runLoggedProcess({
+  const { exitCode } = await withProgressHeartbeat(args.reporter, downloadEvent, () => runLoggedProcess({
     command: entrypoint.command,
     commandArgs: entrypoint.commandArgs,
     env,
@@ -517,7 +521,7 @@ export async function prefetchBaseModel(args: {
     // by default; callers can still opt out by omitting the reporter (`--quiet`).
     reporter: args.reporter ? { ...args.reporter, verbose: true } : undefined,
     stage: "model_prefetch",
-  });
+  }));
 
   if (exitCode !== 0) {
     throw new Error(`Model prefetch exited with code ${exitCode}. See ${logPath}.`);
@@ -556,18 +560,24 @@ export async function prefetchBaseModel(args: {
     output,
   });
   if (defaultBaseModelRevision(payload.base_model)) {
-    await verifyLocalBaseModel(
+    await withProgressHeartbeat(args.reporter, {
+      stage: "model_prefetch", status: "running",
+      message: "Checking model files against the certified revision's checksums.",
+    }, () => verifyLocalBaseModel(
       output.snapshot_path!,
       payload.base_model,
       effectiveModelCache,
-    );
+    ));
   }
-  const recorded = args.localOnly ? undefined : await recordAssetDownload({
+  const recorded = args.localOnly ? undefined : await withProgressHeartbeat(args.reporter, {
+    stage: "model_prefetch", status: "running",
+    message: "Verifying model files and recording the local asset manifest.",
+  }, () => recordAssetDownload({
     kind: "model",
     repo: payload.base_model,
     revision: snapshotRevision.data,
     snapshotPath: output.snapshot_path!,
-  });
+  }));
 
   await args.reporter?.onEvent?.({
     stage: "model_prefetch",
