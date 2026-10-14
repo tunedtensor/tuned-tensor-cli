@@ -8,7 +8,7 @@ export function trimAgentContext(
   // Code and JSON tokenize more densely than prose. Reserve room for the answer,
   // protocol overhead, and tool declarations even when Pi stores them separately.
   const toolChars = JSON.stringify(options.tools.map(({ name, description, parameters }) => ({ name, description, parameters }))).length;
-  const budget = Math.max(0, options.contextWindow - options.maxTokens - 2048);
+  const budget = Math.max(0, options.contextWindow - options.maxTokens - 4096);
   const estimate = (items: AgentMessage[]) => (toolChars + items.reduce((total, item) =>
     total + JSON.stringify("content" in item ? item.content : item).length, 0)) / 3;
   // Providers add protocol/template tokens that the character estimate misses.
@@ -44,5 +44,10 @@ export function trimAgentContext(
     throw new Error("The conversation still exceeds the model's context budget after omitting older tool output. Use a smaller request or /new.");
   }
   options.onTrim?.();
-  return trimmed;
+  // Pi clamps output tokens using the last assistant's usage. Those counts
+  // describe the larger prefix we just removed; retaining them can clamp the
+  // next reply to one token even though the shortened request fits comfortably.
+  return trimmed.map((message) => message.role === "assistant" && message.usage
+    ? { ...message, usage: { ...message.usage, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 } }
+    : message);
 }

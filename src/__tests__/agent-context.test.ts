@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
 import { trimAgentContext } from "../agent-context.js";
 
 const user = (text: string) => ({ role: "user", content: text, timestamp: 1 });
-const answer = (content: unknown[]) => ({ role: "assistant", content });
-const toolResult = (text: string) => ({ role: "toolResult", toolCallId: "call", toolName: "get_local_spec", content: [{ type: "text", text }] });
-const options = { contextWindow: 6000, maxTokens: 1000, tools: [] };
+const answer = (content: unknown[]) => ({ role: "assistant", content, timestamp: 1, stopReason: "stop",
+  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 } });
+const toolResult = (text: string) => ({ role: "toolResult", toolCallId: "call", toolName: "get_local_spec", timestamp: 1, content: [{ type: "text", text }] });
+const options = { contextWindow: 8000, maxTokens: 1000, tools: [] };
 const messages = (items: unknown[]) => items as AgentMessage[];
 
 describe("agent context budget", () => {
@@ -46,7 +48,24 @@ describe("agent context budget", () => {
     const onTrim = vi.fn();
     const output = trimAgentContext(input, { ...options, onTrim });
     expect(onTrim).toHaveBeenCalledOnce();
-    expect(output).toEqual([input[0], input[3], input[4], input[5], input[6]]);
+    expect(output.map(m => m.role)).toEqual(["user", "assistant", "user", "assistant", "toolResult"]);
+    expect(output[1]).toMatchObject({ usage: { input: 0, output: 0, totalTokens: 0 } });
+  });
+
+  it("restores the real provider's reply allowance after trimming stale usage", () => {
+    const input = messages([
+      user("Create a spec"),
+      answer([{ type: "toolCall", id: "call", name: "get_local_spec", arguments: {} }]),
+      toolResult("x".repeat(30000)),
+      { ...answer([{ type: "text", text: "Created python-agent/tunedtensor.json" }]), timestamp: 2,
+        stopReason: "stop", usage: { input: 30000, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 30001 } },
+      { ...user("Download its model"), timestamp: 3 },
+    ]);
+    const model = { contextWindow: 32768, maxTokens: 4096 };
+    expect(clampMaxTokensToContext(model as never, { messages: input } as never, 4096)).toBe(1);
+    const output = trimAgentContext(input, { ...model, tools: [] });
+    expect(clampMaxTokensToContext(model as never, { messages: output } as never, 4096)).toBe(4096);
+    expect(input[3]).toMatchObject({ usage: { totalTokens: 30001 } });
   });
 
   it("does not silently discard old user instructions when text alone exceeds the budget", () => {
