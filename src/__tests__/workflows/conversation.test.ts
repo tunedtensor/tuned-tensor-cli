@@ -110,6 +110,46 @@ function conversation(replies: Reply[] | ((context: Context, call: number) => Re
 }
 
 describe("conversation workflow contracts (scripted provider, real agent and tools)", () => {
+  it("splits local data after approval, survives resume, and attaches the recorded files to a training preview", async () => {
+    const source = JSON.stringify(spec, null, 2) + "\n";
+    writeFileSync(join(root, "tunedtensor.json"), source);
+    const data = Array.from({ length: 20 }, (_, i) => JSON.stringify({
+      messages: [{ role: "user", content: `Feedback ${i}` }, { role: "assistant", content: i % 2 ? "positive" : "negative" }],
+      metadata: { category: i % 2 ? "positive" : "negative" },
+    })).join("\n") + "\n";
+    writeFileSync(join(root, "data.jsonl"), data);
+    const dataset = { training: "./split/training.jsonl", validation: "./split/validation.jsonl", format: "chat_jsonl" };
+    const c = conversation([
+      { tool: "inspect_dataset_file", args: { file: "data.jsonl" } },
+      { tool: "prepare_dataset_split", args: { file: "data.jsonl", output: "split", train: .8, validation: .2, test: 0, seed: "123", stratify_by: "metadata.category" } },
+      "Review the 80/20 split with seed 123.",
+      { tool: "get_local_spec", args: {} },
+      { tool: "prepare_update_local_spec", args: { expected_sha256: createHash("sha256").update(source).digest("hex"), changes: { dataset_prebuilt: dataset } } },
+      "Review the dataset paths in your spec.",
+      { tool: "prepare_pipeline_run", args: {} },
+      "The saved spec is ready for a dry-run.",
+    ]);
+    await c.session.handleLine("Split data.jsonl 80/20 for train and validation with seed 123 and balanced categories.");
+    expect(c.errors).toEqual([]);
+    expect(c.session.snapshot().pendingActions).toMatchObject([{ operation: "split_local_dataset" }]);
+    expect(existsSync(join(root, "split"))).toBe(false);
+    expect(c.output.join(" ")).not.toContain("workspace_fingerprint");
+    await c.session.handleLine("/approve");
+    expect(JSON.parse(readFileSync(join(root, "split/split-manifest.json"), "utf8"))).toMatchObject({ counts: { training: 16, validation: 4, test: 0 }, dataset_prebuilt: dataset });
+    expect(readFileSync(join(root, "data.jsonl"), "utf8")).toBe(data);
+    expect(readFileSync(join(root, "tunedtensor.json"), "utf8")).toBe(source);
+    const resumed = c.newSession();
+    await resumed.handleLine(`/resume ${c.session.snapshot().thread!.id}`);
+    await resumed.handleLine("Use the files you just created in my spec.");
+    expect(JSON.stringify(c.contexts[3])).toContain("split/training.jsonl");
+    await resumed.handleLine("/approve");
+    expect(JSON.parse(readFileSync(join(root, "tunedtensor.json"), "utf8"))).toMatchObject({ ...spec, dataset_prebuilt: dataset });
+    await resumed.handleLine("Preview training.");
+    expect(c.errors).toEqual([]);
+    expect(resumed.snapshot().pendingActions).toMatchObject([{ operation: "run_local_pipeline", arguments: { dry_run: true } }]);
+    expect(c.forbidden).not.toHaveBeenCalled();
+  });
+
   it("discovers cached Parquet data, inspects both splits and attaches it only after approval", async () => {
     const repo = "org/downloaded-coding";
     const revision = "c".repeat(40);

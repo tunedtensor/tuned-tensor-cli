@@ -55,6 +55,26 @@ afterEach(() => {
 });
 
 describe("local output primitives", () => {
+  it("renders local split counts and paths instead of treating a split as a download", () => {
+    renderLocalOutput(payload({ args: ["datasets", "split"], hasJson: true, json: {
+      source: "./data.jsonl", output: "./split", rows: 100,
+      counts: { training: 80, validation: 20, test: 0 }, method: "random", seed: "42",
+    } }));
+    const output = vi.mocked(console.log).mock.calls.flat().join(" ");
+    expect(output).toContain("Dataset split preview");
+    expect(output).toContain("80");
+    expect(output).toContain("./split");
+    expect(output).not.toContain("Dataset is ready locally");
+  });
+  it("renders local inspection counts and samples", () => {
+    renderLocalOutput(payload({ args: ["datasets", "inspect"], hasJson: true, json: {
+      file: "./data.jsonl", rows: 100, fields: ["messages"], sample: [], sha256: "a".repeat(64),
+    } }));
+    const output = vi.mocked(console.log).mock.calls.flat().join(" ");
+    expect(output).toContain("Validated local chat JSONL");
+    expect(output).toContain("100");
+    expect(output).not.toContain("Dataset is ready locally");
+  });
   it("adapts the standalone binary name to the unified command", () => {
     expect(
       adaptLocalCliText(

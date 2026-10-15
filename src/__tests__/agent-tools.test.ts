@@ -631,7 +631,7 @@ exit 1
       "list_specs", "get_spec", "list_runs", "get_run", "diagnose_run",
       "report_run", "estimate_run", "list_datasets", "get_dataset",
       "list_models", "get_model", "get_balance", "get_agent_usage", "list_transactions",
-      "examine_hardware", "describe_pipeline", "search_hugging_face", "list_local_datasets", "inspect_local_dataset", "inspect_hugging_face_dataset", "inspect_training_source", "validate_pipeline",
+      "examine_hardware", "describe_pipeline", "search_hugging_face", "inspect_dataset_file", "prepare_dataset_split", "list_local_datasets", "inspect_local_dataset", "inspect_hugging_face_dataset", "inspect_training_source", "validate_pipeline",
       "prepare_create_spec", "prepare_update_spec",
     ]);
   });
@@ -646,6 +646,8 @@ exit 1
         "examine_hardware",
         "describe_pipeline",
         "search_hugging_face",
+        "inspect_dataset_file",
+        "prepare_dataset_split",
         "list_local_datasets",
         "inspect_local_dataset",
         "inspect_hugging_face_dataset",

@@ -48,6 +48,8 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   { path: "models verify", description: "Verify a local model artifact.", group: "Serving", modes: LOCAL },
   { path: "models prefetch", description: "Download the spec's base model, or any model with --repo.", group: "Serving", modes: LOCAL },
   { path: "models verify-base", description: "Verify the local base-model snapshot.", group: "Serving", modes: LOCAL },
+  { path: "datasets inspect", description: "Validate and inspect a local chat JSONL file.", group: "Workflow", modes: LOCAL },
+  { path: "datasets split", description: "Split local chat JSONL with ratios, grouping, and a seed.", group: "Workflow", modes: LOCAL },
   { path: "datasets prefetch", description: "Download the spec's dataset files, or any dataset files with --repo.", group: "Workflow", modes: LOCAL },
   { path: "datasets verify", description: "Verify the cached Hugging Face dataset files.", group: "Workflow", modes: LOCAL },
   { path: "assets list", description: "List downloaded Hugging Face datasets and models.", group: "Inspect", modes: LOCAL },

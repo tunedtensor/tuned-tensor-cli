@@ -304,6 +304,9 @@ export function isLabelingOperation(action: AgentAction): boolean {
 export function approvedResultForModel(operation: string | undefined, output: unknown): Record<string, unknown> | undefined {
   const value = record(output);
   if (!value) return undefined;
+  if (operation === "split_local_dataset") {
+    return { operation, source: value.source, source_sha256: value.source_sha256, counts: value.counts, dataset_prebuilt: value.dataset_prebuilt, note: value.note };
+  }
   if (operation === "prefetch_local") {
     return {
       operation, kind: value.kind, repo: value.repo, revision: value.revision,

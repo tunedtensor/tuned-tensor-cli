@@ -208,14 +208,14 @@ describe("TunedTensorAgentSession", () => {
     expect(session.snapshot().pendingActions).toHaveLength(0);
   });
 
-  it("allows an approved local pipeline to be stopped with Ctrl-C", async () => {
+  it.each(["run_local_pipeline", "split_local_dataset"])("allows an approved %s action to be stopped with Ctrl-C", async (operation) => {
     const client = fakeClient();
     const action = {
       id: "pipeline-action-123",
       title: "Run local pipeline",
       summary: "Run the adapter pipeline.",
       risk: "medium",
-      operation: "run_local_pipeline",
+      operation,
       arguments: {},
     };
     client.runTurn = vi.fn(async (_threadId, _prompt, onEvent) => {

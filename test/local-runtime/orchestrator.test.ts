@@ -530,6 +530,32 @@ test("normalizes prebuilt training JSONL and evaluates the validation split", as
   }
 });
 
+test("uses current spec instructions for reusable system-free data without modifying source files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-reusable-data-"));
+  try {
+    const training = join(root, "training.jsonl");
+    const validation = join(root, "validation.jsonl");
+    const generic = (input: string) => JSON.stringify({ messages: [
+      { role: "user", content: input }, { role: "assistant", content: "label" },
+    ], metadata: { license: "fixture" } }) + "\n";
+    const source = generic("train");
+    await writeFile(training, source);
+    await writeFile(validation, generic("validate"));
+    const request = requestFixture({ runId: "67676767-6767-4676-8676-676767676767",
+      datasetPrebuilt: { training, validation, format: "chat_jsonl" } });
+    request.spec_snapshot.guidelines = ["Use the allowed labels."];
+    request.spec_snapshot.constraints = ["Do not add explanations."];
+    const result = await runLocalFineTune({ request, config: configFixture(root) });
+    const persisted = JSON.parse((await readFile(result.report.artifact_uris.dataset.replace(/^file:\/\//, ""), "utf8")).trim());
+    assert.equal(persisted.messages[0].role, "system");
+    assert.equal(persisted.messages[0].content, "Return labels.\n\nGuidelines:\n- Use the allowed labels.\n\nConstraints:\n- Do not add explanations.");
+    assert.equal(result.report.baseline.eval_split, "prebuilt_validation");
+    assert.equal(result.report.baseline.results[0]?.prompt, "validate");
+    assert.equal(await readFile(training, "utf8"), source);
+    assert.equal(await readFile(validation, "utf8"), generic("validate"));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("requires a separate prebuilt evaluation split for real runs", async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-prebuilt-guard-"));
   try {

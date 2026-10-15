@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- Split unsplit local chat JSONL through the agent or `tt datasets split`, with
+  configurable train/validation/test ratios, seeded random or ordered membership,
+  grouping and stratification. Sources and metadata are preserved; approved
+  results can be attached to the spec for a pipeline preview. `tt datasets inspect`
+  validates the file and shows counts and bounded samples. Reusable rows without
+  a system message receive the current spec instructions in adapter run artifacts;
+  explicitly conflicting system messages are still rejected.
+
 ## [0.25.0] - 2026-10-14
 
 ### Added

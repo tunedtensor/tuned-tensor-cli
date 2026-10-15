@@ -163,3 +163,58 @@ reproducibility; these are outputs, not additional user-authored configuration.
 Agent `/approve` for a pipeline still runs a preview only. Real training uses
 the direct command above. The spec is the behavior recipe; approval of a spec
 edit is not approval to launch training.
+
+## Splitting an unsplit local dataset
+
+Keep the reusable master dataset as one chat JSONL file. Ask the agent:
+
+> Split data.jsonl into 80% training and 20% validation, using seed 123.
+> Balance metadata.category, save to split-123, and use the files in my spec.
+
+The agent validates the file, previews counts, and asks for approval to create
+new split files. It then reads the spec and proposes a separate
+`dataset_prebuilt` edit using the recorded output paths. Training remains a
+separate step: the agent can preview a dry-run; actual training uses
+`tt pipeline run --spec tunedtensor.json`.
+
+The same operation is available without an agent or account:
+
+```sh
+tt datasets inspect data.jsonl
+tt datasets split data.jsonl --output split-123 \
+  --train 0.8 --validation 0.2 --test 0 --seed 123 \
+  --stratify-by metadata.category --dry-run
+# Remove --dry-run to create the reviewed files.
+```
+
+Defaults are 80/10/10 with seed `42`. `--method ordered` assigns groups by source
+order instead of seeded random membership. Records retain their source order
+within each output; the seed controls membership, not training batch order.
+`--group-by group_id` keeps related examples together; without it, normalized
+user prompts define groups. Repeated prompts cannot cross splits, including
+when using a custom grouping field. Ratios are approximate at group boundaries;
+requested nonzero splits must contain examples. `--stratify-by` accepts a scalar
+field (including dotted metadata paths), and each group must belong to one
+stratum. This is not a near-duplicate detector or a time-series split engine.
+
+Inputs must use an optional system message, one user message, and one assistant
+answer per row. Metadata is preserved. During adapter training, rows without a
+system message receive the current spec’s compiled system prompt, guidelines and
+constraints in the run artifact. An explicit system message must match those
+instructions; it is never silently replaced. Master and split files stay unchanged. Paths must be inside the current
+workspace without symlinks; the output directory must be new, and its parent
+must exist. The source and spec remain unchanged by the splitter. A manifest
+records the source checksum, options, counts, and relative `dataset_prebuilt`
+paths. A prepared agent action refuses a source changed since review.
+
+Source split labels are metadata only. Random/ordered splitting does not enforce
+original benchmark holdouts; preserve those holdouts separately when reporting
+results against the original benchmark. Never shuffle a published test set into
+training and still describe the result as that benchmark's evaluation.
+
+Inspection and splitting stream source records, but the existing adapter training
+loader still materializes complete split files and compiled JSONL in memory.
+Splitting a multi-gigabyte master does not remove that training-loader limit.
+Do not treat a successful split preview as proof that an arbitrarily large split
+can train; streaming training ingestion or bounded dataset selection is separate
+work. Use `tt validate` on the saved spec to validate the actual training inputs.

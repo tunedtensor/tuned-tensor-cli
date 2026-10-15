@@ -320,23 +320,25 @@ interface ValidatedDataset {
   evalSplit: EvalSplit;
 }
 
-function assertMatchingDatasetSystems(
+/** Reusable data can omit system instructions; explicit policies must still agree. */
+function applyDatasetSystem(
   jsonl: string,
   expectedSystem: string,
   split: string,
-): void {
-  for (const [index, line] of jsonl.split(/\r?\n/).entries()) {
-    if (!line.trim()) continue;
+): string {
+  return jsonl.split("\n").map((line, index) => {
     const row = JSON.parse(line) as {
       messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
     };
-    const actualSystem = row.messages.find((message) => message.role === "system")?.content ?? "";
-    if (actualSystem !== expectedSystem) {
+    const system = row.messages.find((message) => message.role === "system");
+    if (system && system.content !== expectedSystem) {
       throw new Error(
         `Prebuilt ${split} row ${index + 1} system message must match the behavior spec system message.`,
       );
     }
-  }
+    if (!system) row.messages.unshift({ role: "system", content: expectedSystem });
+    return JSON.stringify(row);
+  }).join("\n");
 }
 
 function addDryRunPlaceholders(request: unknown, dryRun: boolean): unknown {
@@ -408,8 +410,7 @@ async function validateDatasetInputs(
   for (const [name, value] of splitEntries) {
     if (!value) continue;
     const path = stripFileUri(value);
-    const jsonl = await normalizeChatJsonlForRelocation(path);
-    assertMatchingDatasetSystems(jsonl, expectedSystem, name);
+    const jsonl = applyDatasetSystem(await normalizeChatJsonlForRelocation(path), expectedSystem, name);
     normalized.set(name, {
       jsonl,
       examples: await examplesFromChatJsonl(path),

@@ -598,7 +598,21 @@ function renderKnownJson(args: string[], value: unknown): boolean {
     }
   }
   if (command === "datasets" && isRecord(value)) {
-    renderDatasetPrefetch(value);
+    if (subcommand === "inspect") {
+      printSuccess("Validated local chat JSONL structure");
+      printDetail([["File", text(value.file)], ["Rows", text(value.rows)], ["Size", displayBytes(value.size_bytes)], ["SHA-256", text(value.sha256)]]);
+      printJson({ fields: value.fields, sample: value.sample, note: value.note });
+    } else if (subcommand === "split") {
+      const options = record(value.options) ?? value;
+      const counts = record(value.counts) ?? {};
+      printSuccess(value.dataset_prebuilt ? "Dataset splits saved" : "Dataset split preview — no files written");
+      printDetail([
+        ["Source", text(value.source)], ["Output", text(options.output)], ["Rows", text(value.rows)],
+        ["Training", text(counts.training)], ["Validation", text(counts.validation)], ["Test", text(counts.test)],
+        ["Method", text(options.method)], ["Seed", text(options.seed)],
+      ]);
+      printJson(value.dataset_prebuilt ? { dataset_prebuilt: value.dataset_prebuilt, note: value.note } : { group_by: value.group_by, stratify_by: value.stratify_by, note: value.note });
+    } else renderDatasetPrefetch(value);
     return true;
   }
   if (command === "serve" && isRecord(value)) {

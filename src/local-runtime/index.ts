@@ -1,3 +1,4 @@
+import { inspectDatasetFile, prepareDatasetSplit, executeDatasetSplit } from "./dataset-split.js";
 import { pipelineForRunInput } from "../pipeline.js";
 import { resolveDownloadConfig, resolveProjectConfig } from "./project-workflow.js";
 import { readFileSync, realpathSync } from "node:fs";
@@ -122,6 +123,7 @@ Commands:
   serve <model-id|active|base|foundation> [--config local-runner.json] [--host 127.0.0.1] [--port 8000]
   runs list|get|events|report|compare|audit [args] [--config local-runner.json]
   models list|get|verify|prefetch|verify-base|active|activate|rollback|serve [args] [--config local-runner.json]
+  datasets inspect|split <data.jsonl> [--output directory --train .8 --validation .1 --test .1]
   datasets prefetch|verify [tunedtensor.json] [--repo org/name --training path ...]
   assets list|path|verify [org/name[@revision]]
 
@@ -325,9 +327,29 @@ const COMMAND_GROUPS: Record<string, CliCommandGroup> = {
     },
   },
   datasets: {
-    description: "Download or verify the Hugging Face dataset a behavior spec trains on.",
+    description: "Inspect and split local chat JSONL, or download and verify Hugging Face datasets.",
     defaultSubcommand: "prefetch",
     subcommands: {
+      inspect: {
+        usage: "tt datasets inspect <data.jsonl>",
+        description: "Validate local chat JSONL and report row count, hash, and bounded samples without changes.",
+        options: [], minPositionals: 1, maxPositionals: 1,
+      },
+      split: {
+        usage: "tt datasets split <data.jsonl> --output <new-directory> [options]",
+        description: "Partition unsplit chat JSONL without changing the source or spec. Keep duplicate prompts together; preserve metadata.",
+        options: [
+          { name: "--output", value: "directory", description: "New output directory inside the workspace (parent must exist)" },
+          { name: "--train", value: "ratio", description: "Training fraction (default 0.8)" },
+          { name: "--validation", value: "ratio", description: "Validation fraction (default 0.1)" },
+          { name: "--test", value: "ratio", description: "Test fraction (default 0.1); set 0 for train/validation only" },
+          { name: "--seed", value: "seed", description: "Reproducible random group assignment (default 42)" },
+          { name: "--method", value: "random|ordered", description: "Seeded group ordering or source order (default random)" },
+          { name: "--group-by", value: "field", description: "Group field, with dotted paths supported; defaults to normalized user prompt" },
+          { name: "--stratify-by", value: "field", description: "Keep similar ratios within each label/category" },
+          { name: "--dry-run", description: "Show planned counts without writing files" },
+        ], minPositionals: 1, maxPositionals: 1,
+      },
       prefetch: {
         usage: "tt datasets prefetch [tunedtensor.json] [--repo org/name --training path [--test path]] [options]",
         description: "Download dataset_prebuilt.huggingface files and pin them in tunedtensor.lock.json, or download any dataset files with --repo. Resumes after interruption.",
@@ -1351,6 +1373,17 @@ async function main(argv: string[]): Promise<void> {
 
   if (command === "datasets") {
     const subcommand = cli.subcommand!;
+    if (subcommand === "inspect") return printJson(await inspectDatasetFile(cwd(), cli.positionals[0]!));
+    if (subcommand === "split") {
+      const numeric = (name: string, fallback: number) => readOption(argv, name) === undefined ? fallback : Number(readOption(argv, name));
+      const prepared = await prepareDatasetSplit(cwd(), {
+        file: cli.positionals[0], output: readOption(argv, "--output"),
+        train: numeric("--train", 0.8), validation: numeric("--validation", 0.1), test: numeric("--test", 0.1),
+        seed: readOption(argv, "--seed") ?? "42", method: readOption(argv, "--method") ?? "random",
+        group_by: readOption(argv, "--group-by"), stratify_by: readOption(argv, "--stratify-by"),
+      });
+      return printJson(hasFlag(argv, "--dry-run") ? prepared.preview : await executeDatasetSplit(cwd(), prepared));
+    }
     const inputPath = resolve(cli.positionals[0] ?? DEFAULT_LOCAL_SPEC_PATH);
     const config = readOption(argv, "--repo")
       ? await resolveDownloadConfig(inputPath, readOption(argv, "--config"), (message) => console.error(message))
