@@ -33,6 +33,11 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   { path: "pipeline validate", description: "Validate a pipeline without executing it.", group: "Workflow", modes: LOCAL },
   { path: "pipeline plan", description: "Resolve pipeline steps and required artifacts.", group: "Workflow", modes: LOCAL },
   { path: "pipeline run", description: "Run or dry-run a local pipeline.", group: "Workflow", modes: LOCAL },
+  { path: "pipeline start", description: "Start a real run in the background with an audit record.", group: "Workflow", modes: LOCAL },
+  { path: "pipeline list", description: "List background runs.", group: "Inspect", modes: LOCAL },
+  { path: "pipeline status", description: "Show a background run's status, audit check and recent log.", group: "Inspect", modes: LOCAL },
+  { path: "pipeline logs", description: "Print a background run's log.", group: "Inspect", modes: LOCAL },
+  { path: "pipeline cancel", description: "Stop an active background run.", group: "Workflow", modes: LOCAL },
   { path: "shell", description: "Open the conversational terminal.", group: "Workflow", modes: LOCAL },
 
   { path: "runs list", description: "List local runs.", group: "Inspect", modes: LOCAL },

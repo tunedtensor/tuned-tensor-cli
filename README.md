@@ -263,9 +263,16 @@ sealed as `outcome_unknown` for manual inspection. `/reject` never mutates.
 Pipeline dry-runs also wait for `/approve`. Preparation fingerprints the
 workspace directory identity, spec, and adjacent config, revalidates them,
 copies the resolved spec, config, and pipeline into private temporary inputs,
-and invokes `tt pipeline run --dry-run` deterministically. Persisted proposals
-that request real execution fail before the child command is dispatched. Real
-training remains available through the explicit direct `tt pipeline run` command.
+and invokes `tt pipeline run --dry-run` deterministically. A dry-run proposal
+edited to request real execution fails before the child command is dispatched.
+After a dry-run of the same spec bytes completes, the agent can propose a real
+background run with a reason; approval starts it in a detached process and the
+conversation continues. The agent reports progress with read-only tools and can
+cancel a run only through another approval. Each run keeps an audit record
+(reason, requester, choices, resources, outcome and metrics), a hash-chained event
+log and its full log; `TT_MAX_PARALLEL_RUNS` limits concurrent runs. See
+[background runs](docs/local-runtime/background-runs.md). The direct
+`tt pipeline run` and `tt pipeline start` commands remain available.
 A changed workspace or spec requires a new review.
 
 The startup **What you can do** panel covers specs/datasets, decision training,

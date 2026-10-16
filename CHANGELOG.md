@@ -12,6 +12,15 @@
 
 ### Added
 
+- The TT agent can start real training in the background after an approved
+  dry-run of the same spec, report status, logs, metrics and CPU/memory/GPU usage
+  through read-only tools, and cancel a run after a second approval. The
+  conversation continues while the run trains, and the agent hears about
+  finished runs on the next message. `tt pipeline start|list|status|logs|cancel`
+  manage the same runs from the shell. Each run keeps an audit record (reason,
+  requester, approval, sealed spec, choices, resources at launch, outcome and
+  evaluation metrics), a hash-chained event log and its full log.
+  `TT_MAX_PARALLEL_RUNS` (default 1) limits concurrent runs.
 - Split unsplit local chat JSONL through the agent or `tt datasets split`, with
   configurable train/validation/test ratios, seeded random or ordered membership,
   grouping and stratification. Sources and metadata are preserved; approved

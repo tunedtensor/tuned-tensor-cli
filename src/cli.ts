@@ -31,6 +31,7 @@ import { registerSpecCommands } from "./commands/spec.js";
 import { registerLocalCommands } from "./commands/local.js";
 import { registerAgentCommands } from "./commands/agent.js";
 import { registerPipelineCommands } from "./commands/pipeline.js";
+import { createBackgroundRunExecutor, type BackgroundRunExecutor } from "./local-background-run-action.js";
 import { registerAuthCommands } from "./commands/auth.js";
 import { registerBalanceCommands } from "./commands/balance.js";
 import { registerTopupCommands } from "./commands/topup.js";
@@ -131,6 +132,7 @@ export interface CliRuntime {
   stdinIsTTY?: boolean;
   stdoutIsTTY?: boolean;
   runSelfCommand?: SelfCommandRunner;
+  backgroundRuns?: BackgroundRunExecutor;
   runLocalCommand?: typeof executeLocalCommand;
   checkForUpdate?: (currentVersion: string) => Promise<{
     currentVersion: string;
@@ -188,6 +190,10 @@ async function createDefaultAgentClient(
       entrypoint: runtime.argv?.[1],
       signal: options.signal,
       ...(options.captureJson ? { captureJson: true } : {}),
+    }),
+    backgroundRuns: runtime.backgroundRuns ?? createBackgroundRunExecutor({
+      env,
+      entrypoint: runtime.argv?.[1] ?? process.argv[1],
     }),
     createAgent: runtime.createPiAgent,
   });

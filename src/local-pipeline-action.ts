@@ -59,6 +59,8 @@ export interface ValidatePreparedLocalPipelineActionArgs {
   expectedConfigPath?: string;
   expectedConfigSha256?: string;
   dryRun: boolean;
+  /** Only the approved background-run operation may prepare real execution. */
+  allowReal?: boolean;
 }
 
 export class LocalPipelineActionError extends Error {
@@ -174,6 +176,7 @@ export async function prepareLocalPipelineAction(args: {
   pipeline?: unknown;
   specPath?: string;
   dryRun?: boolean;
+  allowReal?: boolean;
 }): Promise<PreparedLocalPipelineAction> {
   const spec = await resolveWorkspaceSpec(
     args.workspaceRoot,
@@ -210,9 +213,9 @@ export async function prepareLocalPipelineAction(args: {
     throw new Error("The saved spec drives execution. Update tunedtensor.json.pipeline and review the edit before previewing a different recipe.");
   }
   const dryRun = args.dryRun ?? true;
-  if (!dryRun) {
+  if (!dryRun && args.allowReal !== true) {
     throw new Error(
-      "Real pipeline execution requires the explicit direct tt pipeline run command; model-mediated approvals are dry-run only.",
+      "Real pipeline execution requires the explicit direct tt pipeline run command or an approved background run; dry-run approvals never train.",
     );
   }
 
@@ -244,6 +247,7 @@ export async function validatePreparedLocalPipelineAction(
       pipeline: args.pipeline,
       specPath: args.specPath,
       dryRun: args.dryRun,
+      allowReal: args.allowReal,
     });
   } catch (error) {
     throw new LocalPipelineActionError(
@@ -272,6 +276,19 @@ export async function validatePreparedLocalPipelineAction(
   return prepared;
 }
 
+/** The reviewed spec with its resolved runtime, so the child never reopens mutable files. */
+export function sealPreparedSpec(prepared: PreparedLocalPipelineAction): Record<string, unknown> {
+  const config = prepared.resolvedConfig!;
+  const { evaluation, dryRun: _dryRun, ...runtime } = config;
+  return {
+    ...prepared.resolvedSpec,
+    pipeline: prepared.pipeline,
+    ...(prepared.engine === "adapter" ? { runtime, evaluation } : {
+      runtime: { ...prepared.resolvedSpec.runtime, ...(config.gpu ? { gpu: config.gpu } : {}) },
+    }),
+  };
+}
+
 export async function executeLocalPipelineAction(args: ValidatePreparedLocalPipelineActionArgs & {
   runCommand: LocalPipelineCommandRunner;
   signal?: AbortSignal;
@@ -288,15 +305,7 @@ export async function executeLocalPipelineAction(args: ValidatePreparedLocalPipe
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "tt-agent-pipeline-"));
   const temporaryId = randomUUID();
   const specPath = join(temporaryDirectory, `${temporaryId}.spec.json`);
-  const config = prepared.resolvedConfig!;
-  const { evaluation, dryRun: _dryRun, ...runtime } = config;
-  const sealedSpec = {
-    ...prepared.resolvedSpec,
-    pipeline: prepared.pipeline,
-    ...(prepared.engine === "adapter" ? { runtime, evaluation } : {
-      runtime: { ...prepared.resolvedSpec.runtime, ...(config.gpu ? { gpu: config.gpu } : {}) },
-    }),
-  };
+  const sealedSpec = sealPreparedSpec(prepared);
   const command = ["pipeline", "run", "--spec", specPath, "--dry-run"];
   try {
     await writeFile(specPath, `${JSON.stringify(sealedSpec, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });

@@ -169,6 +169,13 @@ evaluation (`evaluation.inference.device: "cpu"`) stays on the laptop.
 Remove `gpu` to execute everything locally. `--dry-run` or `dryRun: true`
 does not connect to AWS or copy files.
 
+To keep using the terminal or the TT agent during a long run, start it in the
+background instead: `tt pipeline start --spec tunedtensor.json --reason "..."`,
+or approve a background run the agent proposes after the dry-run. Check it with
+`tt pipeline status <id>` and stop it with `tt pipeline cancel <id> --reason "..."`.
+The laptop still orchestrates the run, so keep it awake. See
+[background runs](background-runs.md).
+
 ## 5. Inspect results and finish
 
 Wait for a successful completion message. Adapter runs return a run ID and a
