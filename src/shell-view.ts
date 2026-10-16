@@ -38,7 +38,7 @@ export function usageBar(percent: number | undefined, width = BAR_WIDTH): string
 }
 
 function percentLabel(percent: number | undefined): string {
-  if (percent === undefined) return chalk.dim("  n/a");
+  if (percent === undefined) return chalk.dim(" n/a");
   return loadColor(percent)(`${String(Math.round(percent)).padStart(3)}%`).padStart(4);
 }
 
@@ -150,7 +150,7 @@ export function describeFineTuneFit(usage: LiveUsage | undefined, context: Shell
     if (verdict.status === "not_possible") return result;
     const free = report.gpu?.unified_memory && usage
       ? usage.memory.total_bytes - usage.memory.used_bytes : report.gpu?.memory_free_bytes;
-    if (free !== undefined && verdict.required_bytes !== undefined && free < verdict.required_bytes) {
+    if (verdict.status === "ready" && free !== undefined && verdict.required_bytes !== undefined && free < verdict.required_bytes) {
       return { status: "tight", text: `${label}: insufficient free memory for the estimated workload`, source: "Free GPU/shared memory or choose a smaller configuration." };
     }
     if (workflow && workflow.status !== "ready" && workflow.status !== "remote") {

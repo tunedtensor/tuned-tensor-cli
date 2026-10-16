@@ -94,6 +94,15 @@ describe("workflow guidance across OS and resource profiles", () => {
     expect(w.foundation.status).toBe("limited");
     expect(w.adapter.reason).toContain("0.0 GiB free");
   });
+  it("does not mistake a disk-space requirement for a VRAM requirement", () => {
+    const h = gpu(host(), 24, 20);
+    h.disks[0]!.free_bytes = GiB;
+    const report = evaluateCapabilities(h);
+    expect(report.workflows!.find(w => w.id === "adapter")).toMatchObject({
+      status: "limited", reason: expect.stringContaining(report.adapters[0]!.finetune.reason),
+    });
+    expect(report.workflows!.find(w => w.id === "adapter")!.reason).not.toContain("Available GPU memory");
+  });
   it("uses shared free RAM for Spark, not a second independent GPU memory pool", () => {
     const h = gpu(host(), 128, 128); h.gpus[0]!.unified_memory = true; h.os.free_memory_bytes = 3 * GiB;
     expect(workflows(h).decision.status).toBe("limited");
@@ -145,6 +154,12 @@ describe("workflow guidance across OS and resource profiles", () => {
 });
 
 describe("native host and terminal smoke (runs on Linux, macOS and Windows CI)", () => {
+  it("fits an Apple GPU with unknown utilization into a narrow terminal", () => {
+    const live = { sampled_at: new Date().toISOString(), platform: "darwin" as const, arch: "arm64", cpu: { model: "Apple M2", cores: 4, load_average: [0, 0, 0] as [number, number, number] }, memory: { total_bytes: 8 * GiB, used_bytes: 4 * GiB }, gpus: [{ index: 0, name: "Apple Silicon GPU", vendor: "apple" as const, unified_memory: true, memory_total_bytes: 8 * GiB }] };
+    const context = { cwd: "/test", projectName: "test", local: { artifactRoot: "/test", storeRoot: "/test" }, warnings: [] };
+    const lines = renderMachinePanel(live, context, { columns: 40 });
+    expect(lines.filter(line => terminalWidth(line) > 40).map(stripVTControlCharacters)).toEqual([]);
+  });
   it("samples the real CPU/RAM and persists guidance with optional programs absent", async () => {
     const root = await mkdtemp(join(tmpdir(), "tt-hardware-native-"));
     try {

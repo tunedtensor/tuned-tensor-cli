@@ -88,6 +88,11 @@ export function workflowGuidance(host: HostInventory, report: CapabilityReport):
       reason: "Native training on this OS is not certified; Windows users can use a Linux/WSL2 environment.",
       next: "Run tt doctor in the training environment, or use your AWS GPU.",
     };
+    if (verdict.status !== "ready") return {
+      id, label, status: "limited",
+      reason: verdict.reason,
+      next: "Choose a smaller supported model/configuration or use your AWS GPU.",
+    };
     const free = report.gpu?.unified_memory ? host.os.free_memory_bytes : report.gpu?.memory_free_bytes;
     if (free !== undefined && verdict.required_bytes !== undefined && free < verdict.required_bytes) {
       return {
@@ -96,11 +101,6 @@ export function workflowGuidance(host: HostInventory, report: CapabilityReport):
         next: "Free GPU/shared memory, choose a smaller configuration, or use your AWS GPU.",
       };
     }
-    if (verdict.status !== "ready") return {
-      id, label, status: "limited",
-      reason: verdict.reason,
-      next: "Choose a smaller supported model/configuration or use your AWS GPU.",
-    };
     const verified = !host.quick && host.python?.ok;
     return {
       id, label, status: verified ? "ready" : "unverified",
