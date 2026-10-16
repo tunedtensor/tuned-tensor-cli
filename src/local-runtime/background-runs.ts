@@ -284,21 +284,32 @@ export function createBackgroundRunStore(root = backgroundRunsRoot()): Backgroun
 
   /** Mark a run whose supervisor disappeared (crash, reboot) instead of reporting it as running forever. */
   async function reconcile(record: BackgroundRunRecord): Promise<BackgroundRunRecord> {
-    if (!isActiveBackgroundRun(record)) return record;
-    const owner = record.process;
-    if (owner?.host && owner.host !== hostname()) return record;
-    const pid = owner?.supervisor_pid;
-    if (pid !== undefined && processAlive(pid)) return record;
-    if (pid === undefined && Date.now() - Date.parse(record.created_at) < STARTING_GRACE_MS) return record;
-    return await update(record.id, (current) => {
-      if (!isActiveBackgroundRun(current)) return;
+    const missingSupervisor = (current: BackgroundRunRecord) => {
+      if (!isActiveBackgroundRun(current)) return false;
+      const owner = current.process;
+      if (owner?.host && owner.host !== hostname()) return false;
+      const pid = owner?.supervisor_pid;
+      return pid === undefined
+        ? Date.now() - Date.parse(current.created_at) >= STARTING_GRACE_MS
+        : !processAlive(pid);
+    };
+    if (!missingSupervisor(record)) return record;
+    return await withAppendLock(lockPath(record.id), async () => {
+      // A launcher or supervisor may have saved its PID or final outcome since
+      // the read above. Recheck under the same lock before declaring it lost.
+      const current = await readRecord(record.id);
+      if (!missingSupervisor(current)) return current;
       current.status = "lost";
       current.finished_at = new Date().toISOString();
+      current.updated_at = current.finished_at;
       current.outcome = {
         ...current.outcome,
         error: "The background supervisor stopped without recording an outcome (for example after a crash or reboot). Inspect the log and the local run store before starting again.",
       };
-    }, { type: "lost", message: "Supervisor process is gone; outcome unknown." });
+      await writePrivateJsonAtomic(paths(current.id).record, current);
+      await appendEvent(current, { type: "lost", message: "Supervisor process is gone; outcome unknown." });
+      return current;
+    });
   }
 
   async function listRaw(): Promise<BackgroundRunRecord[]> {
@@ -500,10 +511,16 @@ export function summarizePipelineResult(result: unknown): BackgroundRunOutcome {
   if (request) {
     const report = record(value.report);
     const runId = text(request.run_id, 64);
+    const outputs = Object.values(record(value.outputs) ?? {}).map(record);
+    const trained = Boolean(text(report?.fine_tuned_model_id)
+      || outputs.some((output) => text(output?.modelArtifactUri)))
+      && record(record(report?.training)?.metrics)?.dry_run !== true;
     return compact({
       pipeline_status: text(value.status, 40),
       local_run_id: runId,
-      model_id: text(report?.fine_tuned_model_id, 200) ?? (runId ? `local-${runId}` : undefined),
+      // Reports identify the artifact URI; CLI consumers need the store ID.
+      // Evaluation-only recipes have a run ID but never register a model.
+      model_id: trained && runId ? `local-${runId}` : undefined,
       report_path: text(value.reportPath),
       output_dir: text(value.artifactDir),
       metrics: report ? compact({

@@ -87,6 +87,40 @@ describe("background run store", () => {
     await expect(store.create(newRun(), { maxParallel: 1 })).resolves.toBeDefined();
   });
 
+  it("rechecks a disappeared supervisor under lock before appending a lost event", async () => {
+    const run = await store.create(newRun());
+    const deadPid = 2 ** 22 + 12345;
+    const running = await store.update(run.id, (current) => {
+      current.status = "running";
+      current.process = { host: hostname(), supervisor_pid: deadPid };
+    });
+    const originalKill = process.kill.bind(process);
+    const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (pid === deadPid) {
+        // The supervisor finishes between the reader's snapshot and PID check.
+        writeFileSync(store.paths(run.id).record, JSON.stringify({ ...running, status: "succeeded", outcome: { exit_code: 0 } }));
+        throw Object.assign(new Error("Gone"), { code: "ESRCH" });
+      }
+      return originalKill(pid, signal);
+    });
+    try {
+      expect(await store.get(run.id)).toMatchObject({ status: "succeeded", outcome: { exit_code: 0 } });
+      expect((await store.events(run.id)).events.map(event => event.type)).toEqual(["requested"]);
+    } finally {
+      kill.mockRestore();
+    }
+  });
+
+  it("records a disappeared supervisor once when readers reconcile concurrently", async () => {
+    const run = await store.create(newRun());
+    await store.update(run.id, current => {
+      current.status = "running";
+      current.process = { host: hostname(), supervisor_pid: 2 ** 22 + 12345 };
+    });
+    expect((await Promise.all([store.get(run.id), store.get(run.id)])).map(current => current.status)).toEqual(["lost", "lost"]);
+    expect((await store.events(run.id)).events.map(event => event.type)).toEqual(["requested", "lost"]);
+  });
+
   it("records the cancel reason and refuses to cancel a finished run", async () => {
     const run = await store.create(newRun());
     const cancelled = await store.requestCancel(run.id, { reason: "Wrong dataset", requested_by: currentRequester("cli") });
@@ -123,7 +157,7 @@ describe("pipeline result summaries", () => {
       status: "completed",
       request: { run_id: "11111111-1111-4111-8111-111111111111" },
       report: {
-        fine_tuned_model_id: "local-11111111-1111-4111-8111-111111111111",
+        fine_tuned_model_id: "file:///runs/artifacts/model",
         baseline: { pass_rate: 0.5, average_score: 0.6, results: [{ huge: true }] },
         candidate: { pass_rate: 0.8, average_score: 0.85 },
         comparison: { pass_rate_delta: 0.3, regressions: 1, details: [] },
@@ -144,6 +178,27 @@ describe("pipeline result summaries", () => {
         general_regression_passed: true,
       },
     });
+  });
+
+  it("does not invent a model for evaluation-only or dry-run results", () => {
+    const result = {
+      status: "stage_completed",
+      request: { run_id: "11111111-1111-4111-8111-111111111111" },
+      outputs: { baseline: { report: { pass_rate: 1 } } },
+    };
+    expect(summarizePipelineResult(result).model_id).toBeUndefined();
+    expect(summarizePipelineResult({
+      ...result,
+      report: { fine_tuned_model_id: "dry-run", training: { metrics: { dry_run: true } } },
+    }).model_id).toBeUndefined();
+  });
+
+  it("links a train-only recipe to its registered model", () => {
+    expect(summarizePipelineResult({
+      status: "stage_completed",
+      request: { run_id: "11111111-1111-4111-8111-111111111111" },
+      outputs: { custom_train: { modelArtifactUri: "file:///runs/artifacts/model" } },
+    }).model_id).toBe("local-11111111-1111-4111-8111-111111111111");
   });
 
   it("keeps per-step metrics for foundation and decision results", () => {

@@ -47,6 +47,13 @@ import { createRunConsoleReporter } from "../local-runtime/console-reporter.js";
 const DEFAULT_PIPELINE_FILE = "tunedtensor.pipeline.json";
 const DEFAULT_SPEC_FILE = "tunedtensor.json";
 
+function printPipelineWarning(message: string): void {
+  // Background supervisors parse stdout as one JSON result. Keep advisory
+  // output in the log, including warnings from legacy config and host sizing.
+  if (isJsonMode()) console.error(`Warning: ${message}`);
+  else printWarning(message);
+}
+
 export function localConfigPath(explicitPath: string | undefined, specPath: string): string | undefined {
   if (explicitPath) return resolve(explicitPath);
   const adjacent = join(dirname(resolve(specPath)), "local-runner.json");
@@ -253,7 +260,7 @@ export function registerPipelineCommands(parent: Command): void {
         throw new Error("--output and --resume are mutually exclusive.");
       }
       const { document, input, spec } = resolvePipelineDocument(options, command.getOptionValueSource("spec") !== "default");
-      const { config } = await resolveProjectConfig(options.spec, options.config, printWarning, input);
+      const { config } = await resolveProjectConfig(options.spec, options.config, printPipelineWarning, input);
       const plan = createExecutionPlan(document, { only: parseList(options.only), skip: parseList(options.skip) });
       const hostWarnings = config.gpu ? [] : await hostWarningsForPipeline(document, input);
       if (options.dryRun || config.dryRun) {
@@ -271,7 +278,7 @@ export function registerPipelineCommands(parent: Command): void {
         return outputPlan({ ...plan, ...(spec ? { spec } : {}) }, hostWarnings);
       }
       if (spec && !isJsonMode()) console.log(`Behavior spec: ${spec.path} (sha256 ${spec.sha256})`);
-      for (const warning of hostWarnings) printWarning(warning);
+      for (const warning of hostWarnings) printPipelineWarning(warning);
       const remote = plan.steps.find((step) => step.target !== "local");
       if (remote) {
         throw new Error(`Step "${remote.id}" targets cloud execution. Pipeline execution requires local targets; set targets to local and configure runtime.gpu in tunedtensor.json to use your AWS instance.`);
@@ -352,7 +359,7 @@ function registerBackgroundRunCommands(pipeline: Command): void {
         reason: options.reason,
         executor,
       });
-      for (const warning of (prepared.preview.warnings as string[] | undefined) ?? []) printWarning(warning);
+      for (const warning of (prepared.preview.warnings as string[] | undefined) ?? []) printPipelineWarning(warning);
       const started = await executeBackgroundRunStart({
         workspaceRoot,
         input: prepared.arguments,
