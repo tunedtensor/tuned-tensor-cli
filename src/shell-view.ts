@@ -73,7 +73,8 @@ export function inventoryFromUsage(usage: LiveUsage): HostInventory {
       type: usage.platform ?? process.platform,
       cpu_count: usage.cpu.cores,
       total_memory_bytes: usage.memory.total_bytes,
-      free_memory_bytes: usage.memory.total_bytes - usage.memory.used_bytes,
+      free_memory_bytes: usage.memory.free_bytes ?? usage.memory.total_bytes - usage.memory.used_bytes,
+      available_memory_bytes: usage.memory.available_bytes,
     },
     gpus: nvidia.map((gpu) => ({
       index: gpu.index,
@@ -273,18 +274,18 @@ export function renderMachinePanel(
     label: "CPU",
     name: `${usage.cpu.cores}× ${sanitizeTerminalText(usage.cpu.model)}`,
     percent: usage.cpu.utilization_percent,
-    detail: `load ${usage.cpu.load_average[0].toFixed(2)}`,
+    detail: `1m load ${usage.cpu.load_average[0].toFixed(2)}`,
   });
   meters.push({
     label: "RAM",
-    name: "system memory",
+    name: usage.memory.available_bytes !== undefined ? "in use (est.)" : "system memory",
     percent: usage.memory.total_bytes > 0 ? (usage.memory.used_bytes / usage.memory.total_bytes) * 100 : undefined,
     detail: `${formatGiB(usage.memory.used_bytes)}/${formatGiB(usage.memory.total_bytes)} GiB`,
   });
   if (usage.disk && usage.disk.total_bytes > 0) {
     meters.push({
       label: "Disk",
-      name: "model cache",
+      name: "cache filesystem",
       percent: ((usage.disk.total_bytes - usage.disk.free_bytes) / usage.disk.total_bytes) * 100,
       detail: `${formatGiB(usage.disk.free_bytes)} GiB free`,
     });

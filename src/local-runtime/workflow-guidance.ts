@@ -55,12 +55,16 @@ export function workflowGuidance(host: HostInventory, report: CapabilityReport):
   }
   if (supported && decision.status !== "needs_setup") {
     const memory = device === "CUDA" && report.gpu && !report.gpu.unified_memory
-      ? report.gpu.memory_free_bytes ?? report.gpu.memory_total_bytes : host.os.free_memory_bytes;
+      ? report.gpu.memory_free_bytes ?? report.gpu.memory_total_bytes
+      : host.os.available_memory_bytes ?? host.os.free_memory_bytes;
     const lowDisk = host.disks.find(d => d.name === "model-cache" && d.free_bytes !== undefined && d.free_bytes < 6 * GiB);
     if ((memory !== undefined && memory < 8 * GiB) || lowDisk || host.os.cpu_count < 4) {
       decision.status = "limited";
       decision.reason += lowDisk ? " Less than 6 GiB cache space free."
-        : memory !== undefined && memory < 8 * GiB ? " Less than 8 GiB working memory free."
+        : memory !== undefined && memory < 8 * GiB
+          ? host.os.available_memory_bytes !== undefined && device !== "CUDA"
+            ? " Less than 8 GiB estimated available RAM."
+            : " Less than 8 GiB working memory free."
           : " Fewer than 4 CPU cores; training may be slow.";
       decision.next = "Start with a small batch; free memory/disk or try CPU with freeze_encoder for a smaller training workload.";
     }
