@@ -8,7 +8,8 @@
   },
   "type": "module",
   "bin": {
-    "tt": "dist/index.js"
+    "tt": "dist/index.js",
+    "TT": "dist/index.js"
   },
   "scripts": {
     "build": "tsup",

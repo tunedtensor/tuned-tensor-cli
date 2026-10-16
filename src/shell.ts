@@ -208,7 +208,7 @@ export function routeShellCommand(
 ): RoutedShellCommand | null {
   let args = tokenizeShellInput(input);
   if (args.length === 0) return null;
-  if (args[0] === "tt") {
+  if (args[0]?.toLowerCase() === "tt") {
     args = args.slice(1);
     if (args.length === 0) {
       throw new ShellParseError("The TT shell is already open; enter a command such as `runs list`.");
@@ -249,7 +249,7 @@ export function isCatalogCommand(
 
 function hasCatalogIntent(input: string): boolean {
   let args = input.trim().split(/\s+/);
-  if (args[0] === "tt") args = args.slice(1);
+  if (args[0]?.toLowerCase() === "tt") args = args.slice(1);
   return isCatalogCommand(args);
 }
 
@@ -1050,7 +1050,7 @@ export class TunedTensorShellSession {
       if (explicitCommand !== null && !explicitCommand) {
         throw new ShellParseError("Add a TT command after :.");
       }
-      const explicitWorkflowPrefix = /^tt(?:\s|$)/.test(trimmed);
+      const explicitWorkflowPrefix = /^tt(?:\s|$)/i.test(trimmed);
 
       if (
         explicitCommand === null

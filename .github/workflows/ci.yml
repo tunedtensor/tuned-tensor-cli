@@ -77,7 +77,9 @@ jobs:
           npm init -y >/dev/null
           npm install "${tarball_path}" --silent
           npx --no-install tt --version
+          npx --no-install TT --version
           npx --no-install tt --help >/dev/null
+          npx --no-install TT --help >/dev/null
           npx --no-install tt status --json >/dev/null
 
   hardware-guidance:

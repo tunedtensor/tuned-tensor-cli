@@ -154,6 +154,39 @@ describe("workflow guidance across OS and resource profiles", () => {
 });
 
 describe("native host and terminal smoke (runs on Linux, macOS and Windows CI)", () => {
+  it.each([40, 80, 120])("keeps ready fit details in /system at %i columns", columns => {
+    const h = gpu(host());
+    const live = {
+      sampled_at: h.collected_at, platform: "linux" as const, arch: "x64",
+      cpu: { model: "CPU", cores: 8, load_average: [0, 0, 0] as [number, number, number] },
+      memory: { total_bytes: 32 * GiB, used_bytes: 4 * GiB },
+      gpus: [{ index: 0, name: h.gpus[0]!.name, vendor: "nvidia" as const, unified_memory: false, memory_total_bytes: 24 * GiB, memory_used_bytes: 4 * GiB }],
+    };
+    const context = {
+      cwd: "/test", projectName: "test", local: { artifactRoot: "/test", storeRoot: "/test" }, warnings: [],
+      host: { collectedAt: h.collected_at, stale: false, summary: "", line: "", inventory: h },
+      spec: { path: "/test/tunedtensor.json", parseError: false, baseModel: "Qwen/Qwen3.5-2B" },
+    };
+    expect(describeFineTuneFit(live, context).status).toBe("ready");
+    const compact = renderMachinePanel(live, context, { columns }).map(stripVTControlCharacters);
+    const detailed = renderMachinePanel(live, context, { columns, detailed: true }).map(stripVTControlCharacters);
+    expect(compact.some(line => line.startsWith("Tune"))).toBe(false);
+    expect(compact.join(" ").replace(/\s+/g, " ")).toContain("✓ Specs and datasets · Decision training · LLM fine-tuning · Train from scratch");
+    expect(compact.join("\n")).toContain("? LLM serving · needs verification");
+    expect(detailed.some(line => line.startsWith("Tune"))).toBe(true);
+    const fullText = detailed.join(" ").replace(/\s+/g, " ");
+    for (const item of machineCapabilities(live, context).workflows!) {
+      expect(fullText).toContain(item.reason);
+      expect(fullText).toContain(item.next);
+    }
+    expect([...compact, ...detailed].filter(line => terminalWidth(line) > Math.min(columns, 88))).toEqual([]);
+
+    // The compact banner must still flag pressure on the selected model.
+    live.gpus[0]!.memory_used_bytes = 23.9 * GiB;
+    expect(describeFineTuneFit(live, context).status).toBe("tight");
+    expect(renderMachinePanel(live, context, { columns }).map(stripVTControlCharacters).some(line => /^Tune\s+!/.test(line))).toBe(true);
+  });
+
   it("fits an Apple GPU with unknown utilization into a narrow terminal", () => {
     const live = { sampled_at: new Date().toISOString(), platform: "darwin" as const, arch: "arm64", cpu: { model: "Apple M2", cores: 4, load_average: [0, 0, 0] as [number, number, number] }, memory: { total_bytes: 8 * GiB, used_bytes: 4 * GiB }, gpus: [{ index: 0, name: "Apple Silicon GPU", vendor: "apple" as const, unified_memory: true, memory_total_bytes: 8 * GiB }] };
     const context = { cwd: "/test", projectName: "test", local: { artifactRoot: "/test", storeRoot: "/test" }, warnings: [] };
@@ -180,6 +213,9 @@ describe("native host and terminal smoke (runs on Linux, macOS and Windows CI)",
         expect(text).toContain("WHAT YOU CAN DO");
         expect(text).toContain("Decision training");
         expect(text).toContain("Specs and datasets");
+        expect(text).toContain("/system for details");
+        expect(text.replace(/\s+/g, " ")).not.toContain("no GPU required");
+        expect(stripVTControlCharacters(renderMachinePanel(live, context, { columns, detailed: true }).join("\n")).replace(/\s+/g, " ")).toContain("no GPU required");
         expect(lines.filter(line => terminalWidth(line) > Math.min(columns, 88)).map(stripVTControlCharacters)).toEqual([]);
       }
     } finally { await rm(root, { recursive: true, force: true }); }

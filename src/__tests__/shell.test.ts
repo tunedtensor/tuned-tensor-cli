@@ -93,6 +93,9 @@ describe("routeShellCommand", () => {
     expect(routeShellCommand("tt doctor")).toEqual({
       args: ["doctor"],
     });
+    expect(routeShellCommand("TT doctor")).toEqual({
+      args: ["doctor"],
+    });
   });
 
   it("strips the hidden local alias so the command runs at the top level", () => {
@@ -296,9 +299,8 @@ describe("renderShellBanner", () => {
     expect(banner).toContain("tt ›");
     expect(banner).toContain("agent not configured");
     expect(banner).toContain("workflow model model_abc123");
-    expect(banner).toContain("ctrl+c stop/clear");
-    expect(banner).toContain("/system machine");
-    expect(banner).toContain("Use /login tunedtensor for managed inference");
+    expect(banner).toContain("ctrl+c stop");
+    expect(banner).toContain("Connect a model with /login tunedtensor");
     expect(banner).toContain("Workflow commands work now");
     expect(banner).not.toContain("MACHINE");
   });
@@ -318,15 +320,15 @@ describe("renderShellBanner", () => {
       version: "0.6.0",
     });
     expect(banner).toContain("spec Support triage · Qwen/Qwen3.5-2B · 120 examples");
-    expect(banner).toContain("Ask TT anything. Known commands run directly.");
+    expect(banner).toContain("What would you like to work on?");
     expect(banner).not.toContain("Use /login tunedtensor");
   });
 
   it.each([
-    [undefined, /No tunedtensor\.json here yet/],
+    [undefined, /Describe it and I'll draft a spec/],
     [{ path: "/p/tunedtensor.json", parseError: true }, /doesn't parse/],
-    [{ path: "/p/tunedtensor.json", name: "Tiny", exampleCount: 4, parseError: false }, /4 examples is a small set/],
-    [{ path: "/p/tunedtensor.json", name: "Dataset", exampleCount: 3, hasPrebuiltDataset: true, parseError: false }, /prebuilt dataset supplies training rows/],
+    [{ path: "/p/tunedtensor.json", name: "Tiny", exampleCount: 4, parseError: false }, /You have 4 examples/],
+    [{ path: "/p/tunedtensor.json", name: "Dataset", exampleCount: 3, hasPrebuiltDataset: true, parseError: false }, /uses a prebuilt dataset/],
   ])("suggests the next step for %o", (spec, message) => {
     const banner = renderShellBanner({
       mode: "local",
@@ -358,7 +360,7 @@ describe("renderShellBanner", () => {
     expect(banner).toContain("16× Ryzen 9 7950X");
     expect(banner).toContain("26.0/64.0 GiB");
     expect(banner).toMatch(/LoRA Qwen3\.5-2B: Needs verification/);
-    expect(banner).toContain("tt hardware checks training runtimes");
+    expect(banner).toContain("/system for details and next steps");
   });
 
   it("omits the version when none is provided", () => {
@@ -622,6 +624,37 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
         cwd: "/tmp/cloud-project",
       },
     ]);
+    expect(writeError).toHaveBeenCalledWith(expect.stringMatching(/Shell operator/));
+  });
+
+  it.each(["tt", "TT", "Tt"])("routes explicit %s input to the CLI even with an agent", async (prefix) => {
+    const run = vi.fn(async (_request: ShellCommandRequest) => ({ exitCode: 0 }));
+    const agent = {
+      busy: false,
+      handleLine: vi.fn(async () => "continue" as const),
+      interrupt: vi.fn(() => false),
+    };
+    const writeError = vi.fn();
+    const session = await createShellSession({
+      cwd: "/tmp/local-project",
+      env: {},
+      io: { write: vi.fn(), writeError, clear: vi.fn() },
+      runner: run,
+      agent,
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
+    });
+
+    await session.handleLine(`${prefix} runs list`);
+    await session.handleLine(`${prefix} --help`);
+    await session.handleLine(`${prefix} not-a-command`);
+    await session.handleLine(prefix);
+    await session.handleLine(`${prefix} runs list | cat`);
+
+    expect(run.mock.calls.map(([request]) => request.args)).toEqual([
+      ["runs", "list"], ["--help"], ["not-a-command"],
+    ]);
+    expect(agent.handleLine).not.toHaveBeenCalled();
+    expect(writeError).toHaveBeenCalledWith(expect.stringMatching(/already open/));
     expect(writeError).toHaveBeenCalledWith(expect.stringMatching(/Shell operator/));
   });
 

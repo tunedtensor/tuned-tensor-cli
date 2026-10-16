@@ -72,7 +72,7 @@ npm install -g --ignore-scripts @tuned-tensor/cli
 tt --version
 ```
 
-Upgrade later with `tt upgrade`. Uninstall with `npm uninstall -g @tuned-tensor/cli` (add
+`TT` works the same as `tt`. Upgrade later with `tt upgrade`. Uninstall with `npm uninstall -g @tuned-tensor/cli` (add
 `--prefix ~/.local` if the curl installer used that prefix).
 
 Node.js 22.19.0 or newer is required. Training additionally needs
@@ -176,14 +176,15 @@ the agent:
 ```text
 tt v0.15.0
 agent tunedtensor/managed · workflow model base
-ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
+tt › What would you like to work on?
+/help commands · ctrl+c stop · ctrl+d exit
 
-Ask TT anything. Known commands run directly.
 › What happened in my latest training run?
 › runs list
 ```
 
-Ordinary sentences go through the locally orchestrated model session. The
+Known commands such as `runs list` run directly; tab completes them. Ordinary
+sentences go through the locally orchestrated model session. The
 model has no shell or general filesystem tool. It can read and propose reviewed
 edits to an existing spec, or prepare one new folder directly beneath the shell's current working directory with a validated
 `tunedtensor.json`, or prepare a local pipeline dry-run sealed to the reviewed
@@ -271,7 +272,8 @@ The startup **What you can do** panel covers specs/datasets, decision training,
 LLM fine-tuning, training from scratch, and serving even before a spec exists.
 Decision training can use CPU or Apple MPS; the other training paths currently
 require CUDA locally or a configured AWS GPU. A missing NVIDIA GPU does not
-prevent spec creation or dataset preparation. `/system` includes next steps.
+prevent spec creation or dataset preparation. The banner lists ready workflows on
+one line and shows only the status of the rest; `/system` adds reasons and next steps.
 
 Guidance distinguishes **Ready**, **Needs setup**, **Limited resources**,
 **Remote GPU**, **Needs verification**, and **Unsupported runtime**. Quick
