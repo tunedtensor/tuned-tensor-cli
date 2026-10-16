@@ -1050,7 +1050,7 @@ export class TunedTensorShellSession {
       if (explicitCommand !== null && !explicitCommand) {
         throw new ShellParseError("Add a TT command after :.");
       }
-      const explicitWorkflowPrefix = /^tt(?:\s|$)/.test(trimmed);
+      const explicitWorkflowPrefix = /^tt(?:\s|$)/i.test(trimmed);
 
       if (
         explicitCommand === null

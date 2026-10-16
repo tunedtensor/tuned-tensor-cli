@@ -627,6 +627,37 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     expect(writeError).toHaveBeenCalledWith(expect.stringMatching(/Shell operator/));
   });
 
+  it.each(["tt", "TT", "Tt"])("routes explicit %s input to the CLI even with an agent", async (prefix) => {
+    const run = vi.fn(async (_request: ShellCommandRequest) => ({ exitCode: 0 }));
+    const agent = {
+      busy: false,
+      handleLine: vi.fn(async () => "continue" as const),
+      interrupt: vi.fn(() => false),
+    };
+    const writeError = vi.fn();
+    const session = await createShellSession({
+      cwd: "/tmp/local-project",
+      env: {},
+      io: { write: vi.fn(), writeError, clear: vi.fn() },
+      runner: run,
+      agent,
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
+    });
+
+    await session.handleLine(`${prefix} runs list`);
+    await session.handleLine(`${prefix} --help`);
+    await session.handleLine(`${prefix} not-a-command`);
+    await session.handleLine(prefix);
+    await session.handleLine(`${prefix} runs list | cat`);
+
+    expect(run.mock.calls.map(([request]) => request.args)).toEqual([
+      ["runs", "list"], ["--help"], ["not-a-command"],
+    ]);
+    expect(agent.handleLine).not.toHaveBeenCalled();
+    expect(writeError).toHaveBeenCalledWith(expect.stringMatching(/already open/));
+    expect(writeError).toHaveBeenCalledWith(expect.stringMatching(/Shell operator/));
+  });
+
   it("implements help, context, status, clear, and exit without running work", async () => {
     const run = vi.fn();
     const clear = vi.fn();
