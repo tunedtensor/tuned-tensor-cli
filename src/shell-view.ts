@@ -322,13 +322,11 @@ export function renderMachinePanel(
   }
   lines.push(...renderMeterRows(meters, width));
 
+  // "What you can do" already covers a good fit; the banner only flags a problem.
   const fit = describeFineTuneFit(usage, context);
-  if (context.spec) {
+  if (context.spec && (options.detailed || fit.status !== "ready")) {
     lines.push(`${chalk.bold("Tune".padEnd(6))} ${fitMark(fit.status)} ${truncateText(fit.text, width - 9)}`);
-    // The banner only repeats where a ready verdict came from in `/system`.
-    if (fit.source && (options.detailed || fit.status !== "ready")) {
-      lines.push(`${" ".repeat(9)}${chalk.dim(truncateText(fit.source, width - 9))}`);
-    }
+    if (fit.source) lines.push(`${" ".repeat(9)}${chalk.dim(truncateText(fit.source, width - 9))}`);
   }
   const guidance = machineCapabilities(usage, context);
   lines.push("", sectionRule("WHAT YOU CAN DO", width));
@@ -389,13 +387,13 @@ export function bannerTip(input: BannerInput): string {
   const { context, usage } = input;
   const agent = agentLabel(context);
   if (!agent) {
-    return "Use /login tunedtensor for managed inference, or /model for your own provider. Workflow commands work now.";
+    return "Hi! Connect a model with /login tunedtensor, or /model to use your own. Workflow commands work now.";
   }
   if (!context.spec) {
-    return "No tunedtensor.json here yet. Describe the model you want and I'll draft a spec, or run init.";
+    return "What should your model do? Describe it and I'll draft a spec.";
   }
   if (context.spec.parseError) {
-    return "tunedtensor.json doesn't parse. /spec show points at the problem.";
+    return "tunedtensor.json doesn't parse. Try /spec show to find the problem.";
   }
   const busy = usage?.gpus.find((gpu) => (gpu.utilization_percent ?? 0) >= 85);
   if (busy) {
@@ -403,12 +401,12 @@ export function bannerTip(input: BannerInput): string {
   }
   const examples = context.spec.exampleCount ?? 0;
   if (context.spec.hasPrebuiltDataset) {
-    return "A prebuilt dataset supplies training rows. Ask me to review it or preview the workflow.";
+    return "Your spec uses a prebuilt dataset. Want me to review it or preview the workflow?";
   }
   if (examples < 20) {
-    return `${examples} example${examples === 1 ? "" : "s"} is a small set. Ask me to draft more, or /spec examples to review them.`;
+    return `You have ${examples} example${examples === 1 ? "" : "s"}. Want me to draft more? /spec examples lists them.`;
   }
-  return "Ask TT anything. Known commands run directly.";
+  return "What would you like to work on?";
 }
 
 function specLine(context: ShellContext): string {
@@ -449,13 +447,6 @@ export function renderBanner(input: BannerInput): string {
   const hang = terminalWidth(prefix);
   const wrapped = wrapTerminalLine(tip, Math.max(20, width - hang));
   lines.push("", `${prefix}${wrapped[0]}`, ...wrapped.slice(1).map((line) => `${" ".repeat(hang)}${line}`));
-  lines.push(...hintLines([
-    "/spec review",
-    "/system machine",
-    "/help commands",
-    "tab complete",
-    "ctrl+c stop/clear",
-    "ctrl+d exit",
-  ], width));
+  lines.push(...hintLines(["/help commands", "ctrl+c stop", "ctrl+d exit"], width));
   return `${lines.join("\n")}\n\n`;
 }

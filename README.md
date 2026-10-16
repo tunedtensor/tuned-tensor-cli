@@ -176,14 +176,15 @@ the agent:
 ```text
 tt v0.15.0
 agent tunedtensor/managed · workflow model base
-ctrl+c stop/clear · ctrl+d exit · /help commands · tab complete
+tt › What would you like to work on?
+/help commands · ctrl+c stop · ctrl+d exit
 
-Ask TT anything. Known commands run directly.
 › What happened in my latest training run?
 › runs list
 ```
 
-Ordinary sentences go through the locally orchestrated model session. The
+Known commands such as `runs list` run directly; tab completes them. Ordinary
+sentences go through the locally orchestrated model session. The
 model has no shell or general filesystem tool. It can read and propose reviewed
 edits to an existing spec, or prepare one new folder directly beneath the shell's current working directory with a validated
 `tunedtensor.json`, or prepare a local pipeline dry-run sealed to the reviewed

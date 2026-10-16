@@ -5,7 +5,8 @@
 ### Changed
 
 - The startup banner is shorter: ready workflows share one line, others show
-  only their status, and a ready fine-tune verdict drops its source line.
+  only their status, and the Tune row appears only when the spec's model may
+  not fit. The greeting asks a question and the hints fit on one line.
   `/system` keeps the full reasons and next steps.
 
 ### Added

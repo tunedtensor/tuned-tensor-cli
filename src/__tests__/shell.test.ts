@@ -296,9 +296,8 @@ describe("renderShellBanner", () => {
     expect(banner).toContain("tt ›");
     expect(banner).toContain("agent not configured");
     expect(banner).toContain("workflow model model_abc123");
-    expect(banner).toContain("ctrl+c stop/clear");
-    expect(banner).toContain("/system machine");
-    expect(banner).toContain("Use /login tunedtensor for managed inference");
+    expect(banner).toContain("ctrl+c stop");
+    expect(banner).toContain("Connect a model with /login tunedtensor");
     expect(banner).toContain("Workflow commands work now");
     expect(banner).not.toContain("MACHINE");
   });
@@ -318,15 +317,15 @@ describe("renderShellBanner", () => {
       version: "0.6.0",
     });
     expect(banner).toContain("spec Support triage · Qwen/Qwen3.5-2B · 120 examples");
-    expect(banner).toContain("Ask TT anything. Known commands run directly.");
+    expect(banner).toContain("What would you like to work on?");
     expect(banner).not.toContain("Use /login tunedtensor");
   });
 
   it.each([
-    [undefined, /No tunedtensor\.json here yet/],
+    [undefined, /Describe it and I'll draft a spec/],
     [{ path: "/p/tunedtensor.json", parseError: true }, /doesn't parse/],
-    [{ path: "/p/tunedtensor.json", name: "Tiny", exampleCount: 4, parseError: false }, /4 examples is a small set/],
-    [{ path: "/p/tunedtensor.json", name: "Dataset", exampleCount: 3, hasPrebuiltDataset: true, parseError: false }, /prebuilt dataset supplies training rows/],
+    [{ path: "/p/tunedtensor.json", name: "Tiny", exampleCount: 4, parseError: false }, /You have 4 examples/],
+    [{ path: "/p/tunedtensor.json", name: "Dataset", exampleCount: 3, hasPrebuiltDataset: true, parseError: false }, /uses a prebuilt dataset/],
   ])("suggests the next step for %o", (spec, message) => {
     const banner = renderShellBanner({
       mode: "local",
