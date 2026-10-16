@@ -12,6 +12,11 @@
   a system message receive the current spec instructions in adapter run artifacts;
   explicitly conflicting system messages are still rejected.
 
+### Fixed
+
+- Store permission repair tolerates temporary state files and append locks
+  disappearing during concurrent updates, while still rejecting unsafe entries.
+
 ## [0.25.0] - 2026-10-14
 
 ### Added

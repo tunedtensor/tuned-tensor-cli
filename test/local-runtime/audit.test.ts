@@ -172,9 +172,12 @@ test("concurrent writers from separate store instances keep one valid chain", as
     const first = createLocalStore(join(root, "store"));
     await first.startRun({ request, artifactDir: join(root, "artifacts") });
     const writers = [first, createLocalStore(join(root, "store")), createLocalStore(join(root, "store"))];
-    await Promise.all(Array.from({ length: 24 }, (_, index) => writers[index % 3]!.updateRun({
+    const updates = await Promise.allSettled(Array.from({ length: 24 }, (_, index) => writers[index % 3]!.updateRun({
       runId: request.run_id, status: "training", stage: "training", message: `step ${index}`,
     })));
+    // Drain all writers before cleanup so a first failure is not hidden by
+    // another writer recreating files while the fixture is being removed.
+    assert.deepEqual(updates.filter(update => update.status === "rejected"), []);
     const events = await first.getRunEvents(request.run_id);
     assert.equal(events.length, 25);
     assert.equal(verifyEventChain(events as unknown as Array<Record<string, unknown>>).status, "verified");

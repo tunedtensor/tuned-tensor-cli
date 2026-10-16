@@ -166,7 +166,13 @@ async function hardenPrivateTree(path: string): Promise<void> {
   if (metadata.isDirectory()) {
     await chmod(path, 0o700);
     for (const entry of await readdir(path)) {
-      await hardenPrivateTree(join(path, entry));
+      try {
+        await hardenPrivateTree(join(path, entry));
+      } catch (error) {
+        // Active writers rename temporary state files and remove append locks.
+        // A vanished child needs no permission repair; propagate other errors.
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
     }
     return;
   }
