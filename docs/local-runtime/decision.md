@@ -12,6 +12,11 @@ TT fine-tunes [Laya](https://huggingface.co/convaiinnovations/laya)
 encoder with a typed decision head. Every stage uses Laya revision
 `55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851`, the reviewed commit that Laya 0.3.22
 pins. Training and evaluation run on CPU, Apple MPS or CUDA; no GPU is required.
+The startup panel and `tt hardware` show decision capabilities even without a
+spec. A full hardware check probes the decision runtime separately from the
+adapter runtime. Native Windows training is not yet end-to-end certified;
+Intel macOS and Windows ARM64 have no compatible packaged PyTorch wheel.
+See the [platform guidance](../../README.md) for setup and memory caveats.
 
 ## Spec
 

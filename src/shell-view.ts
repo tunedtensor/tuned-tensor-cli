@@ -1,3 +1,4 @@
+import { WORKFLOW_STATUS_LABEL } from "./local-runtime/workflow-guidance.js";
 import chalk from "chalk";
 import { evaluateCapabilities, type CapabilityReport, type CapabilityVerdict } from "./local-runtime/capability.js";
 import type { HostInventory } from "./local-runtime/host-inventory.js";
@@ -67,9 +68,9 @@ export function inventoryFromUsage(usage: LiveUsage): HostInventory {
     quick: true,
     node: { version: process.versions.node, major: Number(process.versions.node.split(".")[0]), ok: true },
     os: {
-      platform: process.platform,
-      arch: process.arch,
-      type: process.platform,
+      platform: usage.platform ?? process.platform,
+      arch: usage.arch ?? process.arch,
+      type: usage.platform ?? process.platform,
       cpu_count: usage.cpu.cores,
       total_memory_bytes: usage.memory.total_bytes,
       free_memory_bytes: usage.memory.total_bytes - usage.memory.used_bytes,
@@ -84,8 +85,20 @@ export function inventoryFromUsage(usage: LiveUsage): HostInventory {
       unified_memory: gpu.unified_memory,
     })),
     nvidia_smi: { ok: nvidia.length > 0, message: usage.gpu_note ?? "" },
-    disks: [],
+    disks: usage.disk ? [{ name: "model-cache", path: usage.disk.path, free_bytes: usage.disk.free_bytes, ok: true, message: "live sample" }] : [],
   };
+}
+
+/** Reuse fresh runtime checks, but use current free RAM/VRAM and disk space. */
+export function machineCapabilities(usage: LiveUsage, context: ShellContext): CapabilityReport {
+  const live = inventoryFromUsage(usage);
+  const saved = context.host && !context.host.stale ? context.host.inventory : undefined;
+  const sameDevice = saved?.os?.platform === live.os.platform && saved.os.arch === live.os.arch
+    && JSON.stringify(saved.gpus?.map(gpu => gpu.name)) === JSON.stringify(live.gpus.map(gpu => gpu.name));
+  return evaluateCapabilities(sameDevice ? {
+    ...live, quick: saved!.quick, uv: saved!.uv,
+    python: saved!.python, decision_python: saved!.decision_python,
+  } : live);
 }
 
 function shortModel(id: string, width = 24): string {
@@ -113,28 +126,46 @@ export function describeFineTuneFit(usage: LiveUsage | undefined, context: Shell
     };
   }
   const snapshot = context.host && !context.host.stale ? context.host.capabilities : undefined;
-  let report: CapabilityReport | undefined = snapshot;
+  let report: CapabilityReport | undefined = usage && context.host?.inventory ? machineCapabilities(usage, context) : snapshot;
   const source = snapshot ? "from tt hardware" : "quick check · tt hardware for a full probe";
   if (!report && usage) report = evaluateCapabilities(inventoryFromUsage(usage));
   if (!report) return { status: "unknown", text: "not checked yet", source: "run tt hardware" };
 
   if (spec?.engine === "decision") {
+    const item = report.workflows?.find(item => item.id === "decision");
     return {
-      status: "unknown",
-      text: "decision training runs locally on CPU, MPS or CUDA",
-      source: "device selected by hyperparameters.device",
+      status: item?.status === "ready" ? "ready" : item?.status === "limited" ? "tight" : "unknown",
+      text: item ? `decision training: ${WORKFLOW_STATUS_LABEL[item.status]} — ${item.reason}` : "decision runtime needs verification",
+      source: item?.next ?? "run tt hardware",
     };
   }
+  const workflow = report.workflows?.find(item => item.id === (spec?.engine === "foundation" ? "foundation" : "adapter"));
   const noCuda = !report.cuda_available;
-  if (spec?.engine === "foundation") {
-    const verdict = report.foundation.train;
-    return {
+  const modelFit = (verdict: CapabilityVerdict, label: string, detail = verdict.reason): FineTuneFit => {
+    const result: FineTuneFit = {
       status: verdict.status,
-      text: verdict.status === "not_possible"
-        ? `foundation training ${STATUS_WORD[verdict.status]} — ${verdict.reason}`
-        : `foundation training ${STATUS_WORD[verdict.status]} · suggested max depth ${report.foundation.suggested_max_depth}`,
+      text: `${label} ${STATUS_WORD[verdict.status]} — ${detail}`,
       source: noCuda ? "set runtime.gpu to train on your AWS GPU" : source,
     };
+    if (verdict.status === "not_possible") return result;
+    const free = report.gpu?.unified_memory && usage
+      ? usage.memory.total_bytes - usage.memory.used_bytes : report.gpu?.memory_free_bytes;
+    if (free !== undefined && verdict.required_bytes !== undefined && free < verdict.required_bytes) {
+      return { status: "tight", text: `${label}: insufficient free memory for the estimated workload`, source: "Free GPU/shared memory or choose a smaller configuration." };
+    }
+    if (workflow && workflow.status !== "ready" && workflow.status !== "remote") {
+      return {
+        status: workflow.status === "limited" ? "tight" : "unknown",
+        text: `${label}: ${WORKFLOW_STATUS_LABEL[workflow.status]} — ${detail}`,
+        source: workflow.next,
+      };
+    }
+    return result;
+  };
+  if (spec?.engine === "foundation") {
+    const verdict = report.foundation.train;
+    return modelFit(verdict, "foundation training", verdict.status === "not_possible"
+      ? verdict.reason : `suggested max depth ${report.foundation.suggested_max_depth}`);
   }
 
   if (spec?.baseModel) {
@@ -146,12 +177,7 @@ export function describeFineTuneFit(usage: LiveUsage | undefined, context: Shell
         source: "tt hardware lists supported base models",
       };
     }
-    const verdict = adapter.finetune;
-    return {
-      status: verdict.status,
-      text: `LoRA ${shortModel(adapter.id)} ${STATUS_WORD[verdict.status]} — ${verdict.reason}`,
-      source: noCuda ? "set runtime.gpu to train on your AWS GPU" : source,
-    };
+    return modelFit(adapter.finetune, `LoRA ${shortModel(adapter.id)}`);
   }
 
   const ready = report.adapters.filter((item) => item.finetune.status !== "not_possible");
@@ -266,13 +292,20 @@ export function renderMachinePanel(
   lines.push(...renderMeterRows(meters, width));
 
   const fit = describeFineTuneFit(usage, context);
-  lines.push(`${chalk.bold("Tune".padEnd(6))} ${fitMark(fit.status)} ${truncateText(fit.text, width - 9)}`);
-  if (fit.source) lines.push(`${" ".repeat(9)}${chalk.dim(truncateText(fit.source, width - 9))}`);
+  if (context.spec) {
+    lines.push(`${chalk.bold("Tune".padEnd(6))} ${fitMark(fit.status)} ${truncateText(fit.text, width - 9)}`);
+    if (fit.source) lines.push(`${" ".repeat(9)}${chalk.dim(truncateText(fit.source, width - 9))}`);
+  }
+  const guidance = machineCapabilities(usage, context);
+  lines.push("", sectionRule("WHAT YOU CAN DO", width));
+  for (const item of guidance?.workflows ?? []) {
+    lines.push(...wrapTerminalLine(sanitizeTerminalText(`${item.label}: ${WORKFLOW_STATUS_LABEL[item.status]} — ${item.reason}`), width));
+    if (options.detailed) lines.push(...wrapTerminalLine(sanitizeTerminalText(item.next), width).map(line => chalk.dim(line)));
+  }
+  if (!options.detailed) lines.push(...wrapTerminalLine("/system for next steps · tt hardware checks training runtimes", width).map(line => chalk.dim(line)));
 
   if (options.detailed) {
-    const report = context.host && !context.host.stale
-      ? context.host.capabilities
-      : evaluateCapabilities(inventoryFromUsage(usage));
+    const report = guidance;
     if (report) {
       lines.push("", sectionRule("CERTIFIED BASE MODELS", width, "LoRA fine-tune"));
       const idWidth = Math.min(44, Math.floor(width * 0.55));

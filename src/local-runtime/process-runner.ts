@@ -52,7 +52,7 @@ const decisionRuntimeHash = (() => {
   return hash.digest("hex").slice(0, 20);
 })();
 export const DECISION_PYTHON_ENVIRONMENT = pythonEnvironmentPath("uv-decision", decisionRuntimeHash);
-export type DecisionPythonEntrypoint = "train.py" | "evaluate.py";
+export type DecisionPythonEntrypoint = "train.py" | "evaluate.py" | "-c";
 
 /** Build a command for the locked typed decision-model runtime. */
 export function buildDecisionPythonCommand(
@@ -66,7 +66,7 @@ export function buildDecisionPythonCommand(
     "--project",
     decisionProject,
     "python",
-    join(decisionProject, "src", entrypoint),
+    entrypoint === "-c" ? entrypoint : join(decisionProject, "src", entrypoint),
     ...args,
   ];
   return { command: "uv", commandArgs, displayCommand: ["uv", ...commandArgs] };

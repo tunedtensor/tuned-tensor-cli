@@ -10,6 +10,8 @@ import {
   withHuggingFaceCacheEnvironment,
 } from "./huggingface-cache.js";
 import {
+  buildDecisionPythonCommand,
+  withDecisionPythonEnvironment,
   buildBundledPythonCommand,
   withBundledPythonEnvironment,
 } from "./process-runner.js";
@@ -130,6 +132,7 @@ export interface HostPythonRuntime {
   transformers?: string;
   peft?: string;
   cuda_available?: boolean;
+  mps_available?: boolean;
   cuda_device?: string;
   compute_capability?: number[];
   total_memory_bytes?: number;
@@ -152,7 +155,15 @@ export interface HostInventory {
   gpus: HostGpu[];
   nvidia_smi: { ok: boolean; message: string };
   python?: HostPythonRuntime;
+  decision_python?: HostPythonRuntime;
   disks: HostDisk[];
+}
+
+/** Platforms with wheels in the bundled training lockfiles. */
+export function supportsPackagedTrainingRuntime(os: Pick<HostInventory["os"], "platform" | "arch">): boolean {
+  return (os.platform === "linux" && ["x64", "arm64"].includes(os.arch))
+    || (os.platform === "darwin" && os.arch === "arm64")
+    || (os.platform === "win32" && os.arch === "x64");
 }
 
 export interface CollectHostInventoryOptions {
@@ -290,11 +301,13 @@ async function diskCheck(name: string, path: string): Promise<HostDisk> {
   }
 }
 
-function pythonProbeSource(): string {
+export function pythonProbeSource(decision = false): string {
   return [
     "import json",
-    "import torch, transformers, peft, huggingface_hub",
+    decision ? "import torch, transformers, laya; peft = None" : "import torch, transformers, peft, huggingface_hub",
+    "x = torch.ones(1, requires_grad=True); (x * x).sum().backward()",
     "payload = {'python_ok': True, 'torch': torch.__version__, 'transformers': transformers.__version__, 'peft': getattr(peft, '__version__', None), 'cuda_available': bool(torch.cuda.is_available())}",
+    "payload['mps_available'] = bool(torch.backends.mps.is_available())",
     "cuda = torch.cuda.is_available()",
     "payload.update({'cuda_device': torch.cuda.get_device_name(0), 'compute_capability': list(torch.cuda.get_device_capability(0)), 'total_memory_bytes': torch.cuda.get_device_properties(0).total_memory, 'bf16_supported': bool(torch.cuda.is_bf16_supported())} if cuda else {})",
     "print(json.dumps(payload))",
@@ -314,6 +327,7 @@ export function parsePythonProbeJson(text: string): HostPythonRuntime | undefine
       transformers: typeof parsed.transformers === "string" ? parsed.transformers : undefined,
       peft: typeof parsed.peft === "string" ? parsed.peft : undefined,
       cuda_available: parsed.cuda_available === true,
+      mps_available: typeof parsed.mps_available === "boolean" ? parsed.mps_available : undefined,
       cuda_device: typeof parsed.cuda_device === "string" ? parsed.cuda_device : undefined,
       compute_capability: Array.isArray(parsed.compute_capability)
         ? parsed.compute_capability.filter((value): value is number => typeof value === "number")
@@ -331,9 +345,10 @@ export function parsePythonProbeJson(text: string): HostPythonRuntime | undefine
 async function collectPythonRuntime(
   config: LocalRunnerConfig | undefined,
   env: NodeJS.ProcessEnv,
+  decision = false,
 ): Promise<HostPythonRuntime> {
-  const entrypoint = buildBundledPythonCommand("-c", [pythonProbeSource()]);
-  const childEnv = withBundledPythonEnvironment(
+  const entrypoint = (decision ? buildDecisionPythonCommand : buildBundledPythonCommand)("-c", [pythonProbeSource(decision)]);
+  const childEnv = (decision ? withDecisionPythonEnvironment : withBundledPythonEnvironment)(
     withHuggingFaceCacheEnvironment(
       minimalMachineLearningEnvironment(env),
       config?.paths.modelCache,
@@ -413,7 +428,14 @@ export async function collectHostInventory(
     disks: [artifactDisk, storeDisk, cacheDisk],
   };
 
-  if (options.quick !== true) {
+  if (options.quick !== true && !supportsPackagedTrainingRuntime(inventory.os)) {
+    const unavailable = { ok: false, message: "No packaged training runtime for this OS/architecture." };
+    inventory.python = unavailable;
+    inventory.decision_python = unavailable;
+  } else if (options.quick !== true) {
+    inventory.decision_python = uvVersion.code === 0
+      ? await collectPythonRuntime(config, env, true)
+      : { ok: false, message: "Decision runtime probe skipped because uv is not available" };
     inventory.python = uvVersion.code === 0
       ? await collectPythonRuntime(config, env)
       : { ok: false, message: "Python probe skipped because uv is not available" };
