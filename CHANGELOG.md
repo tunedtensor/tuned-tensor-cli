@@ -14,6 +14,9 @@
 
 ### Fixed
 
+- macOS RAM usage excludes estimated reclaimable cache, and decision-training
+  warnings use the same available-memory estimate. The machine panel labels
+  CPU load as a one-minute average and disk usage as the cache filesystem.
 - Store permission repair tolerates temporary state files and append locks
   disappearing during concurrent updates, while still rejecting unsafe entries.
 

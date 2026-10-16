@@ -301,11 +301,16 @@ Useful shell controls include `/help`, `/status`, `/context`, `/system`,
 `/model`, `/login`, `/cd`, `/clear`, and `/exit`.
 When the shell opens, the TT logo mark (drawn in the terminal) greets you with the current spec, a
 live machine panel (GPU utilization, VRAM and temperature from `nvidia-smi`,
-CPU, RAM, and free space in the model cache) and whether this machine can
+CPU, RAM, and free space on the model-cache filesystem) and whether this machine can
 fine-tune the spec's base model, plus a suggested next step. `/system` refreshes
 that panel and lists every certified base model's verdict. Fit verdicts come
 from the same certified memory profiles as `tt hardware`; a fresh
 `tt hardware` snapshot takes precedence over the quick live check.
+On macOS, RAM marked `in use (est.)` excludes estimated reclaimable file cache;
+decision-training warnings use the same available-RAM estimate. This is not a
+memory-pressure measurement or a guarantee that a workload fits. CPU load is a
+one-minute average, separate from the sampled utilization percentage. Disk usage
+describes the filesystem containing the cache, not the size of downloaded models.
 The shell banner and `/context` show the inference selection (`agent
 provider/model`) separately from the workflow model. The managed alias identifies
 inference through the server-selected model. Run `/model` with no arguments to

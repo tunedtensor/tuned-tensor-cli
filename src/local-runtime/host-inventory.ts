@@ -1,10 +1,11 @@
 import { constants } from "node:fs";
 import { access, statfs } from "node:fs/promises";
-import { cpus, freemem, homedir, totalmem, type } from "node:os";
+import { cpus, homedir, type } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { DEFAULT_ARTIFACT_ROOT, defaultStoreRoot } from "../paths.js";
 import type { LocalRunnerConfig } from "./contracts.js";
+import { sampleHostMemory } from "./live-usage.js";
 import {
   minimalMachineLearningEnvironment,
   withHuggingFaceCacheEnvironment,
@@ -150,6 +151,8 @@ export interface HostInventory {
     cpu_count: number;
     total_memory_bytes: number;
     free_memory_bytes: number;
+    /** Free plus reclaimable cache when the host exposes it. */
+    available_memory_bytes?: number;
   };
   uv?: { ok: boolean; version?: string; message: string };
   gpus: HostGpu[];
@@ -384,12 +387,13 @@ export async function collectHostInventory(
     config?.paths.modelCache ?? env.HF_HOME ?? join(homedir(), ".cache", "huggingface"),
   );
 
-  const [artifactDisk, storeDisk, cacheDisk, uvVersion, nvidiaQueried] = await Promise.all([
+  const [artifactDisk, storeDisk, cacheDisk, uvVersion, nvidiaQueried, memory] = await Promise.all([
     diskCheck("artifact-root", artifactRoot),
     diskCheck("store-root", storeRoot),
     diskCheck("model-cache", modelCache),
     runCommand("uv", ["--version"], { env, timeoutMs: 10_000 }),
     queryNvidiaGpus(env),
+    sampleHostMemory({ env }),
   ]);
 
   const nvidia = nvidiaQueried.result;
@@ -408,8 +412,9 @@ export async function collectHostInventory(
       arch: process.arch,
       type: type(),
       cpu_count: cpus().length,
-      total_memory_bytes: totalmem(),
-      free_memory_bytes: freemem(),
+      total_memory_bytes: memory.total_bytes,
+      free_memory_bytes: memory.free_bytes ?? memory.total_bytes - memory.used_bytes,
+      available_memory_bytes: memory.available_bytes,
     },
     uv: {
       ok: uvVersion.code === 0,

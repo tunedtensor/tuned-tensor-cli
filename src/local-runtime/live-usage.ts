@@ -35,7 +35,7 @@ export interface LiveUsage {
     utilization_percent?: number;
     load_average: [number, number, number];
   };
-  memory: { used_bytes: number; total_bytes: number };
+  memory: HostMemoryUsage;
   /** Space where base models download (the Hugging Face cache). */
   disk?: { path: string; free_bytes: number; total_bytes: number };
   gpus: LiveGpuUsage[];
@@ -51,6 +51,49 @@ export interface SampleLiveUsageOptions {
   gpuTimeoutMs?: number;
   platform?: NodeJS.Platform;
   arch?: string;
+}
+
+export interface HostMemoryUsage {
+  used_bytes: number;
+  total_bytes: number;
+  free_bytes?: number;
+  /** Free plus reclaimable cache, an estimate rather than a pressure reading. */
+  available_bytes?: number;
+}
+
+/**
+ * macOS keeps reusable file cache in RAM. Counting it as working memory makes
+ * a healthy host look full. File-backed and purgeable pages approximate that
+ * cache; do not add inactive/speculative pages again (those lists overlap).
+ * Compressed memory remains used, and swap is never counted as available RAM.
+ */
+export function parseMacMemory(stdout: string, total: number): HostMemoryUsage | undefined {
+  const pageSize = Number(/page size of (\d+) bytes/.exec(stdout)?.[1]);
+  const pages = (label: string): number => {
+    const line = stdout.split(/\r?\n/).find(line => line.startsWith(`${label}:`));
+    const count = line && /^\s*(\d+)\.?\s*$/.exec(line.slice(label.length + 1));
+    return count ? Number(count[1]) : NaN;
+  };
+  const free = pages("Pages free") * pageSize;
+  const cached = (pages("File-backed pages") + pages("Pages purgeable")) * pageSize;
+  const available = free + cached;
+  if (!(pageSize > 0) || !(total > 0) || !Number.isSafeInteger(available) || available > total) return undefined;
+  return { total_bytes: total, free_bytes: free, available_bytes: available, used_bytes: total - available };
+}
+
+/** Shared by the shell sample and full hardware inventory. */
+export async function sampleHostMemory(
+  options: Pick<SampleLiveUsageOptions, "env" | "platform"> = {},
+): Promise<HostMemoryUsage> {
+  const total = totalmem();
+  const free = freemem();
+  const fallback = { total_bytes: total, free_bytes: free, used_bytes: Math.max(0, total - free) };
+  if ((options.platform ?? process.platform) !== "darwin") return fallback;
+  return new Promise(resolve => {
+    execFile("/usr/bin/vm_stat", [], {
+      env: options.env ?? process.env, timeout: 1_000,
+    }, (error, stdout) => resolve(error ? fallback : parseMacMemory(String(stdout), total) ?? fallback));
+  });
 }
 
 interface CpuTimes {
@@ -219,15 +262,15 @@ export async function sampleLiveUsage(options: SampleLiveUsageOptions = {}): Pro
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
   const before = cpuTimes();
-  const [nvidia, disk] = await Promise.all([
+  const [nvidia, disk, memory] = await Promise.all([
     queryNvidia(env, options.gpuTimeoutMs ?? 2_000),
     modelCacheDisk(env).catch(() => undefined),
+    sampleHostMemory({ env, platform }),
     new Promise((resolve) => setTimeout(resolve, options.cpuSampleMs ?? 200)),
   ]);
   const after = cpuTimes();
   const list = cpus();
   const model = cpuModel(list[0]?.model, platform, arch);
-  const total = totalmem();
   const apple = nvidia.gpus.length === 0 ? appleGpu(model, platform, arch) : undefined;
   const [one, five, fifteen] = loadavg();
   return {
@@ -239,7 +282,7 @@ export async function sampleLiveUsage(options: SampleLiveUsageOptions = {}): Pro
       utilization_percent: cpuUtilization(before, after),
       load_average: [one ?? 0, five ?? 0, fifteen ?? 0],
     },
-    memory: { used_bytes: Math.max(0, total - freemem()), total_bytes: total },
+    memory,
     disk,
     gpus: apple ? [apple] : nvidia.gpus,
     gpu_note: apple ? undefined : nvidia.note,
