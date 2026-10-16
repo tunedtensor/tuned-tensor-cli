@@ -129,6 +129,11 @@ Batch latency is the time each request waits for its whole batch, including
 decoding; it is not latency divided by batch size. Batched greedy generation
 can differ from single-prompt generation because of floating-point arithmetic.
 
+On integrated CUDA devices such as GB10, training and evaluation first open
+the weights on CPU, then transfer them to CUDA. This avoids retaining host
+checkpoint copies alongside the full GPU allocation in shared system memory.
+Generation and training still execute on CUDA with the same configured dtype.
+
 Ordinary run output shows loading/generation, completed examples, throughput,
 ETA and a heartbeat every 30 seconds. It warns if the estimated remaining work
 exceeds `evaluation.timeoutMs`; that limit remains a hard wall-clock deadline

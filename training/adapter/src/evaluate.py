@@ -16,6 +16,7 @@ from model_contract import (
     assert_certified_base_model_revision,
     assert_certified_model_config,
     chat_template_kwargs,
+    cuda_model_load_device_map,
     uncertified_load_kwargs,
 )
 
@@ -198,7 +199,7 @@ def load_text_model(
     if dtype is not None:
         model_kwargs["dtype"] = dtype
     if device == "cuda":
-        model_kwargs["device_map"] = {"": torch.cuda.current_device()}
+        model_kwargs["device_map"] = cuda_model_load_device_map(torch)
 
     model_class = (
         AutoModelForImageTextToText
@@ -209,7 +210,7 @@ def load_text_model(
     assert_certified_model_config(model.config, expected_model_id=base_model)
     if adapter_path:
         model = PeftModel.from_pretrained(model, adapter_path)
-    if device != "cuda":
+    if device != "cuda" or model_kwargs["device_map"] is None:
         model = model.to(device)
     model.eval()
     return model, tokenizer, device

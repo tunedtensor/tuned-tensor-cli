@@ -26,6 +26,7 @@ from model_contract import (
     assert_certified_base_model_revision,
     assert_certified_model_config,
     chat_template_kwargs,
+    cuda_model_load_device_map,
     parse_lora_target_modules,
     uncertified_load_kwargs,
 )
@@ -216,13 +217,16 @@ def create_model_and_tokenizer(model_source: str) -> tuple[Any, Any, torch.dtype
         if hp("model_loader", "causal_lm") == "image_text_to_text"
         else AutoModelForCausalLM
     )
+    load_device_map = cuda_model_load_device_map(torch)
     model = model_class.from_pretrained(
         model_source,
         **source_kwargs,
         **uncertified_load_kwargs(str(hp("base_model", CERTIFIED_BASE_MODEL))),
         dtype=dtype,
-        device_map={"": torch.cuda.current_device()},
+        device_map=load_device_map,
     )
+    if load_device_map is None:
+        model = model.to("cuda")
     assert_certified_model_config(
         model.config,
         expected_model_id=str(hp("base_model", CERTIFIED_BASE_MODEL)),

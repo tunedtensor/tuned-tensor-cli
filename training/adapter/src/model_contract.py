@@ -20,6 +20,19 @@ CERTIFIED_BASE_MODELS = (CERTIFIED_BASE_MODEL, NEMOTRON_BASE_MODEL, MUSE_GLIMMER
 # the run pins an immutable commit. Node enforces the same contract.
 HUGGING_FACE_REPO_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}")
 COMMIT_SHA = re.compile(r"[0-9a-fA-F]{40}")
+
+
+def cuda_model_load_device_map(torch_runtime: Any) -> dict[str, int] | None:
+    """Stage on CPU before CUDA transfer when host and GPU share memory.
+
+    Direct CUDA loading can retain a second host copy until checkpoint readers
+    close. CPU-first loading lets those readers close before the CUDA transfer.
+    """
+    index = torch_runtime.cuda.current_device()
+    integrated = torch_runtime.cuda.get_device_properties(index).is_integrated
+    return None if integrated else {"": index}
+
+
 CERTIFIED_QWEN_TEXT_CONFIG = {
     "model_type": "qwen3_5_text",
     "hidden_size": 2048,
