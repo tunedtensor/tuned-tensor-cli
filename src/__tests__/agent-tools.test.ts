@@ -11,6 +11,8 @@ import {
 import type { AgentAction } from "../agent-client.js";
 import { projectCloudSpec, projectLocalSpec } from "../project-spec.js";
 
+import { localAdapterSpecFileSchema } from "../local-runtime/contracts.js";
+
 const SPEC_ID = "251f122f-dd8e-4894-a0ab-99965e976e29";
 
 function fakeApi(): AgentToolApi {
@@ -150,6 +152,16 @@ describe("Tuned Tensor agent tools", () => {
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
+  });
+
+  it.each(["local", "cloud"])("provides valid adapter setting names for %s", async (target) => {
+    const result = await tool("describe_pipeline", fakeApi()).execute("settings", { engine: "adapter", target });
+    const details = result.details as { spec_settings_example: Record<string, unknown> };
+    expect(localAdapterSpecFileSchema.safeParse({
+      name: "Intent classifier", base_model: "Qwen/Qwen3.5-2B", system_prompt: "Return a label.",
+      examples: [{ input: "Hello", output: "greeting" }, { input: "Bye", output: "farewell" }],
+      ...details.spec_settings_example,
+    }).success).toBe(true);
   });
 
   it("describes the shipped foundation workflow and exact CLI commands", async () => {
@@ -631,7 +643,7 @@ exit 1
       "list_specs", "get_spec", "list_runs", "get_run", "diagnose_run",
       "report_run", "estimate_run", "list_datasets", "get_dataset",
       "list_models", "get_model", "get_balance", "get_agent_usage", "list_transactions",
-      "examine_hardware", "describe_pipeline", "search_hugging_face", "list_local_datasets", "inspect_local_dataset", "inspect_hugging_face_dataset", "inspect_training_source", "validate_pipeline",
+      "examine_hardware", "describe_pipeline", "search_hugging_face", "inspect_dataset_file", "prepare_dataset_split", "list_local_datasets", "inspect_local_dataset", "inspect_hugging_face_dataset", "inspect_training_source", "validate_pipeline",
       "prepare_create_spec", "prepare_update_spec",
     ]);
   });
@@ -646,6 +658,8 @@ exit 1
         "examine_hardware",
         "describe_pipeline",
         "search_hugging_face",
+        "inspect_dataset_file",
+        "prepare_dataset_split",
         "list_local_datasets",
         "inspect_local_dataset",
         "inspect_hugging_face_dataset",

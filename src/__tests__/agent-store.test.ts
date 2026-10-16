@@ -22,15 +22,32 @@ describe("local agent store", () => {
       thread: { id: THREAD_ID, title: "Summary", status: "active", last_message_at: null,
         created_at: "2026-10-14T00:00:00Z", updated_at: "2026-10-14T00:00:00Z" },
       messages: Array.from({ length: 8 }, (_, index) => ({ role: "user", content: `${index}: ${"x".repeat(200)}` })),
-      actions: [], summary: { text: "Keep secret-value private; Muse downloaded.", messageCount: 6 },
+      actions: [], summary: { text: "Keep secret-value private; Muse downloaded.", messageCount: 6, usageStart: 7 },
     };
     await store.save(state);
     const saved = await store.load(THREAD_ID);
     expect(saved.summary).toEqual({ text: "Keep [REDACTED] private; Muse downloaded.",
-      messageCount: Math.max(0, 6 - (8 - saved.messages.length)) });
+      messageCount: Math.max(0, 6 - (8 - saved.messages.length)), usageStart: Math.max(0, 7 - (8 - saved.messages.length)) });
     expect(saved.messages.slice(saved.summary!.messageCount)).toEqual(state.messages.slice(6));
     expect(state.summary.messageCount).toBe(6);
     expect(statSync(join(root, "threads", `${THREAD_ID}.json`)).size).toBeLessThanOrEqual(maxThreadBytes);
+  });
+
+  it("upgrades a legacy summary once without discarding usage from later resumed turns", async () => {
+    const store = new LocalAgentStore(root);
+    await store.save({
+      thread: { id: THREAD_ID, title: "Legacy", status: "active", last_message_at: null,
+        created_at: "2026-10-14T00:00:00Z", updated_at: "2026-10-14T00:00:00Z" },
+      messages: [{ role: "user", content: "Old request" }, { role: "assistant", content: [] }],
+      actions: [], summary: { text: "Old request handled.", messageCount: 1 },
+    });
+    const resumed = await store.load(THREAD_ID);
+    expect(resumed.summary?.usageStart).toBe(2);
+    resumed.messages.push({ role: "user", content: "Next request" }, { role: "assistant", content: [], usage: { input: 12000 } });
+    await store.save(resumed);
+    const again = await store.load(THREAD_ID);
+    expect(again.summary?.usageStart).toBe(2);
+    expect(again.messages).toHaveLength(4);
   });
 
   it("atomically persists resumable transcript/action state with private modes", async () => {

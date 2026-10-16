@@ -63,6 +63,35 @@ def pin_native_content_format(args: list[str], model_source: str) -> None:
     args += ["--chat-template-content-format", content_format]
 
 
+def prepare_serving_adapter(adapter_path: str, temp_dir: Path) -> str:
+    # Transformers trains Qwen's text-only model, but vLLM loads the repository's
+    # conditional architecture, even with --language-model-only. Its LoRA mapper
+    # expects the language_model prefix; otherwise it silently misses our layers.
+    if os.environ.get("TT_BASE_MODEL") != "Qwen/Qwen3.5-2B":
+        return adapter_path
+    from safetensors import safe_open
+    from safetensors.torch import save_file
+
+    source = Path(adapter_path)
+    old = "base_model.model.model.layers."
+    new = "base_model.model.model.language_model.layers."
+    with safe_open(str(source / "adapter_model.safetensors"), framework="pt", device="cpu") as weights:
+        if not any(key.startswith(old) for key in weights.keys()):
+            return adapter_path
+        tensors = {}
+        for key in weights.keys():
+            mapped = new + key[len(old):] if key.startswith(old) else key
+            if mapped in tensors:
+                raise ValueError("Adapter contains conflicting text and conditional layer names.")
+            tensors[mapped] = weights.get_tensor(key)
+        destination = temp_dir / "serving-adapter"
+        destination.mkdir()
+        save_file(tensors, str(destination / "adapter_model.safetensors"), metadata=weights.metadata())
+    # Keep the verified archive and extracted training layout unchanged.
+    (destination / "adapter_config.json").write_bytes((source / "adapter_config.json").read_bytes())
+    return str(destination)
+
+
 def build_vllm_args(model_source: str, adapter_path: str | None, temp_dir: Path) -> list[str]:
     args = [
         "serve", model_source,
@@ -101,6 +130,7 @@ def build_vllm_args(model_source: str, adapter_path: str | None, temp_dir: Path)
         adapter_base = config.get("base_model_name_or_path")
         if adapter_base not in {os.environ["TT_BASE_MODEL"], model_source}:
             raise ValueError("The adapter base does not match the verified serving model.")
+        adapter_path = prepare_serving_adapter(adapter_path, temp_dir)
         base_name = "base:" + os.environ["TT_BASE_MODEL"]
         args[args.index("--served-model-name") + 1] = base_name
         args += ["--enable-lora", "--max-lora-rank", str(max(8, int(config["r"]))),

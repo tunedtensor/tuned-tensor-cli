@@ -118,19 +118,26 @@ export class LocalAgentStore {
       action.status === "proposed" || action.status === "executing" || action.status === "outcome_unknown"
     );
     const terminal = state.actions.filter((action) => !active.includes(action));
+    const removedMessages = Math.max(0, state.messages.length - this.maxMessages);
+    const retainedMessages = state.messages.length - removedMessages;
     const compact: StoredAgentThread = this.redact({
       thread: state.thread,
       messages: state.messages.slice(-this.maxMessages),
       actions: [...active, ...terminal.slice(-Math.max(0, this.maxActions - active.length))],
       ...(state.summary ? { summary: {
         ...state.summary,
-        messageCount: Math.max(0, state.summary.messageCount - Math.max(0, state.messages.length - this.maxMessages)),
+        messageCount: Math.max(0, state.summary.messageCount - removedMessages),
+        ...(state.summary.usageStart !== undefined ? { usageStart: Math.min(retainedMessages,
+          Math.max(0, state.summary.usageStart - removedMessages)) } : {}),
       } } : {}),
     });
     let serialized = `${JSON.stringify(compact, null, 2)}\n`;
     while (Buffer.byteLength(serialized) > this.maxThreadBytes && compact.messages.length > 0) {
       compact.messages.shift();
-      if (compact.summary) compact.summary.messageCount = Math.max(0, compact.summary.messageCount - 1);
+      if (compact.summary) {
+        compact.summary.messageCount = Math.max(0, compact.summary.messageCount - 1);
+        if (compact.summary.usageStart !== undefined) compact.summary.usageStart = Math.max(0, compact.summary.usageStart - 1);
+      }
       serialized = `${JSON.stringify(compact, null, 2)}\n`;
     }
     if (Buffer.byteLength(serialized) > this.maxThreadBytes) {
@@ -247,10 +254,17 @@ export class LocalAgentStore {
     if (parsed.summary !== undefined && (!isRecord(parsed.summary)
       || typeof parsed.summary.text !== "string" || !parsed.summary.text.trim()
       || !Number.isInteger(parsed.summary.messageCount) || (parsed.summary.messageCount as number) < 0
-      || (parsed.summary.messageCount as number) > parsed.messages.length)) {
+      || (parsed.summary.messageCount as number) > parsed.messages.length
+      || (parsed.summary.usageStart !== undefined && (!Number.isInteger(parsed.summary.usageStart)
+        || (parsed.summary.usageStart as number) < (parsed.summary.messageCount as number)
+        || (parsed.summary.usageStart as number) > parsed.messages.length)))) {
       throw new Error("Local agent conversation summary is malformed.");
     }
-    return parsed as unknown as StoredAgentThread;
+    const state = parsed as unknown as StoredAgentThread;
+    // Upgrade legacy checkpoints once. Subsequent saves retain this boundary,
+    // so newly measured usage remains valid across future resumed turns.
+    if (state.summary && state.summary.usageStart === undefined) state.summary.usageStart = state.messages.length;
+    return state;
   }
 
   async list(): Promise<StoredAgentThread[]> {

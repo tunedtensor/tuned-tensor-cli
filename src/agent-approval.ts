@@ -1,3 +1,4 @@
+import { validateDatasetSplit, executeDatasetSplit } from "./local-runtime/dataset-split.js";
 import { applySpecUpdate, validateSpecUpdate, SpecWorkspaceMismatchError, type SpecUpdate } from "./spec-workspace.js";
 import { createHash } from "node:crypto";
 import type { AgentAction, CloudActionContext } from "./agent-client.js";
@@ -215,6 +216,13 @@ export async function preflightPreparedAction(
       if (error instanceof SpecWorkspaceMismatchError) throw new PreparedActionWorkspaceMismatchError(error.message, error);
       throw error;
     }
+  } else if (action.operation === "split_local_dataset") {
+    if (!options.workspaceRoot) throw new Error("A local workspace is required to split data.");
+    try { await validateDatasetSplit(options.workspaceRoot, args(action), options.signal); }
+    catch (error) {
+      if (error instanceof SpecWorkspaceMismatchError) throw new PreparedActionWorkspaceMismatchError(error.message, error);
+      throw error;
+    }
   } else if (action.operation === "prefetch_local") {
     if (!options.workspaceRoot) throw new Error("A local workspace is required to download.");
     try { await revalidateLocalPrefetch(options.workspaceRoot, args(action)); }
@@ -281,6 +289,12 @@ export async function approvePreparedAction(
           runCommand: prepared.runCommand,
           signal: prepared.signal,
         });
+        break;
+      }
+      case "split_local_dataset": {
+        if (!options.workspaceRoot) throw new Error("A local workspace is required to split data.");
+        await validateDatasetSplit(options.workspaceRoot, input, options.signal);
+        execute = () => executeDatasetSplit(options.workspaceRoot!, input, options.signal);
         break;
       }
       case "prefetch_local": {

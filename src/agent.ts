@@ -144,6 +144,8 @@ function approvalQuestion(action: AgentAction): string {
       return "Create this project?";
     case "run_local_pipeline":
       return "Run this dry-run preview?";
+    case "split_local_dataset":
+      return "Create these dataset splits?";
     case "prefetch_local":
       return "Start this download?";
     case "create_spec":
@@ -166,6 +168,8 @@ function completionMessage(action: AgentAction | null): string {
       return "Project created.";
     case "run_local_pipeline":
       return "Dry-run preview finished.";
+    case "split_local_dataset":
+      return "Dataset split saved. Ask me to attach the new files to your spec.";
     case "prefetch_local":
       return "Download finished.";
     case "start_label_job":
@@ -362,6 +366,9 @@ export class TunedTensorAgentSession {
         });
       }
       for (const warning of preview?.validation?.warnings ?? []) push(`! ${warning}`, chalk.yellow);
+    } else if (action.operation === "split_local_dataset") {
+      out.push(`${GUTTER}${bar}`);
+      push(formatJson(action.preview ?? {}), chalk.dim);
     } else {
       const request = [action.method, action.path].filter(Boolean).join(" ");
       const technical = {
@@ -647,7 +654,7 @@ export class TunedTensorAgentSession {
         return context
           ? await this.options.client.approveAction(action.id, onEvent, signal, context)
           : await this.options.client.approveAction(action.id, onEvent, signal);
-      }, action.operation === "run_local_pipeline" || action.operation === "prefetch_local");
+      }, action.operation === "run_local_pipeline" || action.operation === "prefetch_local" || action.operation === "split_local_dataset");
     } finally {
       // Approval is one-way once requested. Preflight failures, completed
       // actions, and unknown outcomes are all non-retryable under this ID.
