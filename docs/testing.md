@@ -202,3 +202,17 @@ each workflow bug, add the failing scenario before fixing it. Keep assertions
 about observable outcomes and durable evidence, not incidental internal call
 order. Add machinery only when a concrete scenario cannot be expressed cleanly
 with these tools.
+
+## Hardware guidance across platforms
+
+`npm run test:cli -- src/__tests__/hardware-guidance.test.ts` covers explicit
+Linux, Apple Silicon, Intel Mac, native Windows and unsupported-platform
+profiles, CUDA/MPS availability, failed runtime probes, missing dependencies,
+CPU core counts, free RAM/VRAM, unified memory, cache disk pressure and legacy
+snapshots. Terminal rendering is checked at narrow and wide widths.
+
+CI runs this suite on real Ubuntu, macOS and Windows runners. Each job also
+samples its actual CPU/RAM/OS, handles absent optional programs, and persists
+and reloads a hardware report. These checks do not certify CUDA/MPS training
+on those runners. Real model training/evaluation remains a separate validation;
+never turn a simulated accelerator fixture into a hardware support claim.

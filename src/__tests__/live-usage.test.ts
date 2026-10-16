@@ -85,7 +85,7 @@ describe("live CPU sampling", () => {
 describe("describeFineTuneFit", () => {
   it("uses certified profiles for the spec's base model", () => {
     expect(describeFineTuneFit(usage([gpu24]), context({ baseModel: "Qwen/Qwen3.5-2B" })))
-      .toMatchObject({ status: "ready", text: expect.stringMatching(/LoRA Qwen3\.5-2B ready/) });
+      .toMatchObject({ status: "unknown", text: expect.stringMatching(/LoRA Qwen3\.5-2B: Needs verification/) });
     expect(describeFineTuneFit(usage([gpu24]), context({ baseModel: "meta-models/Muse-Glimmer-30B" })))
       .toMatchObject({ status: "not_possible" });
   });
@@ -104,7 +104,7 @@ describe("describeFineTuneFit", () => {
 
   it("covers the foundation engine and the no-spec summary", () => {
     expect(describeFineTuneFit(usage([gpu24]), context({ engine: "foundation" })))
-      .toMatchObject({ status: "ready", text: expect.stringMatching(/suggested max depth \d+/) });
+      .toMatchObject({ status: "unknown", text: expect.stringMatching(/suggested max depth \d+/) });
     expect(describeFineTuneFit(usage([gpu24]), context()).text).toContain("LoRA ready for Qwen3.5-2B");
     expect(describeFineTuneFit(undefined, context())).toMatchObject({ status: "unknown" });
   });

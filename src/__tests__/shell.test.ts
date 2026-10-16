@@ -357,8 +357,8 @@ describe("renderShellBanner", () => {
     expect(banner).toContain("VRAM 6.0/24.0 GiB");
     expect(banner).toContain("16× Ryzen 9 7950X");
     expect(banner).toContain("26.0/64.0 GiB");
-    expect(banner).toMatch(/LoRA Qwen3\.5-2B ready/);
-    expect(banner).toContain("quick check");
+    expect(banner).toMatch(/LoRA Qwen3\.5-2B: Needs verification/);
+    expect(banner).toContain("tt hardware checks training runtimes");
   });
 
   it("omits the version when none is provided", () => {

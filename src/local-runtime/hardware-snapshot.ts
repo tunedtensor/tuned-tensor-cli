@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getTunedTensorHome } from "../paths.js";
 import type { CapabilityReport } from "./capability.js";
-import { formatCapabilitySummary } from "./capability.js";
+import { evaluateCapabilities, formatCapabilitySummary } from "./capability.js";
 import type { HostInventory } from "./host-inventory.js";
 
 export const HARDWARE_SNAPSHOT_VERSION = 1;
@@ -41,7 +41,14 @@ export async function readHardwareSnapshot(
     }
     const age = Date.now() - Date.parse(snapshot.collected_at);
     const stale = !Number.isFinite(age) || age > HARDWARE_SNAPSHOT_TTL_MS || age < 0;
-    return { ...snapshot, stale, path };
+    // Older/partial inventories can still supply their recorded legacy verdicts.
+    if (!snapshot.inventory.os || !snapshot.inventory.node || !snapshot.inventory.nvidia_smi
+      || !Array.isArray(snapshot.inventory.gpus) || !Array.isArray(snapshot.inventory.disks)) {
+      return { ...snapshot, stale, path };
+    }
+    // Recompute guidance from the saved inventory, including legacy snapshots.
+    const capabilities = evaluateCapabilities(snapshot.inventory);
+    return { ...snapshot, capabilities, summary: formatCapabilitySummary(capabilities), stale, path };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     return undefined;

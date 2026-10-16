@@ -1,3 +1,4 @@
+import { workflowGuidance, WORKFLOW_STATUS_LABEL, type WorkflowGuidance } from "./workflow-guidance.js";
 import {
   ADAPTER_MEMORY_PROFILES,
   FOUNDATION_DEFAULT_DEPTH,
@@ -43,6 +44,7 @@ export interface CapabilityReport {
   adapters: AdapterCapability[];
   foundation: FoundationCapability;
   notes: string[];
+  workflows?: WorkflowGuidance[];
 }
 
 const HEADROOM = 1.2;
@@ -262,7 +264,9 @@ export function evaluateCapabilities(inventory: HostInventory): CapabilityReport
       : { status: "not_possible", reason: "Foundation serving requires Linux and an NVIDIA CUDA GPU" },
   };
 
-  return { cuda_available: hasCuda, gpu, adapters, foundation, notes };
+  const report: CapabilityReport = { cuda_available: hasCuda, gpu, adapters, foundation, notes };
+  report.workflows = workflowGuidance(inventory, report);
+  return report;
 }
 
 export function formatCapabilitySummary(report: CapabilityReport): string {
@@ -275,6 +279,7 @@ export function formatCapabilitySummary(report: CapabilityReport): string {
     return `${short} train ${adapter.train.status}`;
   });
   return [
+    ...(report.workflows ?? []).map(item => `${item.label}: ${WORKFLOW_STATUS_LABEL[item.status]} — ${item.reason} ${item.next}`),
     `GPU ${gpuLabel}, CUDA ${report.cuda_available ? "yes" : "no"}`,
     `Adapter: ${adapterBits.join("; ")}`,
     `Foundation: train ${report.foundation.train.status}, suggested max depth ${report.foundation.suggested_max_depth}; serve ${report.foundation.serve.status}`,
@@ -287,10 +292,8 @@ export function warningsFromSnapshot(
 ): string[] {
   const warnings: string[] = [];
   if (target.engine === "decision") {
-    // Decision models are small enough for CPU or Apple MPS; CUDA only makes them faster.
-    if (!report.cuda_available) {
-      warnings.push("No CUDA GPU detected: decision training runs on CPU or Apple MPS (roughly 15 s per 8-example step on a 4-core CPU).");
-    }
+    const decision = report.workflows?.find(item => item.id === "decision");
+    if (decision && decision.status !== "ready") warnings.push(`${decision.label}: ${WORKFLOW_STATUS_LABEL[decision.status]} — ${decision.reason} ${decision.next}`);
     return warnings;
   }
   if (target.engine === "foundation") {

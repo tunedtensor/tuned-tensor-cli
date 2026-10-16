@@ -1,3 +1,4 @@
+import type { HostInventory } from "./local-runtime/host-inventory.js";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import {
@@ -60,6 +61,7 @@ export interface ShellHostContext {
   cuda?: boolean;
   gpuName?: string;
   capabilities?: CapabilityReport;
+  inventory?: HostInventory;
 }
 
 export interface ShellContext {
@@ -216,6 +218,7 @@ function hostFromSnapshot(snapshot: LoadedHardwareSnapshot | undefined): ShellHo
     cuda: snapshot.capabilities.cuda_available,
     gpuName: snapshot.capabilities.gpu?.name,
     capabilities: snapshot.capabilities,
+    inventory: snapshot.inventory,
   };
 }
 

@@ -26,6 +26,8 @@ export interface LiveGpuUsage {
 
 export interface LiveUsage {
   sampled_at: string;
+  platform?: NodeJS.Platform;
+  arch?: string;
   cpu: {
     model: string;
     cores: number;
@@ -230,6 +232,7 @@ export async function sampleLiveUsage(options: SampleLiveUsageOptions = {}): Pro
   const [one, five, fifteen] = loadavg();
   return {
     sampled_at: new Date().toISOString(),
+    platform, arch,
     cpu: {
       model,
       cores: list.length,
