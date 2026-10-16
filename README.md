@@ -693,6 +693,13 @@ Commit the lock file with the spec. Runs that load the base model from
 `--verbose` adds training and evaluation process output, and `--quiet` hides
 both. Full logs stay in the run directory either way.
 
+Adapter evaluation batches four prompts by default, reports
+completed examples and ETA, and saves completed batches for recovery. Set
+`evaluation.inference.batchSize` to tune memory use; `evaluation.maxExamples`
+and `sampleSeed` select an explicit smoke sample. Matching interrupted
+baselines automatically continue on retry with the default baseline cache.
+See [evaluation settings and recovery](docs/local-runtime/architecture.md#evaluation).
+
 Every run report has a `provenance` block recording what produced it:
 
 - TT, Node and platform versions, and the digest of the locked Python runtime;

@@ -121,6 +121,52 @@ The Python evaluator receives only opaque IDs and prompts. Node joins its
 predictions to trusted references before scoring. This avoids accidental label
 leakage across the process boundary.
 
+Generation uses left-padded batches of four prompts by default. Set
+`evaluation.inference.batchSize` (1–128) in `tunedtensor.json` to tune memory
+use. A CUDA allocation failure halves the batch and retries the unfinished
+examples; failure at one example is reported instead of retrying forever.
+Batch latency is the time each request waits for its whole batch, including
+decoding; it is not latency divided by batch size. Batched greedy generation
+can differ from single-prompt generation because of floating-point arithmetic.
+
+Ordinary run output shows loading/generation, completed examples, throughput,
+ETA and a heartbeat every 30 seconds. It warns if the estimated remaining work
+exceeds `evaluation.timeoutMs`; that limit remains a hard wall-clock deadline
+(30 minutes by default), including model loading. An ETA is an estimate, not
+a deadline extension. `--verbose` additionally streams the raw process logs.
+
+Each completed batch atomically saves a private prediction checkpoint. An
+incomplete checkpoint is never scored as a completed evaluation. With the
+default `evaluation.baselineCache: true`, rerunning the same baseline inputs
+in a new run automatically continues the checkpoint in the local store's
+`cache/baseline-evals/` directory. Changing only the timeout preserves reuse.
+Changed prompts, model revision/fingerprint, generation settings, batch size
+or package version invalidate it. Local base-model paths without a verified
+fingerprint do not resume. Adapter contents are hashed before candidate
+checkpoint reuse, so retraining at the same path cannot reuse old answers.
+Per-run checkpoints live in `inference-checkpoints/` in the run directory;
+retrying the same saved run request reuses them. A new training run has a new
+candidate identity. Completed baseline reports retain their existing cache.
+Checkpoints contain generated text; remove them when no longer needed.
+
+For a smoke run, explicitly set a small deterministic sample, for example:
+
+```json
+"evaluation": {
+  "maxExamples": 16,
+  "sampleSeed": 42,
+  "timeoutMs": 3600000,
+  "inference": { "batchSize": 4 }
+}
+```
+
+This limits evaluation, not training. Baseline and candidate use the same
+sample. Remove `maxExamples` for full held-out evaluation and choose a timeout
+appropriate to the measured throughput. TT never silently reduces the
+evaluation set to meet a deadline. A smoke sample is pipeline validation,
+not evidence of overall model quality. Exact text matching is also not a
+coding correctness test; the scoring contract is unchanged here.
+
 ## Storage and integrity
 
 Canonical JSON and JSONL files are the state store; there is no database or

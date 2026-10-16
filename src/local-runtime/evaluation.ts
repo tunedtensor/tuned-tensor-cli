@@ -1,7 +1,7 @@
 import { runGpuProcess, gpuBaseModelPath, type GpuFile } from "./gpu-executor.js";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   evalReportSchema,
   type BehaviorSpecExample,
@@ -256,6 +256,31 @@ function fileUriToPath(value?: string): string | undefined {
 
 export const INFERENCE_PROTOCOL_VERSION = 2;
 
+interface InferenceProgress {
+  phase: string;
+  completed: number;
+  total: number;
+  batch_size: number;
+  elapsed_seconds: number;
+  eta_seconds: number | null;
+}
+
+function parseInferenceProgress(line: string, total: number): InferenceProgress | null {
+  const prefix = "@@tt-evaluation ";
+  if (!line.startsWith(prefix)) return null;
+  try {
+    const value = JSON.parse(line.slice(prefix.length));
+    if (!value || !["initializing", "loading", "resuming", "generating", "reducing_batch"].includes(value.phase)
+      || value.total !== total || !Number.isInteger(value.completed) || value.completed < 0 || value.completed > total
+      || !Number.isInteger(value.batch_size) || value.batch_size < 1 || value.batch_size > 128
+      || !Number.isFinite(value.elapsed_seconds) || value.elapsed_seconds < 0
+      || (value.eta_seconds !== null && (!Number.isFinite(value.eta_seconds) || value.eta_seconds < 0))) return null;
+    return value as InferenceProgress;
+  } catch {
+    return null;
+  }
+}
+
 interface BatchInferenceResult {
   model_id?: string;
   base_model?: string;
@@ -331,6 +356,8 @@ async function runTransformersInference(args: {
   modelSource: string;
   baseModelRevision?: string;
   adapterPath?: string;
+  sourceFingerprint?: string;
+  checkpointPath?: string;
   examples: BehaviorSpecExample[];
   system: string;
   config: LocalRunnerConfig;
@@ -341,8 +368,11 @@ async function runTransformersInference(args: {
   const inputPath = `${args.outputPath}.inference-input.json`;
   const outputPath = `${args.outputPath}.inference-output.json`;
   const logPath = `${args.outputPath}.inference.log`;
+  // Keep per-run recovery outside the stage output prefix, which is cleaned on retry.
+  const checkpointPath = args.checkpointPath
+    ?? join(dirname(args.outputPath), "inference-checkpoints", basename(args.outputPath));
   await mkdir(dirname(inputPath), { recursive: true });
-  await writeFile(inputPath, `${JSON.stringify({
+  const payload = {
     protocol_version: INFERENCE_PROTOCOL_VERSION,
     kind: args.kind,
     model_id: args.modelId,
@@ -361,22 +391,30 @@ async function runTransformersInference(args: {
       : undefined,
     trust_remote_code: false,
     device: args.config.evaluation.inference.device,
+    batch_size: args.config.evaluation.inference.batchSize,
+    source_fingerprint: args.sourceFingerprint,
     generation: {
       max_new_tokens: args.config.evaluation.inference.maxNewTokens,
       temperature: args.config.evaluation.inference.temperature,
       top_p: args.config.evaluation.inference.topP,
     },
-  }, null, 2)}\n`, "utf8");
+  };
+  const checkpointKey = baselineInputsAreStable({
+    baseModelRevision: args.baseModelRevision, sourceFingerprint: args.sourceFingerprint, config: args.config,
+  }) ? createHash("sha256").update(JSON.stringify({
+    payload, package_version: await packageVersion(),
+  })).digest("hex") : undefined;
+  await writeFile(inputPath, `${JSON.stringify({ ...payload, checkpoint_key: checkpointKey }, null, 2)}\n`, "utf8");
   await rm(outputPath, { force: true });
   const entrypoint = buildBundledPythonCommand(
     "evaluate.py",
-    ["--input", inputPath, "--output", outputPath],
+    ["--input", inputPath, "--output", outputPath, "--checkpoint", checkpointPath],
   );
 
   await args.reporter?.onEvent?.({
     stage: `evaluating_${args.kind}`,
     status: "running",
-    message: `Starting ${args.kind} Transformers inference.`,
+    message: `Starting ${args.kind} Transformers inference (batch size ${payload.batch_size}).`,
     details: {
       model_id: args.modelId,
       examples: args.examples.length,
@@ -392,6 +430,7 @@ async function runTransformersInference(args: {
     const files: GpuFile[] = [
       { path: inputPath, direction: "input" },
       { path: outputPath, direction: "output" },
+      { path: checkpointPath, direction: "both" },
       { path: document.model_source, direction: "input", directory: true },
       ...(document.adapter_path ? [{ path: document.adapter_path, direction: "input" as const,
         directory: (await stat(document.adapter_path)).isDirectory() }] : []),
@@ -399,26 +438,82 @@ async function runTransformersInference(args: {
     return runGpuProcess({ ...processArgs, gpu, runtime: "adapter", files,
       document: { path: inputPath, value: document, pathKeys: ["model_source", "adapter_path"] } });
   } : runLoggedProcess;
-  const result = await execute({
-    command: entrypoint.command,
-    commandArgs: entrypoint.commandArgs,
-    env: withBundledPythonEnvironment(
-      withOfflineHuggingFaceCacheEnvironment(
-        minimalMachineLearningEnvironment(process.env),
-        args.config.paths.modelCache,
+  const started = Date.now();
+  const progressState: { latest: InferenceProgress | null } = { latest: null };
+  let generatedFrom = 0;
+  let lastReportedAt = 0;
+  let warned = false;
+  // Serialize durable events; a slow or failed optional reporter must not orphan the process.
+  let reporting = Promise.resolve();
+  const reportProgress = (progress: InferenceProgress, heartbeat = false) => {
+    const phaseChanged = progress.phase !== progressState.latest?.phase;
+    progressState.latest = progress;
+    if (progress.phase === "generating" && progress.elapsed_seconds === 0) generatedFrom = progress.completed;
+    const remainingSeconds = Math.max(0, (args.config.evaluation.timeoutMs - (Date.now() - started)) / 1000);
+    const overBudget = progress.eta_seconds !== null && progress.eta_seconds > remainingSeconds;
+    const newWarning = overBudget && !warned;
+    if (!heartbeat && !phaseChanged && !newWarning && progress.completed !== progress.total
+      && Date.now() - lastReportedAt < 30_000) return;
+    warned ||= overBudget;
+    lastReportedAt = Date.now();
+    const eta = progress.eta_seconds === null ? "" : ` ETA ${Math.ceil(progress.eta_seconds / 60)} min.`;
+    const rate = progress.elapsed_seconds > 0 ? (progress.completed - generatedFrom) / progress.elapsed_seconds : null;
+    const message = progress.phase === "reducing_batch"
+      ? `CUDA memory limit reached; retrying with batch size ${progress.batch_size}.`
+      : `${heartbeat ? "Still working: " : ""}${progress.phase}: ${progress.completed}/${progress.total} examples.`
+        + (rate === null ? "" : ` ${rate.toFixed(2)} examples/s.`) + eta;
+    reporting = reporting.then(async () => {
+      await args.reporter?.onEvent?.({
+        stage: `evaluating_${args.kind}`, status: "running",
+        message: message + (newWarning
+          ? " Estimated completion exceeds the timeout; increase evaluation.timeoutMs or set evaluation.maxExamples for a smoke run." : ""),
+        details: { completed: progress.completed, total: progress.total, batch_size: progress.batch_size,
+          eta_seconds: progress.eta_seconds, checkpoint_path: checkpointPath },
+      });
+    }).catch(() => undefined);
+  };
+  const heartbeat = setInterval(() => reportProgress(progressState.latest ?? {
+    phase: "initializing", completed: 0, total: args.examples.length,
+    batch_size: payload.batch_size, elapsed_seconds: 0, eta_seconds: null,
+  }, true), 30_000);
+  heartbeat.unref();
+  let result;
+  try {
+    result = await execute({
+      command: entrypoint.command,
+      commandArgs: entrypoint.commandArgs,
+      env: withBundledPythonEnvironment(
+        withOfflineHuggingFaceCacheEnvironment(
+          minimalMachineLearningEnvironment(process.env),
+          args.config.paths.modelCache,
+        ),
       ),
-    ),
-    logPath,
-    timeoutMs: args.config.evaluation.timeoutMs,
-    timeoutMessage:
-      `Transformers inference timed out after ${args.config.evaluation.timeoutMs}ms`,
-    reporter: args.reporter,
-    stage: `evaluating_${args.kind}`,
-    shouldCancel: args.shouldCancel,
-  });
+      logPath,
+      timeoutMs: args.config.evaluation.timeoutMs,
+      timeoutMessage:
+        `Transformers inference timed out after ${args.config.evaluation.timeoutMs}ms`,
+      reporter: args.reporter,
+      stage: `evaluating_${args.kind}`,
+      shouldCancel: args.shouldCancel,
+      onLine: (line, stream) => {
+        if (stream !== "stdout") return;
+        const progress = parseInferenceProgress(line, args.examples.length);
+        if (progress) reportProgress(progress);
+      },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Transformers inference timed out")) {
+      throw new Error(`${error.message}. Completed ${progressState.latest?.completed ?? 0}/${args.examples.length} examples. `
+        + `Checkpoint: ${checkpointPath}. Retry with the same inputs and a larger evaluation.timeoutMs.`);
+    }
+    throw error;
+  } finally {
+    clearInterval(heartbeat);
+    await reporting;
+  }
   if (result.exitCode !== 0) {
     throw new Error(
-      `Transformers inference exited ${result.exitCode}: ${result.stderr.slice(0, 1000)}`,
+      `Transformers inference exited ${result.exitCode}: ${result.stderr.slice(-2000)}\nCheckpoint: ${checkpointPath}. Full log: ${logPath}`,
     );
   }
   let output: unknown;
@@ -463,7 +558,7 @@ export function baselineCacheKey(args: {
   packageVersion: string;
 }): string {
   return createHash("sha256").update(JSON.stringify({
-    v: 6,
+    v: 7,
     inference_protocol_version: INFERENCE_PROTOCOL_VERSION,
     package_version: args.packageVersion,
     model_id: args.modelId,
@@ -693,6 +788,11 @@ export async function evaluateExamples(args: {
     }
   }
 
+  if (cacheKey) {
+    await createLocalStore(baselineStoreRoot(args.config)).ensure();
+    await mkdir(dirname(baselineCachePath(args.config, cacheKey)), { recursive: true, mode: 0o700 });
+    await hardenExistingLocalStore(baselineStoreRoot(args.config));
+  }
   const inference = args.config.dryRun
     ? null
     : await runTransformersInference({
@@ -702,6 +802,8 @@ export async function evaluateExamples(args: {
         modelSource: args.modelSource ?? args.modelId,
         baseModelRevision,
         adapterPath: args.adapterPath,
+        sourceFingerprint: args.sourceFingerprint,
+        ...(cacheKey ? { checkpointPath: `${baselineCachePath(args.config, cacheKey)}.checkpoint.json` } : {}),
         examples,
         system: args.system,
         config: args.config,

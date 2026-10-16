@@ -1516,6 +1516,7 @@ async function runCandidateStage(args: {
       ? undefined
       : args.prepared.metadata.base_model_revision ?? undefined,
     adapterPath: modelArtifact,
+    sourceFingerprint: args.prepared.metadata.base_model_fingerprint ?? undefined,
     examples: args.prepared.examples,
     system: args.prepared.system,
     config: args.config,
@@ -1548,6 +1549,7 @@ async function runCandidateStage(args: {
         ? undefined
         : args.prepared.metadata.base_model_revision ?? undefined,
       adapterPath: modelArtifact,
+      sourceFingerprint: args.prepared.metadata.base_model_fingerprint ?? undefined,
       examples: args.prepared.generalRegression.examples,
       system: args.prepared.generalRegression.system,
       config: generalRegressionEvaluationConfig(args.config),
