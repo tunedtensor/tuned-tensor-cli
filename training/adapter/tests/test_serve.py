@@ -126,7 +126,7 @@ class UpstreamLaunchTests(unittest.TestCase):
         self.assertIn("--no-enable-log-requests", args)
         self.assertNotIn("--enable-lora", args)
 
-    def test_adapter_is_registered_alongside_base_without_loading_weights(self):
+    def test_adapter_is_registered_alongside_base_with_serving_layout(self):
         import json
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -135,13 +135,49 @@ class UpstreamLaunchTests(unittest.TestCase):
             (adapter / "adapter_config.json").write_text(json.dumps({
                 "peft_type": "LORA", "r": 16, "base_model_name_or_path": "Qwen/Qwen3.5-2B"
             }))
-            with patch.dict(os.environ, {"TT_BASE_MODEL": "Qwen/Qwen3.5-2B", "TT_MODEL_NAME": "local-tuned"}, clear=True):
+            with patch.dict(os.environ, {"TT_BASE_MODEL": "Qwen/Qwen3.5-2B", "TT_MODEL_NAME": "local-tuned"}, clear=True), patch.object(serve, "prepare_serving_adapter", return_value="/prepared/adapter") as prepare:
                 args = serve.build_vllm_args("/verified/snapshot", str(adapter), root)
+            prepare.assert_called_once_with(str(adapter), root)
             self.assertEqual(args[args.index("--served-model-name") + 1], "base:Qwen/Qwen3.5-2B")
             self.assertEqual(json.loads(args[args.index("--lora-modules") + 1]), {
-                "name": "local-tuned", "path": str(adapter), "base_model_name": "base:Qwen/Qwen3.5-2B"
+                "name": "local-tuned", "path": "/prepared/adapter", "base_model_name": "base:Qwen/Qwen3.5-2B"
             })
             self.assertEqual(args[args.index("--max-lora-rank") + 1], "16")
+
+    def test_qwen_serving_maps_text_lora_without_changing_values_or_source(self):
+        try:
+            import torch
+            from safetensors.torch import load_file, save_file
+            from safetensors import safe_open
+        except ImportError:
+            self.skipTest("Run in the locked training/adapter runtime for tensor conversion coverage")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "original"
+            source.mkdir()
+            keys = ["base_model.model.model.layers.0.linear_attn.in_proj_a.lora_A.weight",
+                    "base_model.model.model.layers.3.self_attn.q_proj.lora_B.weight"]
+            weights = {key: torch.arange(6, dtype=torch.bfloat16).reshape(2, 3) for key in keys}
+            path = source / "adapter_model.safetensors"
+            save_file(weights, str(path), metadata={"format": "pt"})
+            original = path.read_bytes()
+            (source / "adapter_config.json").write_text('{"r":16}')
+            with patch.dict(os.environ, {"TT_BASE_MODEL": "Qwen/Qwen3.5-2B"}, clear=True):
+                prepared = Path(serve.prepare_serving_adapter(str(source), root))
+                # Already conditional adapters do not get a second prefix.
+                self.assertEqual(serve.prepare_serving_adapter(str(prepared), root), str(prepared))
+            mapped = load_file(str(prepared / "adapter_model.safetensors"))
+            self.assertEqual(len(mapped), len(weights))
+            for key, value in weights.items():
+                self.assertTrue(torch.equal(mapped[key.replace("model.layers.", "model.language_model.layers.")], value))
+            self.assertEqual(path.read_bytes(), original)
+            self.assertEqual((prepared / "adapter_config.json").read_bytes(), (source / "adapter_config.json").read_bytes())
+            with safe_open(str(prepared / "adapter_model.safetensors"), framework="pt") as result:
+                self.assertEqual(result.metadata(), {"format": "pt"})
+
+    def test_other_models_keep_original_adapter(self):
+        with patch.dict(os.environ, {"TT_BASE_MODEL": "meta-models/Muse-Glimmer-30B"}, clear=True):
+            self.assertEqual(serve.prepare_serving_adapter("/adapter", Path("/unused")), "/adapter")
 
     def test_owner_prompt_is_literal_and_tool_history_is_preserved(self):
         import json

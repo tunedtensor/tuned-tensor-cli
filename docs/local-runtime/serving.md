@@ -28,8 +28,12 @@ not mutate the training runtime.
   Keep each model paired with its original training tokenizer. Context defaults to
   the checkpoint limit. Text completions and chat are supported; foundation tool-call
   parsing and image inputs are not supported.
-- Qwen3.5-2B base and a one-step, rank-16 `all-linear` TT-shaped adapter have been
-  exercised on GB10. The registry's Nemotron and Muse Glimmer architectures have
+- Qwen3.5-2B base and a rank-16 `all-linear` adapter trained for one epoch on
+  10,458 banking-intent examples have been exercised on GB10. On a fixed
+  100-example test sample spanning all 77 labels, serving scored 53/100 for the
+  base and 93/100 for the adapter; all adapter predictions matched offline
+  evaluation. This checks adapter application, not general coding ability.
+  The registry's Nemotron and Muse Glimmer architectures have
   upstream support, but their exact adapters/hardware combinations are **not
   certified by that Qwen smoke test**. No 70B model was tested here.
 
@@ -47,6 +51,11 @@ endpoint, sharing the base weights. The adapter is registered at startup; TT
 never enables runtime adapter upload/loading. There is no merge/export step
 and no modification of the verified weights. `tt serve base` starts base-only.
 `active` still fails when no adapter is activated.
+
+Qwen text-model adapters use a temporary copy with layer names mapped to vLLM's
+conditional-model layout. Tensor values, adapter settings and the verified
+artifact stay unchanged. This prevents vLLM from accepting an adapter whose
+layer names do not match the loaded model and silently serving base behavior.
 
 Artifact integrity, certified base revisions, and stored behavior-prompt
 fingerprints retain their verification. A stored adapter's behavior prompt is
