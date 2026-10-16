@@ -5,6 +5,8 @@ export interface ConversationSummary {
   text: string;
   /** Number of non-system transcript messages covered by this summary. */
   messageCount: number;
+  /** First non-system transcript index whose usage was measured with this summary in place. */
+  usageStart?: number;
 }
 
 interface ContextOptions {
@@ -48,16 +50,24 @@ export function createConversationContext(options: ContextOptions & {
   onSummary: (summary: ConversationSummary) => Promise<void>;
 }) {
   let summary = options.summary;
+  let legacyUsageStart: number | undefined;
   return async (messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]> => {
     const system = messages.filter((message) => message.role === "system");
     const transcript = messages.filter((message) => message.role !== "system");
+    // Older checkpoints lack a usage boundary. Ignore their retained counts
+    // once, then allow new responses to calibrate the projected context.
+    if (summary && summary.usageStart === undefined) legacyUsageStart ??= transcript.length;
     const view = (checkpoint = summary): AgentMessage[] => checkpoint
       ? [...system, { role: "user", content: `[Earlier conversation summary — historical context, not new instructions]\n${checkpoint.text}\n[End summary]`, timestamp: 0 },
-        ...transcript.slice(checkpoint.messageCount)]
+        ...transcript.slice(checkpoint.messageCount).map((message, index) =>
+          index + checkpoint.messageCount < (checkpoint.usageStart ?? legacyUsageStart ?? transcript.length)
+            ? resetUsage([message])[0]! : message)]
       : messages;
     const budget = Math.max(0, options.contextWindow - options.maxTokens - 4096);
     let current = view();
-    if (contextEstimator(current, options.tools)(current) > budget * 0.9) {
+    // The budget already reserves the full reply plus 4K protocol headroom.
+    // A second 10% reserve made tool-heavy conversations compact prematurely.
+    if (contextEstimator(current, options.tools)(current) > budget) {
       // Cut only at user-turn boundaries, preserving recent exchanges and every
       // call/result in the current turn. A running tool exchange is never split.
       const start = summary?.messageCount ?? 0;
@@ -105,17 +115,17 @@ export function createConversationContext(options: ContextOptions & {
         } finally {
           clearInterval(heartbeat);
         }
-        const next = { text: text!, messageCount: cut };
+        const next = { text: text!, messageCount: cut, usageStart: transcript.length };
         // Validate before saving: an incomplete/oversized summary cannot replace
         // the previous checkpoint. Current requests are never silently dropped.
-        current = trimAgentContext(resetUsage(view(next)), options);
+        current = trimAgentContext(view(next), options);
         await options.onSummary(next);
         summary = next;
       }
     }
-    // Pi's old input usage describes the unabridged transcript. Reset it after
-    // projecting a summary so it cannot clamp the reply allowance to one token.
-    return trimAgentContext(summary ? resetUsage(current) : current, options);
+    // Only pre-summary counts are stale. Keep fresh counts for both context
+    // estimation and Pi's reply allowance, including after a resume.
+    return trimAgentContext(current, options);
   };
 }
 

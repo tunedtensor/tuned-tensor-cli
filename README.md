@@ -223,6 +223,10 @@ download with only a training split still needs distinct held-out data.
 
 When a conversation approaches the model's context budget, TT automatically
 summarizes earlier turns using Pi and the selected model, and shows progress.
+The trigger reserves the full reply allowance plus 4,096 tokens for protocol
+headroom; it does not apply an additional percentage reserve. Usage measured
+before a summary is ignored, while new provider usage calibrates the next
+trigger, including after resume.
 The summary preserves goals, decisions and action outcomes and is saved for
 `/resume`; recent exchanges remain in context. Summarization uses an additional
 model request (or several for unusually long histories). The transcript stays
@@ -756,9 +760,11 @@ For the full command reference, including long-example policies, eval token
 budgets, evaluation caps, and local model serving, see the
 [CLI docs](https://tunedtensor.com/docs/cli).
 
-### Split a local master dataset
+### Split a master dataset
 
-Keep converted datasets as unsplit chat JSONL. Ask the agent to split a named
+Keep converted datasets as unsplit chat JSONL. Downloaded chat JSONL can be
+split directly from its verified cache: ask the agent to inspect the download
+and use its pinned `split_source`, with no manual copy. Ask it to split a named
 file with your ratios and seed, then attach the approved paths to your spec.
 For example: “Split data.jsonl 80/20 for training and validation with seed 123,
 stratify by metadata.category, and save to split-123.”
@@ -771,7 +777,7 @@ tt datasets split data.jsonl --output split-123 --train .8 --validation .2 --tes
 The source stays unchanged. Groups containing repeated prompts stay in training
 so held-out prompts remain unique;
 optional `--group-by` and `--stratify-by` support family and label boundaries.
-See [splitting local data](docs/spec-workflow.md#splitting-an-unsplit-local-dataset)
+See [splitting local data](docs/spec-workflow.md#splitting-an-unsplit-dataset)
 for defaults, metadata preservation, and benchmark holdout limitations.
 
 ## Development

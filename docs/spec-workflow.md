@@ -164,9 +164,16 @@ Agent `/approve` for a pipeline still runs a preview only. Real training uses
 the direct command above. The spec is the behavior recipe; approval of a spec
 edit is not approval to launch training.
 
-## Splitting an unsplit local dataset
+## Splitting an unsplit dataset
 
-Keep the reusable master dataset as one chat JSONL file. Ask the agent:
+Keep the reusable master dataset as one chat JSONL file. For a downloaded
+Hugging Face chat dataset, `inspect_local_dataset` returns a pinned `split_source`
+(`hf://datasets/org/repo@<commit>/data.jsonl`). The inspection and split tools
+accept that reference directly, verifying the recorded checksum without copying
+or downloading the master again. Outputs still go into a new workspace directory.
+The CLI accepts the same reference in place of `data.jsonl` below.
+
+Ask the agent:
 
 > Split data.jsonl into 80% training and 20% validation, using seed 123.
 > Balance metadata.category, save to split-123, and use the files in my spec.

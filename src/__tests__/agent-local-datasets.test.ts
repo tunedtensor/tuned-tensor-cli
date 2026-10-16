@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parquetWriteBuffer } from "hyparquet-writer";
 import { listLocalDatasets, inspectLocalDataset } from "../agent-local-datasets.js";
 import { recordAssetDownload } from "../local-runtime/assets.js";
+import { executeDatasetSplit, prepareDatasetSplit } from "../local-runtime/dataset-split.js";
 import { createTunedTensorTools } from "../agent-tools.js";
 
 const repo = "org/coding";
@@ -26,6 +28,47 @@ async function cache(files: Record<string, string | Uint8Array>) {
 }
 
 describe("agent access to downloaded datasets", () => {
+  it("splits a recorded cached chat dataset into the workspace and rejects changed cache bytes", async () => {
+    const data = Array.from({ length: 100 }, (_, i) => JSON.stringify({ messages: [
+      { role: "user", content: `Request ${i}` }, { role: "assistant", content: `Answer ${i}` },
+    ] })).join("\n") + "\n";
+    await cache({ "data/train.jsonl": data });
+    const workspace = join(root, "workspace");
+    await mkdir(workspace);
+    const source = `hf://datasets/${repo}@${revision}/data/train.jsonl`;
+    const inspected = await inspectLocalDataset(repo, revision, "data/train.jsonl");
+    expect(inspected).toMatchObject({ split_source: source });
+    const prepared = await prepareDatasetSplit(workspace, { file: source, output: "split" });
+    const result = await executeDatasetSplit(workspace, prepared);
+    expect(result).toMatchObject({ source, counts: { training: 80, validation: 10, test: 10 } });
+    expect(await readFile(join(snapshot, "data/train.jsonl"), "utf8")).toBe(data);
+    await writeFile(join(snapshot, "data/train.jsonl"), data.replace("Answer 0", "Tampered"));
+    await expect(prepareDatasetSplit(workspace, { file: source, output: "changed" })).rejects.toThrow(/checksum/);
+    await expect(prepareDatasetSplit(workspace, { file: source.replace("train.jsonl", "unknown.jsonl"), output: "unknown" })).rejects.toThrow(/recorded file/);
+  });
+
+  it("splits verified git-blob symlinks and refuses a link escaping the cache", async () => {
+    const data = Array.from({ length: 10 }, (_, i) => JSON.stringify({ messages: [
+      { role: "user", content: `Request ${i}` }, { role: "assistant", content: "label" },
+    ] })).join("\n") + "\n";
+    const blobs = join(root, "hub", "datasets--org--coding", "blobs");
+    await mkdir(blobs);
+    const digest = createHash("sha1").update(`blob ${Buffer.byteLength(data)}\0`).update(data).digest("hex");
+    await writeFile(join(blobs, digest), data);
+    const file = join(snapshot, "data/train.jsonl");
+    await symlink(join(blobs, digest), file);
+    await recordAssetDownload({ kind: "dataset", repo, revision, snapshotPath: snapshot, paths: ["data/train.jsonl"] });
+    const workspace = join(root, "workspace");
+    await mkdir(workspace);
+    const source = `hf://datasets/${repo}@${revision}/data/train.jsonl`;
+    const proposal = await prepareDatasetSplit(workspace, { file: source, output: "split" });
+    expect(await executeDatasetSplit(workspace, proposal)).toMatchObject({ counts: { training: 8, validation: 1, test: 1 } });
+    await rm(file);
+    await writeFile(join(root, "outside.jsonl"), data);
+    await symlink(join(root, "outside.jsonl"), file);
+    await expect(prepareDatasetSplit(workspace, { file: source, output: "escaped" })).rejects.toThrow(/outside its cache/);
+  });
+
   it("lists actual local downloads and reads the Parquet columns and bounded sample without network", async () => {
     const parquet = new Uint8Array(parquetWriteBuffer({ columnData: [
       { name: "prompt", data: ["Write Python", "Fix Python", "Third row"], type: "STRING" },

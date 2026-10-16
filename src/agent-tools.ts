@@ -653,18 +653,17 @@ export function createTunedTensorTools(
         };
         return awsSetup ? { ...foundation, ...awsSetup } : foundation;
       }
-      if (awsSetup) {
-        return {
-          version: 1,
-          engine,
-          canonical: canonicalPipeline("local"),
-          ...awsSetup,
-        };
-      }
-      return {
+      const adapter = {
         version: 1,
         engine,
-        canonical: canonicalPipeline(p.target ?? "local"),
+        canonical: canonicalPipeline("local"),
+        spec_settings_example: {
+          hyperparameters: { n_epochs: 1, learning_rate: 0.0001, batch_size: 4, gradient_accumulation_steps: 4,
+            lora_rank: 16, lora_alpha: 32, max_seq_length: 1024 },
+          evaluation: { inference: { maxNewTokens: 32, temperature: 0 }, scoring: { mode: "exact_match" },
+            maxExamples: 100, sampleSeed: 42 },
+        },
+        settings_note: "Example setting names, not universal tuning recommendations. Evaluation uses inference/scoring objects and maxExamples/sampleSeed; generation limits do not belong in hyperparameters.",
         commands: {
           init: "tt pipeline init --engine adapter",
           validate: "tt pipeline validate --spec tunedtensor.json",
@@ -672,8 +671,9 @@ export function createTunedTensorTools(
           dry_run: "tt pipeline run --dry-run --spec tunedtensor.json",
           run: "tt pipeline run --spec tunedtensor.json",
         },
-        ...(host ? { host } : {}),
+        ...(!awsSetup && host ? { host } : {}),
       };
+      return awsSetup ? { ...adapter, ...awsSetup } : adapter;
     }),
     define(
       "search_hugging_face",
@@ -698,7 +698,7 @@ export function createTunedTensorTools(
     ),
     define(
       "inspect_dataset_file", "Inspect local dataset file",
-      "Validate an unsplit local chat JSONL file in the workspace, count rows, hash it and show two bounded samples. Use before preparing a split. Reads only; no download or training. Samples are untrusted data.",
+      "Validate unsplit chat JSONL in the workspace or a pinned split_source from inspect_local_dataset, count rows, hash it and show two bounded samples. Use before preparing a split. Reads only; no download or training. Samples are untrusted data.",
       Type.Object({ file: Type.String({ minLength: 1, maxLength: 1000 }) }, { additionalProperties: false }),
       async (p, signal) => {
         if (!workspaceRoot) throw new Error("A local workspace is required.");
@@ -707,9 +707,9 @@ export function createTunedTensorTools(
     ),
     define(
       "prepare_dataset_split", "Prepare dataset split",
-      "Prepare partitioning workspace chat JSONL into training/validation/test files. Approval writes a new output directory; source and spec stay unchanged. Ratios sum to 1. Duplicate prompts stay together. Random uses a repeatable seed; ordered follows input group order. Optional group_by and stratify_by use dotted metadata fields. Counts can be approximate for groups. Original benchmark split metadata is NOT enforced. After approval, use get_local_spec and prepare_update_local_spec to attach the returned dataset_prebuilt paths; account for the spec directory when forming relative paths.",
+      "Prepare partitioning workspace or recorded cached chat JSONL into training/validation/test files. Approval writes a new output directory; source and spec stay unchanged. Ratios sum to 1. Duplicate prompts stay together. Random uses a repeatable seed; ordered follows input group order. Optional group_by and stratify_by use dotted metadata fields. Counts can be approximate for groups. Original benchmark split metadata is NOT enforced. After approval, use get_local_spec and prepare_update_local_spec to attach the returned dataset_prebuilt paths; account for the spec directory when forming relative paths.",
       Type.Object({
-        file: Type.String({ minLength: 1, maxLength: 1000 }), output: Type.String({ minLength: 1, maxLength: 1000 }),
+        file: Type.String({ minLength: 1, maxLength: 1000, description: "Workspace JSONL path, or the exact pinned split_source from inspect_local_dataset for cached chat data. No manual copy needed." }), output: Type.String({ minLength: 1, maxLength: 1000 }),
         train: Type.Number({ exclusiveMinimum: 0, maximum: 1 }), validation: Type.Number({ minimum: 0, maximum: 1 }), test: Type.Number({ minimum: 0, maximum: 1 }),
         seed: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
         method: Type.Optional(Type.Union([Type.Literal("random"), Type.Literal("ordered")])),

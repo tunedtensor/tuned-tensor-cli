@@ -337,7 +337,7 @@ const COMMAND_GROUPS: Record<string, CliCommandGroup> = {
       },
       split: {
         usage: "tt datasets split <data.jsonl> --output <new-directory> [options]",
-        description: "Partition unsplit chat JSONL without changing the source or spec. Keep duplicate prompts together; preserve metadata.",
+        description: "Partition unsplit chat JSONL without changing the source or spec. Accepts a workspace path or pinned hf://datasets/org/repo@commit/file reference from a recorded download. Keep duplicate prompts together; preserve metadata.",
         options: [
           { name: "--output", value: "directory", description: "New output directory inside the workspace (parent must exist)" },
           { name: "--train", value: "ratio", description: "Training fraction (default 0.8)" },

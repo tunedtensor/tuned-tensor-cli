@@ -31,6 +31,25 @@ function setup(overrides: { summary?: ConversationSummary; stopReason?: string; 
 }
 
 describe("automatic Pi conversation summaries", () => {
+  it("uses the input budget before summarizing instead of reserving it twice", async () => {
+    const s = setup();
+    const input = [user("x".repeat(33000)), assistant("Done"), user("What next?")] as AgentMessage[];
+    await s.transform(input);
+    expect(s.stream).not.toHaveBeenCalled();
+  });
+
+  it.each([5, undefined])("ignores stale usage after resume and accounts for fresh usage (boundary %s)", async (usageStart) => {
+    const input = history();
+    input[3] = user("Recent question " + "r".repeat(6500));
+    input[4] = { ...assistant("Recent answer"), usage: { input: 30000, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 30005 } } as never;
+    const s = setup({ summary: { text: "Python agent. Muse verified.", messageCount: 2, ...(usageStart === undefined ? {} : { usageStart }) } });
+    await s.transform(input);
+    expect(s.stream).not.toHaveBeenCalled();
+    input.push({ ...assistant("New answer"), usage: { input: 26000, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 26005 } } as never, user("Continue"));
+    await s.transform(input);
+    expect(s.stream).toHaveBeenCalledOnce();
+  });
+
   it("reports progress while waiting and cleans up the heartbeat after failure", async () => {
     vi.useFakeTimers();
     try {
@@ -58,7 +77,7 @@ describe("automatic Pi conversation summaries", () => {
     const original = structuredClone(input);
     const result = await s.transform(input);
     expect(s.onSummarizing).toHaveBeenCalledOnce();
-    expect(s.onSummary).toHaveBeenCalledWith({ text: expect.stringContaining("Muse verified"), messageCount: 2 });
+    expect(s.onSummary).toHaveBeenCalledWith({ text: expect.stringContaining("Muse verified"), messageCount: 2, usageStart: 7 });
     expect(result[0]).toEqual(input[0]);
     expect(result[1]).toMatchObject({ role: "user", content: expect.stringContaining("Earlier conversation summary") });
     expect(result.slice(2)).toEqual(input.slice(3));
@@ -80,7 +99,7 @@ describe("automatic Pi conversation summaries", () => {
     expect(resumed.stream).not.toHaveBeenCalled();
     input.push(assistant("Another lengthy discussion. ".repeat(1500)) as never, user("What next?"));
     await resumed.transform(input);
-    expect(resumed.onSummary).toHaveBeenCalledWith({ text: expect.any(String), messageCount: 6 });
+    expect(resumed.onSummary).toHaveBeenCalledWith({ text: expect.any(String), messageCount: 6, usageStart: 7 });
     expect(JSON.stringify(resumed.stream.mock.calls[0]![1])).toContain("previous-summary");
     expect(JSON.stringify(resumed.stream.mock.calls[0]![1])).not.toContain("Earlier discussion.");
   });
