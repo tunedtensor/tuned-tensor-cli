@@ -72,7 +72,7 @@ npm install -g --ignore-scripts @tuned-tensor/cli
 tt --version
 ```
 
-Upgrade later with `tt upgrade`. Uninstall with `npm uninstall -g @tuned-tensor/cli` (add
+`TT` works the same as `tt`. Upgrade later with `tt upgrade`. Uninstall with `npm uninstall -g @tuned-tensor/cli` (add
 `--prefix ~/.local` if the curl installer used that prefix).
 
 Node.js 22.19.0 or newer is required. Training additionally needs

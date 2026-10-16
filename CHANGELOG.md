@@ -4,6 +4,7 @@
 
 ### Changed
 
+- `TT` starts the CLI like `tt`, and `TT <command>` works inside the shell.
 - The startup banner is shorter: ready workflows share one line, others show
   only their status, and the Tune row appears only when the spec's model may
   not fit. The greeting asks a question and the hints fit on one line.

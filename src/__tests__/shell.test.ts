@@ -93,6 +93,9 @@ describe("routeShellCommand", () => {
     expect(routeShellCommand("tt doctor")).toEqual({
       args: ["doctor"],
     });
+    expect(routeShellCommand("TT doctor")).toEqual({
+      args: ["doctor"],
+    });
   });
 
   it("strips the hidden local alias so the command runs at the top level", () => {
