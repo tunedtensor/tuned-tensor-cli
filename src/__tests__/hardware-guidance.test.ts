@@ -180,6 +180,9 @@ describe("native host and terminal smoke (runs on Linux, macOS and Windows CI)",
         expect(text).toContain("WHAT YOU CAN DO");
         expect(text).toContain("Decision training");
         expect(text).toContain("Specs and datasets");
+        expect(text).toContain("/system for details");
+        expect(text.replace(/\s+/g, " ")).not.toContain("no GPU required");
+        expect(stripVTControlCharacters(renderMachinePanel(live, context, { columns, detailed: true }).join("\n")).replace(/\s+/g, " ")).toContain("no GPU required");
         expect(lines.filter(line => terminalWidth(line) > Math.min(columns, 88)).map(stripVTControlCharacters)).toEqual([]);
       }
     } finally { await rm(root, { recursive: true, force: true }); }

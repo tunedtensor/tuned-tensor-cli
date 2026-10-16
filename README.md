@@ -271,7 +271,8 @@ The startup **What you can do** panel covers specs/datasets, decision training,
 LLM fine-tuning, training from scratch, and serving even before a spec exists.
 Decision training can use CPU or Apple MPS; the other training paths currently
 require CUDA locally or a configured AWS GPU. A missing NVIDIA GPU does not
-prevent spec creation or dataset preparation. `/system` includes next steps.
+prevent spec creation or dataset preparation. The banner lists ready workflows on
+one line and shows only the status of the rest; `/system` adds reasons and next steps.
 
 Guidance distinguishes **Ready**, **Needs setup**, **Limited resources**,
 **Remote GPU**, **Needs verification**, and **Unsupported runtime**. Quick

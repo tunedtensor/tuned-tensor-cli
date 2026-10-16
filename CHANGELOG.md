@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The startup banner is shorter: ready workflows share one line, others show
+  only their status, and a ready fine-tune verdict drops its source line.
+  `/system` keeps the full reasons and next steps.
+
 ### Added
 
 - Split unsplit local chat JSONL through the agent or `tt datasets split`, with
