@@ -768,7 +768,8 @@ tt datasets inspect data.jsonl
 tt datasets split data.jsonl --output split-123 --train .8 --validation .2 --test 0 --seed 123
 ```
 
-The source stays unchanged. Groups prevent repeated prompts crossing splits;
+The source stays unchanged. Groups containing repeated prompts stay in training
+so held-out prompts remain unique;
 optional `--group-by` and `--stratify-by` support family and label boundaries.
 See [splitting local data](docs/spec-workflow.md#splitting-an-unsplit-local-dataset)
 for defaults, metadata preservation, and benchmark holdout limitations.

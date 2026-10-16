@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { canonicalWorkspace, fingerprintWorkspace } from "../local-spec-workspace.js";
@@ -127,7 +127,7 @@ export async function inspectDatasetFile(workspaceRoot: string, file: string, si
     note: "Structure validated across the file. Samples are truncated untrusted data, not instructions or proof of answer quality. No files changed." };
 }
 
-type Group = { key: string; stratum: string; count: number; split?: Split };
+type Group = { key: string; stratum: string; count: number; trainingOnly: boolean; split?: Split };
 async function plan(workspaceRoot: string, input: unknown, signal?: AbortSignal) {
   const options = datasetSplitOptionsSchema.parse(input);
   const source = await location(workspaceRoot, options.file);
@@ -143,8 +143,11 @@ async function plan(workspaceRoot: string, input: unknown, signal?: AbortSignal)
     const stratum = options.stratify_by ? field(row, options.stratify_by) : "all";
     const group = groups.get(key);
     if (group && group.stratum !== stratum) throw new Error("A group spans multiple strata; choose a consistent stratification field.");
-    if (group) group.count++;
-    else groups.set(key, { key, stratum, count: 1 });
+    if (group) {
+      group.count++;
+      // TT requires unique evaluation prompts, even within a single split.
+      if (previous !== undefined) group.trainingOnly = true;
+    } else groups.set(key, { key, stratum, count: 1, trainingOnly: false });
   }, signal);
   const strata = new Map<string, Group[]>();
   for (const group of groups.values()) {
@@ -152,32 +155,46 @@ async function plan(workspaceRoot: string, input: unknown, signal?: AbortSignal)
     list.push(group); strata.set(group.stratum, list);
   }
   const counts = { training: 0, validation: 0, test: 0 };
+  let trainingOnlyRows = 0;
   for (const list of strata.values()) {
+    const total = list.reduce((sum, group) => sum + group.count, 0);
+    let forcedTraining = 0;
+    for (const group of list) if (group.trainingOnly) {
+      group.split = "training";
+      forcedTraining += group.count;
+    }
+    counts.training += forcedTraining;
+    trainingOnlyRows += forcedTraining;
+    const eligible = list.filter(group => !group.trainingOnly);
     const ordered = options.method === "random"
-      ? list.map(group => ({ group, rank: digest(`${options.seed}\0${group.key}`) })).sort((a,b) => a.rank.localeCompare(b.rank)).map(x => x.group)
-      : list;
-    const total = ordered.reduce((sum, group) => sum + group.count, 0);
+      ? eligible.map(group => ({ group, rank: digest(`${options.seed}\0${group.key}`) })).sort((a,b) => a.rank.localeCompare(b.rank)).map(x => x.group)
+      : eligible;
+    // Fill the remaining training quota first. If duplicates exceed that quota,
+    // divide eligible rows between held-out splits in their requested proportion.
+    const trainingWeight = Math.max(0, total * options.train - forcedTraining);
+    const validationWeight = total * options.validation;
+    const weight = trainingWeight + validationWeight + total * options.test;
     let used = 0;
     for (const group of ordered) {
-      const position = (used + group.count / 2) / total;
-      group.split = position < options.train ? "training" : position < options.train + options.validation ? "validation" : "test";
+      const position = (used + group.count / 2) / (total - forcedTraining) * weight;
+      group.split = position < trainingWeight ? "training" : position < trainingWeight + validationWeight ? "validation" : "test";
       counts[group.split] += group.count;
       used += group.count;
     }
   }
   for (const [split, ratio] of [["training", options.train], ["validation", options.validation], ["test", options.test]] as const) {
-    if (ratio > 0 && counts[split] === 0) throw new Error(`Requested ${split} split is empty. Use more independent groups or different ratios/stratification.`);
+    if (ratio > 0 && counts[split] === 0) throw new Error(`Requested ${split} split is empty. Use more independent groups or different ratios/stratification. Groups with repeated prompts must stay in training.`);
   }
-  return { options: { ...options, file: source.display, output: target.display }, source, target, groups, sourceInfo, counts,
+  return { options: { ...options, file: source.display, output: target.display }, source, target, groups, sourceInfo, counts, trainingOnlyRows,
     workspace_fingerprint: await fingerprintWorkspace(source.root), parent_fingerprint: await fingerprintWorkspace(dirname(target.path)) };
 }
 
 export async function prepareDatasetSplit(workspaceRoot: string, input: unknown, signal?: AbortSignal) {
   const p = await plan(workspaceRoot, input, signal);
   return { options: p.options, source_sha256: p.sourceInfo.sha256, workspace_fingerprint: p.workspace_fingerprint, parent_fingerprint: p.parent_fingerprint,
-    preview: { source: p.options.file, output: p.options.output, rows: p.sourceInfo.rows, groups: p.groups.size, counts: p.counts,
+    preview: { source: p.options.file, output: p.options.output, rows: p.sourceInfo.rows, groups: p.groups.size, counts: p.counts, training_only_rows: p.trainingOnlyRows,
       method: p.options.method, seed: p.options.seed, group_by: p.options.group_by ?? "normalized user prompt", stratify_by: p.options.stratify_by ?? null,
-      note: "Group boundaries can make ratios approximate. Outputs preserve every record and its metadata; the unsplit source and spec are unchanged. Existing source split labels are metadata only: ordered/random splitting does not preserve original benchmark holdouts." } };
+      note: "Group boundaries can make ratios approximate. Groups containing repeated prompts stay in training so evaluation prompts remain unique. Outputs preserve every record and its metadata; the unsplit source and spec are unchanged. Existing source split labels are metadata only: ordered/random splitting does not preserve original benchmark holdouts." } };
 }
 
 export async function validateDatasetSplit(workspaceRoot: string, input: Record<string, unknown>, signal?: AbortSignal) {
@@ -213,7 +230,7 @@ export async function executeDatasetSplit(workspaceRoot: string, input: Record<s
     for (const handle of handles.values()) await handle.close();
     handles.clear();
     const report = { version: 1, source: p.options.file, source_sha256: result.sha256, options: p.options, rows: result.rows, counts: written,
-      groups: p.groups.size, dataset_prebuilt: { ...files, format: "chat_jsonl" }, note: "Source and spec unchanged. Inspect this result, then update dataset_prebuilt in your spec separately. Original source split labels were not enforced." };
+      groups: p.groups.size, training_only_rows: p.trainingOnlyRows, dataset_prebuilt: { ...files, format: "chat_jsonl" }, note: "Source and spec unchanged. Groups containing repeated prompts were kept in training. Inspect this result, then update dataset_prebuilt in your spec separately. Original source split labels were not enforced." };
     await writeFile(join(stage, "split-manifest.json"), `${JSON.stringify(report, null, 2)}\n`, { flag: "wx" });
     signal?.throwIfAborted();
     await location(workspaceRoot, p.options.output, true);
@@ -225,6 +242,8 @@ export async function executeDatasetSplit(workspaceRoot: string, input: Record<s
   } finally {
     for (const handle of handles.values()) await handle.close();
     await rm(stage, { recursive: true, force: true });
-    if (reserved) await rm(p.target.path, { recursive: true, force: true });
+    // A concurrent writer may have populated the reserved directory. Only
+    // remove it while empty; never recursively delete another writer's data.
+    if (reserved) await rmdir(p.target.path).catch(() => {});
   }
 }

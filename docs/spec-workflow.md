@@ -192,7 +192,9 @@ order instead of seeded random membership. Records retain their source order
 within each output; the seed controls membership, not training batch order.
 `--group-by group_id` keeps related examples together; without it, normalized
 user prompts define groups. Repeated prompts cannot cross splits, including
-when using a custom grouping field. Ratios are approximate at group boundaries;
+when using a custom grouping field. Groups containing repeated prompts stay in
+training: TT requires unique prompts within each evaluation split. The preview
+and manifest report these rows as `training_only_rows`. Ratios are approximate at group boundaries;
 requested nonzero splits must contain examples. `--stratify-by` accepts a scalar
 field (including dotted metadata paths), and each group must belong to one
 stratum. This is not a near-duplicate detector or a time-series split engine.

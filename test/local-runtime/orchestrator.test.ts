@@ -16,6 +16,7 @@ import {
 import { defaultArtifactPrefix, resolveRunArtifacts } from "../../src/local-runtime/artifacts.js";
 import { createLocalStore } from "../../src/local-runtime/store.js";
 import { QWEN_3_5_2B_REVISION } from "../../src/local-runtime/model-registry.js";
+import { prepareDatasetSplit, executeDatasetSplit } from "../../src/local-runtime/dataset-split.js";
 
 const behaviorSpecId = "22222222-2222-4222-8222-222222222222";
 
@@ -553,6 +554,36 @@ test("uses current spec instructions for reusable system-free data without modif
     assert.equal(result.report.baseline.results[0]?.prompt, "validate");
     assert.equal(await readFile(training, "utf8"), source);
     assert.equal(await readFile(validation, "utf8"), generic("validate"));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("split reusable data with repeated prompts passes the full adapter dry-run", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-split-duplicates-"));
+  try {
+    const source = Array.from({ length: 100 }, (_, i) => JSON.stringify({
+      messages: [
+        { role: "user", content: i === 99 ? "  REQUEST   98  " : `Request ${i}` },
+        { role: "assistant", content: `Label ${i}` },
+      ],
+    })).join("\n") + "\n";
+    await writeFile(join(root, "data.jsonl"), source);
+    const prepared = await prepareDatasetSplit(root, { file: "data.jsonl", output: "split", method: "ordered" });
+    const split = await executeDatasetSplit(root, prepared);
+    const request = requestFixture({
+      runId: "68686868-6868-4686-8686-686868686868",
+      datasetPrebuilt: {
+        training: join(root, split.dataset_prebuilt.training!),
+        validation: join(root, split.dataset_prebuilt.validation!),
+        test: join(root, split.dataset_prebuilt.test!),
+        format: "chat_jsonl",
+      },
+    });
+    const result = await runLocalFineTune({ request, config: configFixture(root) });
+    assert.equal(result.report.status, "completed");
+    assert.equal(result.report.run_metadata.training_example_count, 80);
+    assert.equal(result.report.run_metadata.eval_examples_total, 10);
+    assert.equal(split.training_only_rows, 2);
+    assert.equal(await readFile(join(root, "data.jsonl"), "utf8"), source);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
