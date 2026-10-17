@@ -200,7 +200,6 @@ export async function preflightPreparedAction(
     if (!workspaceRoot) {
       throw new Error("A local workspace is required to create a local spec.");
     }
-    const directory = requiredString(input.directory, "local directory");
     const expectedWorkspaceFingerprint = requiredString(
       input.workspace_fingerprint,
       "workspace fingerprint",
@@ -212,12 +211,7 @@ export async function preflightPreparedAction(
         "The local workspace changed after this action was prepared; return to the original workspace and prepare it again.",
       );
     }
-    await prepareLocalSpecProject(
-      workspaceRoot,
-      directory,
-      input.spec,
-      expectedWorkspaceFingerprint,
-    );
+    await prepareLocalSpecProject(workspaceRoot, input.spec, expectedWorkspaceFingerprint);
   } else if (action.operation === "start_label_job" || action.operation === "download_label_job") {
     if (!options.workspaceRoot) throw new Error("A local workspace is required for labeling.");
     try {
@@ -287,14 +281,15 @@ export async function approvePreparedAction(
         if (!workspaceRoot) {
           throw new Error("A local workspace is required to create a local spec.");
         }
-        const directory = requiredString(input.directory, "local directory");
+        if (input.directory !== undefined) {
+          throw new Error("This proposal targets a subfolder from an older tt version; prepare the spec again.");
+        }
         const workspaceFingerprint = requiredString(
           input.workspace_fingerprint,
           "workspace fingerprint",
         );
         execute = async () => await createLocalSpecProject(
           workspaceRoot,
-          directory,
           input.spec,
           workspaceFingerprint,
           options.localFileOperations,

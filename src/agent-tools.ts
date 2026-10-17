@@ -13,7 +13,6 @@ import {
   validatePipeline,
 } from "./pipeline.js";
 import {
-  LocalProjectFolderSchema,
   LocalProjectSpecSchema,
   prepareLocalSpecProject,
 } from "./local-spec-workspace.js";
@@ -861,26 +860,21 @@ export function createTunedTensorTools(
     define(
       "prepare_create_local_spec",
       "Prepare local spec project",
-      "Prepare creating one new workspace folder containing a validated tunedtensor.json. This never writes; /approve is required.",
+      "Prepare creating a validated tunedtensor.json in the current workspace, where tt reads it by default. Refused when one already exists; edit it with prepare_update_local_spec instead. This never writes; /approve is required.",
       Type.Object({
-        directory: LocalProjectFolderSchema,
         spec: LocalProjectSpecSchema,
       }, { additionalProperties: false }),
       async (p) => {
-        const prepared = await prepareLocalSpecProject(workspaceRoot, p.directory, p.spec);
+        const prepared = await prepareLocalSpecProject(workspaceRoot, p.spec);
         return await api.propose(proposal(
           "create_local_spec",
           "Create local Tuned Tensor spec",
           `Create ${prepared.specPath}.`,
           {
-            directory: p.directory,
             spec: p.spec,
             workspace_fingerprint: prepared.workspaceFingerprint,
           },
-          {
-            directory: prepared.directory,
-            spec_path: prepared.specPath,
-          },
+          { spec_path: prepared.specPath },
         ));
       },
     ),

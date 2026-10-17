@@ -3,12 +3,12 @@ import {
   existsSync,
   lstatSync,
   mkdtempSync,
-  mkdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
-import { mkdir as mkdirAsync, rename, writeFile } from "node:fs/promises";
+import { rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Value } from "typebox/value";
@@ -41,12 +41,14 @@ afterEach(() => {
 });
 
 describe("local spec workspace", () => {
-  it("validates foundation execution settings before proposing a new project", async () => {
+  const specPath = () => join(workspace, "tunedtensor.json");
+
+  it("validates foundation execution settings before proposing a new spec", async () => {
     const { base_model: _model, ...behavior } = spec;
-    await expect(prepareLocalSpecProject(workspace, "invalid-foundation", {
+    await expect(prepareLocalSpecProject(workspace, {
       ...behavior, engine: "foundation", foundation: { nproc_per_node: 2 },
     })).rejects.toThrow(/nproc_per_node must be 1/);
-    expect(existsSync(join(workspace, "invalid-foundation"))).toBe(false);
+    expect(existsSync(specPath())).toBe(false);
   });
 
   it("accepts the certified Nemotron Lightning model in local specs", async () => {
@@ -77,41 +79,38 @@ describe("local spec workspace", () => {
 
     expect(Value.Check(LocalProjectSpecSchema, spec)).toBe(true);
   });
-  it.each(["../escape", "/tmp/escape", "nested/spec", "two words", ".", ".."])(
-    "rejects unsafe or ambiguous folder name %s",
-    async (directory) => {
-      await expect(prepareLocalSpecProject(workspace, directory, spec)).rejects.toThrow(
-        /one portable folder name/i,
-      );
-    },
-  );
-
   it("applies the shared behavior-spec rules to new specs", async () => {
-    await expect(prepareLocalSpecProject(workspace, "too-small-spec", {
+    await expect(prepareLocalSpecProject(workspace, {
       ...spec,
       examples: [{ input: "Classify this.", output: "positive" }],
     })).rejects.toThrow(/canonical tunedtensor\.json schema/i);
-    await expect(prepareLocalSpecProject(workspace, "duplicate-spec", {
+    await expect(prepareLocalSpecProject(workspace, {
       ...spec,
       examples: [
         { input: "Classify this.", output: "positive" },
         { input: "Classify this.", output: "negative" },
       ],
     })).rejects.toThrow(/repeats an input/i);
-    expect(existsSync(join(workspace, "duplicate-spec"))).toBe(false);
+    expect(existsSync(specPath())).toBe(false);
   });
 
-  it("refuses existing targets and symlinked workspace roots", async () => {
-    mkdirSync(join(workspace, "existing"));
-    await expect(prepareLocalSpecProject(workspace, "existing", spec)).rejects.toThrow(
-      /refusing to overwrite/i,
+  it("targets tunedtensor.json in the workspace itself", async () => {
+    await expect(prepareLocalSpecProject(workspace, spec)).resolves.toMatchObject({
+      specPath: "./tunedtensor.json",
+    });
+  });
+
+  it("refuses an existing spec and symlinked workspace roots", async () => {
+    writeFileSync(specPath(), "{}");
+    await expect(prepareLocalSpecProject(workspace, spec)).rejects.toThrow(
+      /refusing to overwrite existing \.\/tunedtensor\.json/i,
     );
 
     const parent = mkdtempSync(join(tmpdir(), "tt-local-spec-link-"));
     const link = join(parent, "workspace-link");
     symlinkSync(workspace, link, "dir");
     try {
-      await expect(prepareLocalSpecProject(link, "new-spec", spec)).rejects.toThrow(
+      await expect(prepareLocalSpecProject(link, spec)).rejects.toThrow(
         /real directory, not a symlink/i,
       );
     } finally {
@@ -120,125 +119,59 @@ describe("local spec workspace", () => {
   });
 
   it("revalidates tamperable action arguments and workspace identity", async () => {
-    const prepared = await prepareLocalSpecProject(workspace, "safe-spec", spec);
+    const prepared = await prepareLocalSpecProject(workspace, spec);
     await expect(createLocalSpecProject(
       workspace,
-      "safe-spec",
       { ...spec, base_model: "not a repo id" },
       prepared.workspaceFingerprint,
     )).rejects.toThrow(/canonical tunedtensor\.json schema/i);
-    expect(existsSync(join(workspace, "safe-spec"))).toBe(false);
-
-    await expect(createLocalSpecProject(
-      workspace,
-      "safe-spec",
-      spec,
-      "0".repeat(64),
-    )).rejects.toThrow(/workspace changed/i);
-    expect(existsSync(join(workspace, "safe-spec"))).toBe(false);
-
-    mkdirSync(join(workspace, "conflicting-spec"));
-    await expect(createLocalSpecProject(
-      workspace,
-      "conflicting-spec",
-      spec,
-      "0".repeat(64),
-    )).rejects.toThrow(/workspace changed/i);
+    await expect(createLocalSpecProject(workspace, spec, "0".repeat(64))).rejects.toThrow(/workspace changed/i);
+    expect(existsSync(specPath())).toBe(false);
   });
 
   it("creates private canonical JSON and never overwrites it", async () => {
-    const prepared = await prepareLocalSpecProject(workspace, "safe-spec", spec);
-    await createLocalSpecProject(
-      workspace,
-      "safe-spec",
-      spec,
-      prepared.workspaceFingerprint,
+    const prepared = await prepareLocalSpecProject(workspace, spec);
+    await expect(createLocalSpecProject(workspace, spec, prepared.workspaceFingerprint)).resolves.toEqual({
+      created: true,
+      path: "./tunedtensor.json",
+    });
+
+    expect(JSON.parse(readFileSync(specPath(), "utf8"))).toEqual({ id: expect.stringMatching(/^[0-9a-f-]{36}$/), ...spec });
+    expect(lstatSync(specPath()).mode & 0o777).toBe(0o600);
+    await expect(createLocalSpecProject(workspace, spec, prepared.workspaceFingerprint)).rejects.toThrow(
+      /refusing to overwrite/i,
     );
-
-    const target = join(workspace, "safe-spec");
-    const specPath = join(target, "tunedtensor.json");
-    expect(JSON.parse(readFileSync(specPath, "utf8"))).toEqual({ id: expect.stringMatching(/^[0-9a-f-]{36}$/), ...spec });
-    expect(lstatSync(target).mode & 0o777).toBe(0o700);
-    expect(lstatSync(specPath).mode & 0o777).toBe(0o600);
-    await expect(createLocalSpecProject(
-      workspace,
-      "safe-spec",
-      spec,
-      prepared.workspaceFingerprint,
-    )).rejects.toThrow(/refusing to overwrite/i);
   });
 
-  it("preserves a colliding spec created after its directory", async () => {
-    const prepared = await prepareLocalSpecProject(workspace, "collision-spec", spec);
-    const target = join(workspace, "collision-spec");
-    const specPath = join(target, "tunedtensor.json");
+  it("preserves a colliding spec created after approval", async () => {
+    const prepared = await prepareLocalSpecProject(workspace, spec);
 
-    await expect(createLocalSpecProject(
-      workspace,
-      "collision-spec",
-      spec,
-      prepared.workspaceFingerprint,
-      {
-        writeFile: async (path, data, options) => {
-          await writeFile(path, "external content", options);
-          await writeFile(path, data, options);
-        },
+    await expect(createLocalSpecProject(workspace, spec, prepared.workspaceFingerprint, {
+      writeFile: async (path, data, options) => {
+        await writeFile(path, "external content", options);
+        await writeFile(path, data, options);
       },
-    )).rejects.toMatchObject({ outcome: "unknown" });
+    })).rejects.toMatchObject({ outcome: "not_applied" });
 
-    expect(readFileSync(specPath, "utf8")).toBe("external content");
+    expect(readFileSync(specPath(), "utf8")).toBe("external content");
   });
 
-  it("does not follow a destination replaced with a symlink after mkdir", async () => {
-    const prepared = await prepareLocalSpecProject(workspace, "swapped-spec", spec);
-    const target = join(workspace, "swapped-spec");
-    const movedTarget = join(workspace, "moved-by-racer");
-    const outside = mkdtempSync(join(tmpdir(), "tt-local-spec-outside-"));
-    const outsideSpec = join(outside, "tunedtensor.json");
-
-    try {
-      await expect(createLocalSpecProject(
-        workspace,
-        "swapped-spec",
-        spec,
-        prepared.workspaceFingerprint,
-        {
-          writeFile: async (path, data, options) => {
-            await rename(target, movedTarget);
-            symlinkSync(outside, target, "dir");
-            await writeFile(path, data, options);
-          },
-        },
-      )).rejects.toMatchObject({ outcome: "unknown" });
-
-      expect(existsSync(outsideSpec)).toBe(false);
-    } finally {
-      rmSync(outside, { recursive: true, force: true });
-    }
-  });
-
-  it("does not follow a workspace root replaced with a symlink before mkdir", async () => {
-    const prepared = await prepareLocalSpecProject(workspace, "root-swapped-spec", spec);
+  it("does not follow a workspace root replaced with a symlink before writing", async () => {
+    const prepared = await prepareLocalSpecProject(workspace, spec);
     const movedWorkspace = `${workspace}-moved`;
     const outside = mkdtempSync(join(tmpdir(), "tt-local-spec-root-outside-"));
 
     try {
-      await expect(createLocalSpecProject(
-        workspace,
-        "root-swapped-spec",
-        spec,
-        prepared.workspaceFingerprint,
-        {
-          mkdir: async (path, options) => {
-            await rename(workspace, movedWorkspace);
-            symlinkSync(outside, workspace, "dir");
-            await mkdirAsync(path, options);
-          },
+      await createLocalSpecProject(workspace, spec, prepared.workspaceFingerprint, {
+        writeFile: async (path, data, options) => {
+          await rename(workspace, movedWorkspace);
+          symlinkSync(outside, workspace, "dir");
+          await writeFile(path, data, options);
         },
-      )).rejects.toMatchObject({ outcome: "unknown" });
+      });
 
-      expect(existsSync(join(outside, "root-swapped-spec"))).toBe(false);
-      expect(existsSync(join(movedWorkspace, "root-swapped-spec", "tunedtensor.json"))).toBe(true);
+      expect(existsSync(join(outside, "tunedtensor.json"))).toBe(false);
+      expect(existsSync(join(movedWorkspace, "tunedtensor.json"))).toBe(true);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
       rmSync(movedWorkspace, { recursive: true, force: true });
@@ -247,27 +180,15 @@ describe("local spec workspace", () => {
   });
 
   it("keeps an ambiguous written spec and reports an unknown outcome", async () => {
-    const prepared = await prepareLocalSpecProject(workspace, "rollback-spec", spec);
-    const target = join(workspace, "rollback-spec");
+    const prepared = await prepareLocalSpecProject(workspace, spec);
 
-    await expect(createLocalSpecProject(
-      workspace,
-      "rollback-spec",
-      spec,
-      prepared.workspaceFingerprint,
-      {
-        writeFile: async (
-          path: string,
-          data: string,
-          options: { encoding: "utf8"; flag: "wx"; mode: number },
-        ) => {
-          await writeFile(path, data, options);
-          throw new Error("injected post-write failure");
-        },
+    await expect(createLocalSpecProject(workspace, spec, prepared.workspaceFingerprint, {
+      writeFile: async (path, data, options) => {
+        await writeFile(path, data, options);
+        throw new Error("injected post-write failure");
       },
-    )).rejects.toMatchObject({ outcome: "unknown" });
+    })).rejects.toMatchObject({ outcome: "unknown" });
 
-    expect(existsSync(target)).toBe(true);
-    expect(JSON.parse(readFileSync(join(target, "tunedtensor.json"), "utf8"))).toEqual({ id: expect.any(String), ...spec });
+    expect(JSON.parse(readFileSync(specPath(), "utf8"))).toEqual({ id: expect.any(String), ...spec });
   });
 });

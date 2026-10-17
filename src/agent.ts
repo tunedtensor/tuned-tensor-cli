@@ -141,7 +141,7 @@ function approvalQuestion(action: AgentAction): string {
     case "update_local_spec":
       return "Save this spec edit?";
     case "create_local_spec":
-      return "Create this project?";
+      return "Create this spec?";
     case "run_local_pipeline":
       return "Run this dry-run preview?";
     case "start_local_pipeline":
@@ -169,7 +169,7 @@ function completionMessage(action: AgentAction | null): string {
     case "update_local_spec":
       return "Spec edit saved.";
     case "create_local_spec":
-      return "Project created.";
+      return "Spec created.";
     case "run_local_pipeline":
       return "Dry-run preview finished.";
     case "start_local_pipeline":

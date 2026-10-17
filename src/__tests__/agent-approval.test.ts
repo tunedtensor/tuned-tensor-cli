@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { writeFile as writeFileAsync } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -307,16 +307,15 @@ describe("deterministic local approvals", () => {
     };
 
     try {
-      const prepared = await prepareLocalSpecProject(workspace, "sentiment-demo", spec);
+      const prepared = await prepareLocalSpecProject(workspace, spec);
       const action: AgentAction = {
         id: ACTION_ID,
         operation: "create_local_spec",
         title: "Create local spec",
-        summary: "Create ./sentiment-demo/tunedtensor.json.",
+        summary: "Create ./tunedtensor.json.",
         risk: "Creates local files",
         status: "proposed",
         arguments: {
-          directory: "sentiment-demo",
           spec,
           workspace_fingerprint: prepared.workspaceFingerprint,
         },
@@ -327,16 +326,37 @@ describe("deterministic local approvals", () => {
         transitions.push(value.status ?? "");
       }, { workspaceRoot: workspace })).resolves.toEqual({
         created: true,
-        directory: "./sentiment-demo",
-        path: "./sentiment-demo/tunedtensor.json",
+        path: "./tunedtensor.json",
       });
 
       expect(transitions).toEqual(["executing", "completed"]);
       expect(client.get).not.toHaveBeenCalled();
       expect(client.post).not.toHaveBeenCalled();
       expect(client.put).not.toHaveBeenCalled();
-      expect(JSON.parse(readFileSync(join(workspace, "sentiment-demo", "tunedtensor.json"), "utf8")))
+      expect(JSON.parse(readFileSync(join(workspace, "tunedtensor.json"), "utf8")))
         .toEqual({ id: expect.stringMatching(/^[0-9a-f-]{36}$/), ...spec });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a create proposal that targets a subfolder from an older version", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "tt-local-spec-legacy-"));
+    const action: AgentAction = {
+      id: ACTION_ID,
+      operation: "create_local_spec",
+      title: "Create local spec",
+      summary: "Create ./legacy/tunedtensor.json.",
+      risk: "Creates local files",
+      status: "proposed",
+      arguments: { directory: "legacy", spec: {}, workspace_fingerprint: "0".repeat(64) },
+    };
+
+    try {
+      await expect(approvePreparedAction(action, api(), async () => {}, { workspaceRoot: workspace }))
+        .rejects.toThrow(/older tt version/i);
+      expect(action.status).toBe("failed");
+      expect(existsSync(join(workspace, "tunedtensor.json"))).toBe(false);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -357,23 +377,21 @@ describe("deterministic local approvals", () => {
     };
 
     try {
-      const prepared = await prepareLocalSpecProject(workspace, "sentiment-demo", spec);
+      const prepared = await prepareLocalSpecProject(workspace, spec);
       const action: AgentAction = {
         id: ACTION_ID,
         operation: "create_local_spec",
         title: "Create local spec",
-        summary: "Create ./sentiment-demo/tunedtensor.json.",
+        summary: "Create ./tunedtensor.json.",
         risk: "Creates local files",
         status: "proposed",
         arguments: {
-          directory: "sentiment-demo",
           spec,
           workspace_fingerprint: prepared.workspaceFingerprint,
         },
       };
       const transitions: string[] = [];
-      mkdirSync(join(workspace, "sentiment-demo"));
-      writeFileSync(join(workspace, "sentiment-demo", "sentinel.txt"), "do not replace");
+      writeFileSync(join(workspace, "tunedtensor.json"), "do not replace");
 
       await expect(approvePreparedAction(action, client, async (value) => {
         transitions.push(value.status ?? "");
@@ -381,7 +399,7 @@ describe("deterministic local approvals", () => {
 
       expect(action.status).toBe("failed");
       expect(transitions).toEqual(["executing", "failed"]);
-      expect(readFileSync(join(workspace, "sentiment-demo", "sentinel.txt"), "utf8"))
+      expect(readFileSync(join(workspace, "tunedtensor.json"), "utf8"))
         .toBe("do not replace");
       expect(client.post).not.toHaveBeenCalled();
       expect(client.put).not.toHaveBeenCalled();
@@ -390,7 +408,7 @@ describe("deterministic local approvals", () => {
     }
   });
 
-  it("records an unknown outcome without deleting a racing local spec", async () => {
+  it("records a failure without replacing a racing local spec", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "tt-local-spec-collision-"));
     const client = api();
     const transitions: string[] = [];
@@ -404,21 +422,20 @@ describe("deterministic local approvals", () => {
         { input: "Awful.", output: "negative" },
       ],
     };
-    const prepared = await prepareLocalSpecProject(workspace, "sentiment-demo", spec);
+    const prepared = await prepareLocalSpecProject(workspace, spec);
     const action: AgentAction = {
       id: ACTION_ID,
       operation: "create_local_spec",
       title: "Create local spec",
-      summary: "Create ./sentiment-demo/tunedtensor.json.",
+      summary: "Create ./tunedtensor.json.",
       risk: "Creates local files",
       status: "proposed",
       arguments: {
-        directory: "sentiment-demo",
         spec,
         workspace_fingerprint: prepared.workspaceFingerprint,
       },
     };
-    const specPath = join(workspace, "sentiment-demo", "tunedtensor.json");
+    const specPath = join(workspace, "tunedtensor.json");
 
     try {
       await expect(approvePreparedAction(
@@ -436,10 +453,10 @@ describe("deterministic local approvals", () => {
             },
           },
         },
-      )).rejects.toThrow(/outcome is unknown/i);
+      )).rejects.toThrow(/refusing to overwrite/i);
 
-      expect(action.status).toBe("outcome_unknown");
-      expect(transitions).toEqual(["executing", "outcome_unknown"]);
+      expect(action.status).toBe("failed");
+      expect(transitions).toEqual(["executing", "failed"]);
       expect(readFileSync(specPath, "utf8")).toBe("external content");
       expect(client.get).not.toHaveBeenCalled();
       expect(client.post).not.toHaveBeenCalled();
