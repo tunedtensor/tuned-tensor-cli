@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- npm installs and upgrades no longer race to create `tt` and `TT` on
+  case-insensitive filesystems. The package registers only `tt`; `TT` still
+  works on standard macOS filesystems, and can be a shell alias elsewhere.
+
 ## [0.26.0] - 2026-10-17
 
 ### Added
