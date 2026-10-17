@@ -39,16 +39,22 @@ it.each([false, true])("adapter training preserves local artifacts and dryRun=%s
 
 it("runs inference remotely but scores predictions locally", async () => {
   const config = localRunnerConfigSchema.parse({ artifactRoot: root, gpu, evaluation: { baselineCache: false } });
+  const messages: string[] = [];
   vi.mocked(runGpuProcess).mockImplementation(async (args) => {
+    const checkpoint = args.commandArgs[args.commandArgs.indexOf("--checkpoint") + 1];
+    expect(args.files).toContainEqual({ path: checkpoint, direction: "both" });
+    args.onLine?.('@@tt-evaluation {"phase":"generating","completed":1,"total":1,"batch_size":4,"elapsed_seconds":1,"eta_seconds":0}', "stdout");
     const output = args.files.find((file) => file.direction === "output")!;
     await writeFile(output.path, JSON.stringify({ protocol_version: INFERENCE_PROTOCOL_VERSION, results: [{ id: "0", actual: "greeting", latency_ms: 10 }] }));
     return { exitCode: 0, stderr: "" };
   });
   const report = await evaluateExamples({ kind: "baseline", modelId: "Qwen/Qwen3.5-2B", baseModelRevision: QWEN_3_5_2B_REVISION,
-    examples: [{ input: "hello", output: "greeting" }], system: "Classify", config, outputPath: join(root, "eval.json") });
+    examples: [{ input: "hello", output: "greeting" }], system: "Classify", config, outputPath: join(root, "eval.json"),
+    reporter: { onEvent(event) { messages.push(event.message); } } });
   expect(report.avg_score).toBe(1);
   expect(report.scoring_method).toBe("exact_match");
   expect(runGpuProcess).toHaveBeenCalledOnce();
+  expect(messages.some((message) => message.includes("generating: 1/1"))).toBe(true);
   expect(JSON.parse(await readFile(join(root, "eval.json"), "utf8")).pass_rate).toBe(1);
 });
 

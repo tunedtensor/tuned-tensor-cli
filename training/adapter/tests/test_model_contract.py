@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -18,12 +19,21 @@ from model_contract import (
     assert_certified_base_model_revision,
     assert_certified_model_config,
     chat_template_kwargs,
+    cuda_model_load_device_map,
     parse_lora_target_modules,
     uncertified_load_kwargs,
 )
 
 
 class ModelContractTests(unittest.TestCase):
+    def test_cuda_loading_stages_integrated_devices_on_cpu(self) -> None:
+        for integrated, expected in [(True, None), (False, {"": 2})]:
+            runtime = SimpleNamespace(cuda=SimpleNamespace(
+                current_device=lambda: 2,
+                get_device_properties=lambda index: SimpleNamespace(is_integrated=integrated),
+            ))
+            self.assertEqual(cuda_model_load_device_map(runtime), expected)
+
     def setUp(self) -> None:
         self.config = {
             "architectures": ["Qwen3_5ForConditionalGeneration"],

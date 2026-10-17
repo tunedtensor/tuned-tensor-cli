@@ -235,6 +235,14 @@ Foundation pretraining can resume from returned checkpoints using its existing
 so checkpoint identities still match. Adapter training keeps its existing
 restart behavior.
 
+Adapter evaluation runs in configurable batches (`evaluation.inference.batchSize`,
+default 4), reducing the batch after a CUDA out-of-memory error. Completed
+prediction checkpoints return with outputs on success, cancellation or timeout
+while SSH remains reachable. Matching baseline inputs reuse the returned
+checkpoint on the next run when `evaluation.baselineCache` is enabled. As with
+foundation checkpoints, nothing is continuously copied to the laptop during
+generation. See [evaluation and smoke runs](architecture.md#evaluation).
+
 You provide capacity and pay AWS directly. TT does not create, start, stop,
 terminate or resize instances, request quotas, choose fallback instances or
 fall back to another account. An AWS profile alone cannot create capacity.
