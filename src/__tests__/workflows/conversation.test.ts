@@ -552,10 +552,15 @@ describe("background training runs (scripted provider, real agent and tools)", (
     expect(runs.launch).not.toHaveBeenCalled();
   });
 
-  it("starts after approval, keeps the audit record, reports status, and tells the model when it finishes", async () => {
-    writeFileSync(join(root, "tunedtensor.json"), JSON.stringify(spec));
+  it.each([undefined, 2])("preserves inference batch size %s through approval, launch, status and completion", async (batchSize) => {
+    const reviewedSpec = { ...spec, ...(batchSize === undefined ? {} : { evaluation: { inference: { batchSize } } }) };
+    writeFileSync(join(root, "tunedtensor.json"), JSON.stringify(reviewedSpec));
     const runs = executor();
-    const runCommand = vi.fn<LocalPipelineCommandRunner>(async () => ({ exitCode: 0 }));
+    const runCommand = vi.fn<LocalPipelineCommandRunner>(async (args) => {
+      const preview = JSON.parse(readFileSync(args[args.indexOf("--spec") + 1]!, "utf8"));
+      expect(preview.evaluation.inference.batchSize).toBe(batchSize ?? 4);
+      return { exitCode: 0 };
+    });
     let backgroundId = "";
     const c = conversation((_context, call) => [
       { tool: "prepare_pipeline_run", args: {} }, "Dry-run ready.",
@@ -588,10 +593,12 @@ describe("background training runs (scripted provider, real agent and tools)", (
       status: "starting",
       reason,
       requested_by: { via: "agent", thread_id: thread.thread.id, action_id: startAction.id, dry_run_action_id: dryRunAction.id },
-      choices: { engine: "adapter", spec_path: "./tunedtensor.json", spec_sha256: createHash("sha256").update(JSON.stringify(spec)).digest("hex"), target: "local" },
+      choices: { engine: "adapter", spec_path: "./tunedtensor.json", spec_sha256: createHash("sha256").update(JSON.stringify(reviewedSpec)).digest("hex"), target: "local" },
       resources_at_launch: { cpu_cores: 8 },
     });
-    expect(JSON.parse(readFileSync(runs.store.paths(record!.id).spec, "utf8"))).toMatchObject({ name: spec.name, pipeline: { version: 1 } });
+    expect(JSON.parse(readFileSync(runs.store.paths(record!.id).spec, "utf8"))).toMatchObject({
+      name: spec.name, pipeline: { version: 1 }, evaluation: { inference: { batchSize: batchSize ?? 4 } },
+    });
 
     // The conversation continues while the run is active, and a second run is refused.
     await runs.store.update(record!.id, (run) => { run.status = "running"; run.started_at = new Date().toISOString(); });
@@ -610,7 +617,7 @@ describe("background training runs (scripted provider, real agent and tools)", (
     expect((await runs.store.get(record!.id)).reported_at).toBeDefined();
   });
 
-  it("refuses to start when the spec changed after the proposal", async () => {
+  it("refuses to start when inference batching changed after the proposal", async () => {
     writeFileSync(join(root, "tunedtensor.json"), JSON.stringify(spec));
     const runs = executor();
     const c = conversation([
@@ -620,7 +627,7 @@ describe("background training runs (scripted provider, real agent and tools)", (
     await c.session.handleLine("Preview training.");
     await c.session.handleLine("/approve");
     await c.session.handleLine("Start it.");
-    writeFileSync(join(root, "tunedtensor.json"), JSON.stringify({ ...spec, guidelines: ["Changed after review."] }));
+    writeFileSync(join(root, "tunedtensor.json"), JSON.stringify({ ...spec, evaluation: { inference: { batchSize: 2 } } }));
     await c.session.handleLine("/approve");
     expect(c.errors.join("")).toMatch(/spec changed after this pipeline action was prepared/);
     expect(runs.launch).not.toHaveBeenCalled();
