@@ -18,6 +18,14 @@ import {
   validatePreparedLocalPipelineAction,
 } from "./local-pipeline-action.js";
 import { executeLocalPrefetch, LocalPrefetchError, revalidateLocalPrefetch } from "./local-prefetch-action.js";
+import {
+  executeBackgroundRunCancel,
+  executeBackgroundRunStart,
+  isBackgroundRunFailure,
+  revalidateBackgroundRunStart,
+  type BackgroundRunExecutor,
+} from "./local-background-run-action.js";
+import type { BackgroundRunRequester } from "./local-runtime/background-runs.js";
 
 import {
   revalidateLabelDownload,
@@ -53,6 +61,9 @@ export interface AgentApprovalOptions {
   signal?: AbortSignal;
   durableClaimed?: boolean;
   labeling?: AgentLabelingExecutor;
+  backgroundRuns?: BackgroundRunExecutor;
+  /** Recorded as the approver of background runs and cancellations. */
+  requestedBy?: BackgroundRunRequester;
 }
 
 export class PreparedActionWorkspaceMismatchError extends Error {
@@ -230,6 +241,14 @@ export async function preflightPreparedAction(
       if (error instanceof SpecWorkspaceMismatchError) throw new PreparedActionWorkspaceMismatchError(error.message, error);
       throw error;
     }
+  } else if (action.operation === "start_local_pipeline") {
+    if (!options.workspaceRoot || !options.backgroundRuns) throw new Error("Background runs need a local workspace and the tt command runner.");
+    try {
+      await revalidateBackgroundRunStart(options.workspaceRoot, args(action));
+    } catch (error) {
+      if (error instanceof LocalPipelineWorkspaceMismatchError) throw new PreparedActionWorkspaceMismatchError(error.message, error);
+      throw error;
+    }
   } else if (action.operation === "run_local_pipeline") {
     try {
       await prepareLocalPipelineApproval(action, options);
@@ -289,6 +308,19 @@ export async function approvePreparedAction(
           runCommand: prepared.runCommand,
           signal: prepared.signal,
         });
+        break;
+      }
+      case "start_local_pipeline": {
+        const { workspaceRoot, backgroundRuns, requestedBy } = options;
+        if (!workspaceRoot || !backgroundRuns || !requestedBy) throw new Error("Background runs need a local workspace and the tt command runner.");
+        await revalidateBackgroundRunStart(workspaceRoot, input);
+        execute = async () => await executeBackgroundRunStart({ workspaceRoot, input, executor: backgroundRuns, requestedBy });
+        break;
+      }
+      case "cancel_local_pipeline": {
+        const { backgroundRuns, requestedBy } = options;
+        if (!backgroundRuns || !requestedBy) throw new Error("Cancelling a background run needs the local run store.");
+        execute = async () => await executeBackgroundRunCancel({ input, store: backgroundRuns.store, requestedBy });
         break;
       }
       case "split_local_dataset": {
@@ -379,6 +411,9 @@ export async function approvePreparedAction(
     if (
       (["create_local_spec", "update_local_spec"].includes(action.operation ?? "") && isKnownLocalSpecFailure(error))
       || (action.operation === "run_local_pipeline" && isKnownLocalPipelineFailure(error))
+      // Refused before a supervisor started (validation, parallel limit, launch failure).
+      || (["start_local_pipeline", "cancel_local_pipeline"].includes(action.operation ?? "")
+        && (isBackgroundRunFailure(error) || isKnownLocalPipelineFailure(error)))
       // Downloads resume into a content-addressed cache; retrying is safe.
       || error instanceof LocalPrefetchError
       // A download only writes local files after every row is fetched; retrying is safe.
@@ -409,6 +444,8 @@ export async function approvePreparedAction(
       ? "local workspace"
       : action.operation === "run_local_pipeline"
         ? "local run store"
+        : action.operation === "start_local_pipeline" || action.operation === "cancel_local_pipeline"
+          ? "background runs (tt pipeline list)"
         : action.operation === "prefetch_local"
           ? "local Hugging Face cache (tt datasets verify / tt models verify-base)"
         : action.operation === "start_label_job"

@@ -310,6 +310,8 @@ describe("pipeline commands", () => {
       const output = JSON.parse(log.mock.calls.at(-1)?.[0] as string);
       expect(output.status).toBe("succeeded");
       expect(output.report_path).toBe(join(dir, "report.json"));
+      // The detached supervisor parses the complete stream, not its last line.
+      expect(JSON.parse(log.mock.calls.map(call => call[0]).join("\n"))).toEqual(output);
       execute.mockClear();
       writeFileSync(join(dir, "local-runner.json"), JSON.stringify({
         dryRun: true,

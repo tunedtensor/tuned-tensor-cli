@@ -144,6 +144,10 @@ function approvalQuestion(action: AgentAction): string {
       return "Create this project?";
     case "run_local_pipeline":
       return "Run this dry-run preview?";
+    case "start_local_pipeline":
+      return "Start this training run in the background?";
+    case "cancel_local_pipeline":
+      return "Stop this background run?";
     case "split_local_dataset":
       return "Create these dataset splits?";
     case "prefetch_local":
@@ -168,6 +172,10 @@ function completionMessage(action: AgentAction | null): string {
       return "Project created.";
     case "run_local_pipeline":
       return "Dry-run preview finished.";
+    case "start_local_pipeline":
+      return "Training started in the background. Keep chatting; ask me for its status any time.";
+    case "cancel_local_pipeline":
+      return "Cancellation requested. The run stops once its process exits.";
     case "split_local_dataset":
       return "Dataset split saved. Ask me to attach the new files to your spec.";
     case "prefetch_local":
@@ -183,6 +191,9 @@ function completionMessage(action: AgentAction | null): string {
 
 function labelingCompletionDetail(operation: string | undefined, output: unknown): string | undefined {
   if (!isRecord(output)) return undefined;
+  if (operation === "start_local_pipeline" && typeof output.background_run_id === "string") {
+    return `Run ${output.background_run_id.slice(0, 8)} · tt pipeline status ${output.background_run_id.slice(0, 8)}`;
+  }
   if (operation === "start_label_job" && typeof output.job_id === "string") {
     const cents = typeof output.estimated_cost_cents === "number"
       ? ` · est. $${(output.estimated_cost_cents / 100).toFixed(2)}`

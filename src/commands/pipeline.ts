@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { Command } from "commander";
 import {
   canonicalFoundationPipeline,
@@ -11,7 +11,21 @@ import {
   pipelineForRunInput,
   type Pipeline,
 } from "../pipeline.js";
-import { isJsonMode, printJson, printSuccess, printWarning } from "../output.js";
+import { formatDate, formatStatus, isJsonMode, printDetail, printJson, printSuccess, printTable, printWarning, shortId, truncate } from "../output.js";
+import {
+  createBackgroundRunExecutor,
+  executeBackgroundRunCancel,
+  executeBackgroundRunStart,
+  prepareBackgroundRunStart,
+} from "../local-background-run-action.js";
+import {
+  backgroundRunsRoot,
+  createBackgroundRunStore,
+  currentRequester,
+  describeBackgroundRun,
+  isActiveBackgroundRun,
+  superviseBackgroundRun,
+} from "../local-runtime/background-runs.js";
 import {
   loadLocalRunInput,
   parseLocalRunInput,
@@ -32,6 +46,13 @@ import { createRunConsoleReporter } from "../local-runtime/console-reporter.js";
 
 const DEFAULT_PIPELINE_FILE = "tunedtensor.pipeline.json";
 const DEFAULT_SPEC_FILE = "tunedtensor.json";
+
+function printPipelineWarning(message: string): void {
+  // Background supervisors parse stdout as one JSON result. Keep advisory
+  // output in the log, including warnings from legacy config and host sizing.
+  if (isJsonMode()) console.error(`Warning: ${message}`);
+  else printWarning(message);
+}
 
 export function localConfigPath(explicitPath: string | undefined, specPath: string): string | undefined {
   if (explicitPath) return resolve(explicitPath);
@@ -133,7 +154,7 @@ function printDecisionSummary(result: Awaited<ReturnType<typeof runDecisionPipel
 }
 
 export function registerPipelineCommands(parent: Command): void {
-  const pipeline = parent.command("pipeline").description("Create, validate, inspect, and safely dry-run ordered pipeline recipes");
+  const pipeline = parent.command("pipeline").description("Create, validate, dry-run, run, and start background runs of ordered pipeline recipes");
 
   pipeline.command("init")
     .description("Write a canonical v1 pipeline recipe")
@@ -239,7 +260,7 @@ export function registerPipelineCommands(parent: Command): void {
         throw new Error("--output and --resume are mutually exclusive.");
       }
       const { document, input, spec } = resolvePipelineDocument(options, command.getOptionValueSource("spec") !== "default");
-      const { config } = await resolveProjectConfig(options.spec, options.config, printWarning, input);
+      const { config } = await resolveProjectConfig(options.spec, options.config, printPipelineWarning, input);
       const plan = createExecutionPlan(document, { only: parseList(options.only), skip: parseList(options.skip) });
       const hostWarnings = config.gpu ? [] : await hostWarningsForPipeline(document, input);
       if (options.dryRun || config.dryRun) {
@@ -257,7 +278,7 @@ export function registerPipelineCommands(parent: Command): void {
         return outputPlan({ ...plan, ...(spec ? { spec } : {}) }, hostWarnings);
       }
       if (spec && !isJsonMode()) console.log(`Behavior spec: ${spec.path} (sha256 ${spec.sha256})`);
-      for (const warning of hostWarnings) printWarning(warning);
+      for (const warning of hostWarnings) printPipelineWarning(warning);
       const remote = plan.steps.find((step) => step.target !== "local");
       if (remote) {
         throw new Error(`Step "${remote.id}" targets cloud execution. Pipeline execution requires local targets; set targets to local and configure runtime.gpu in tunedtensor.json to use your AWS instance.`);
@@ -316,6 +337,126 @@ export function registerPipelineCommands(parent: Command): void {
       }
       if (isJsonMode()) return printJson({ ...result, spec });
       printSuccess(`Pipeline completed with status ${result.status}.`);
+    });
+
+  registerBackgroundRunCommands(pipeline);
+}
+
+function registerBackgroundRunCommands(pipeline: Command): void {
+  const store = () => createBackgroundRunStore(backgroundRunsRoot());
+
+  pipeline.command("start")
+    .description("Start a real run in the background with an audit record; check it with tt pipeline status")
+    .requiredOption("--reason <text>", "Why this run is being done (kept in its audit record)")
+    .option("--spec <path>", "Local behavior spec", DEFAULT_SPEC_FILE)
+    .action(async (options: { reason: string; spec: string }) => {
+      const specPath = resolve(options.spec);
+      const executor = createBackgroundRunExecutor({ env: process.env, entrypoint: process.argv[1] });
+      const workspaceRoot = dirname(specPath);
+      const prepared = await prepareBackgroundRunStart({
+        workspaceRoot,
+        specPath: basename(specPath),
+        reason: options.reason,
+        executor,
+      });
+      for (const warning of (prepared.preview.warnings as string[] | undefined) ?? []) printPipelineWarning(warning);
+      const started = await executeBackgroundRunStart({
+        workspaceRoot,
+        input: prepared.arguments,
+        executor,
+        requestedBy: currentRequester("cli"),
+      });
+      if (isJsonMode()) return printJson(started);
+      const id = String(started.background_run_id);
+      printSuccess(`Started background run ${shortId(id)} (${prepared.engine}, ${String(prepared.preview.target)}).`);
+      console.log(`Status: tt pipeline status ${shortId(id)}   Logs: tt pipeline logs ${shortId(id)}   Cancel: tt pipeline cancel ${shortId(id)} --reason "..."`);
+    });
+
+  pipeline.command("list")
+    .description("List background runs on this machine")
+    .option("--active", "Only runs that are starting, running or stopping")
+    .action(async (options: { active?: boolean }) => {
+      const runs = (await store().list()).filter((run) => !options.active || isActiveBackgroundRun(run));
+      if (isJsonMode()) return printJson(runs.map(describeBackgroundRun));
+      if (runs.length === 0) return printWarning("No background runs found.");
+      printTable(
+        ["ID", "Status", "Engine", "Target", "Requested by", "Reason", "Started", "Finished"],
+        runs.map((run) => [
+          shortId(run.id),
+          formatStatus(run.status),
+          run.choices.engine,
+          run.choices.target,
+          `${run.requested_by.user} (${run.requested_by.via})`,
+          truncate(run.reason, 40),
+          formatDate(run.started_at),
+          formatDate(run.finished_at),
+        ]),
+      );
+    });
+
+  pipeline.command("status")
+    .description("Show a background run's record, audit-chain check and recent log lines")
+    .argument("<id>", "Background run ID or prefix")
+    .option("--lines <n>", "Log lines to show", "20")
+    .action(async (id: string, options: { lines: string }) => {
+      const runs = store();
+      const run = await runs.get(id);
+      const [{ events, chain }, log] = await Promise.all([runs.events(run.id), runs.logTail(run.id, Number(options.lines) || 20)]);
+      if (isJsonMode()) return printJson({ ...run, audit: { chain, events }, log_tail: log });
+      printDetail([
+        ["ID", run.id],
+        ["Status", formatStatus(run.status)],
+        ["Reason", run.reason],
+        ["Requested by", `${run.requested_by.user}@${run.requested_by.host} via ${run.requested_by.via}`],
+        ["Approved", formatDate(run.approved_at)],
+        ["Spec", `${run.choices.spec_path} (sha256 ${run.choices.spec_sha256.slice(0, 12)})`],
+        ["Engine", run.choices.engine],
+        ["Steps", run.choices.steps.map((step) => step.id).join(" → ")],
+        ["Target", run.choices.target],
+        ["Started", formatDate(run.started_at)],
+        ["Finished", run.finished_at ? formatDate(run.finished_at) : undefined],
+        ["Cancel reason", run.cancel?.reason],
+        ["Model", run.outcome?.model_id],
+        ["Report", run.outcome?.report_path],
+        ["Error", run.outcome?.error],
+        ["Audit chain", `${chain.status} (${chain.events} events)`],
+        ["Record", runs.paths(run.id).record],
+      ]);
+      if (run.outcome?.metrics) console.log(`\nMetrics:\n${JSON.stringify(run.outcome.metrics, null, 2)}`);
+      if (log) console.log(`\nRecent log:\n${log}`);
+    });
+
+  pipeline.command("logs")
+    .description("Print a background run's log")
+    .argument("<id>", "Background run ID or prefix")
+    .option("--lines <n>", "Lines to show", "200")
+    .action(async (id: string, options: { lines: string }) => {
+      const log = await store().logTail(id, Number(options.lines) || 200);
+      if (isJsonMode()) return printJson({ log });
+      console.log(log);
+    });
+
+  pipeline.command("cancel")
+    .description("Stop an active background run")
+    .argument("<id>", "Background run ID or prefix")
+    .requiredOption("--reason <text>", "Why the run is being stopped (kept in its audit record)")
+    .action(async (id: string, options: { reason: string }) => {
+      const runs = store();
+      const run = await runs.get(id);
+      const result = await executeBackgroundRunCancel({
+        input: { background_run_id: run.id, reason: options.reason },
+        store: runs,
+        requestedBy: currentRequester("cli"),
+      });
+      if (isJsonMode()) return printJson(result);
+      printSuccess(`Cancellation requested for ${shortId(run.id)}. It records cancelled once its process exits.`);
+    });
+
+  pipeline.command("supervise", { hidden: true })
+    .description("Internal: own one background run's pipeline process")
+    .argument("<id>", "Background run ID")
+    .action(async (id: string) => {
+      await superviseBackgroundRun({ store: store(), id, entrypoint: process.argv[1]! });
     });
 }
 

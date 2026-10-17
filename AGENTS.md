@@ -60,6 +60,9 @@ After `npm run build`, run `npm link` to make the `tt` command available globall
 - Start new users at `docs/local-runtime/aws-gpu.md`; include spec creation,
   separate AWS/SSH access, `doctor`, dry-run, real run, results and shutdown.
 - Use `tt pipeline run` with `runtime.gpu` in tunedtensor.json for both engines.
+  Long runs can use `tt pipeline start --reason` or an approved agent background
+  run; see `docs/local-runtime/background-runs.md`. Background runs require a
+  completed dry-run of the same spec bytes and keep an audit record per run.
   `tt cloud` operates TT account records; never recommend retired hosted
   start/estimate commands or require TT credits for user-owned EC2 training.
 - `tt hardware` and `examine_hardware` inspect the laptop only. A missing local

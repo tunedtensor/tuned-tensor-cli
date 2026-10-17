@@ -13,6 +13,9 @@ import { createLocalAgentClient } from "../../local-agent-client.js";
 import type { LocalPipelineCommandRunner } from "../../local-pipeline-action.js";
 import { parquetWriteBuffer } from "hyparquet-writer";
 import { recordAssetDownload } from "../../local-runtime/assets.js";
+import type { BackgroundRunExecutor } from "../../local-background-run-action.js";
+import { createBackgroundRunStore } from "../../local-runtime/background-runs.js";
+import { hostname } from "node:os";
 
 const execFileAsync = promisify(execFile);
 type Context = Parameters<StreamFn>[1];
@@ -43,7 +46,11 @@ afterEach(() => {
 
 // Only the provider stream is scripted. Pi still validates arguments, executes
 // the real tools, feeds their results back to the model, and enforces its budget.
-function conversation(replies: Reply[] | ((context: Context, call: number) => Reply), runCommand?: LocalPipelineCommandRunner) {
+function conversation(
+  replies: Reply[] | ((context: Context, call: number) => Reply),
+  runCommand?: LocalPipelineCommandRunner,
+  backgroundRuns?: BackgroundRunExecutor,
+) {
   const contexts: Context[] = [];
   const streamSimple = vi.fn((_model: unknown, context: Context) => {
     const call = contexts.length;
@@ -98,6 +105,7 @@ function conversation(replies: Reply[] | ((context: Context, call: number) => Re
     toolApi: { get: forbidden, postRead: forbidden, propose: async (action) => action },
     mutationApi: { get: forbidden, post: forbidden, put: forbidden },
     runPipelineCommand: runCommand,
+    backgroundRuns,
   });
   const client = newClient();
   const output: string[] = [];
@@ -513,5 +521,145 @@ describe("spec-centered conversation", () => {
     expect(await readSpecHistory(root)).toEqual([]);
     const state = await c.store.load(c.session.snapshot().thread!.id);
     expect(state.actions[0].status).toBe(reason === "reject" ? "rejected" : "failed");
+  });
+});
+
+describe("background training runs (scripted provider, real agent and tools)", () => {
+  function executor() {
+    const store = createBackgroundRunStore(join(root, "background-runs"));
+    const launch = vi.fn(async (run: Parameters<BackgroundRunExecutor["launch"]>[0]) =>
+      // Stand in for the detached supervisor: this live process "owns" the run.
+      await store.update(run.id, (current) => { current.process = { host: hostname(), supervisor_pid: process.pid }; }));
+    const usage = {
+      sampled_at: "2026-10-16T10:00:00.000Z",
+      cpu: { model: "Fixture CPU", cores: 8, utilization_percent: 12, load_average: [0.5, 0.4, 0.3] as [number, number, number] },
+      memory: { used_bytes: 8e9, total_bytes: 32e9 },
+      gpus: [{ index: 0, name: "Fixture GPU", vendor: "nvidia" as const, unified_memory: false, utilization_percent: 3, memory_used_bytes: 1e9, memory_total_bytes: 24e9 }],
+    };
+    return { store, launch, value: { store, launch, maxParallel: () => 1, sampleUsage: async () => usage } satisfies BackgroundRunExecutor };
+  }
+  const reason = "Measure whether the two new examples fix negation.";
+
+  it("refuses a real run until a dry-run of the same spec bytes completed", async () => {
+    writeFileSync(join(root, "tunedtensor.json"), JSON.stringify(spec));
+    const runs = executor();
+    const c = conversation([
+      { tool: "prepare_background_run", args: { reason } }, "I need a dry-run first.",
+    ], undefined, runs.value);
+    await c.session.handleLine("Train it for real.");
+    expect(JSON.stringify(c.contexts[1]!.messages.at(-1))).toMatch(/completed dry-run of this exact spec/);
+    expect(c.session.snapshot().pendingActions).toEqual([]);
+    expect(runs.launch).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, 2])("preserves inference batch size %s through approval, launch, status and completion", async (batchSize) => {
+    const reviewedSpec = { ...spec, ...(batchSize === undefined ? {} : { evaluation: { inference: { batchSize } } }) };
+    writeFileSync(join(root, "tunedtensor.json"), JSON.stringify(reviewedSpec));
+    const runs = executor();
+    const runCommand = vi.fn<LocalPipelineCommandRunner>(async (args) => {
+      const preview = JSON.parse(readFileSync(args[args.indexOf("--spec") + 1]!, "utf8"));
+      expect(preview.evaluation.inference.batchSize).toBe(batchSize ?? 4);
+      return { exitCode: 0 };
+    });
+    let backgroundId = "";
+    const c = conversation((_context, call) => [
+      { tool: "prepare_pipeline_run", args: {} }, "Dry-run ready.",
+      { tool: "prepare_background_run", args: { reason } }, "Ready to start.",
+      { tool: "get_background_run", args: { id: backgroundId.slice(0, 8) } }, "It is running.",
+      "It finished.",
+    ][call] as Reply, runCommand, runs.value);
+
+    await c.session.handleLine("Preview training.");
+    await c.session.handleLine("/approve");
+    expect(runCommand).toHaveBeenCalledTimes(1);
+
+    await c.session.handleLine("Looks good, start the real training.");
+    const pending = c.session.snapshot().pendingActions;
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ operation: "start_local_pipeline", risk: "high", arguments: { reason } });
+    expect(pending[0]!.preview).toMatchObject({ target: "local", max_parallel_runs: 1, resources: { gpus: [{ name: "Fixture GPU" }] } });
+    expect(runs.launch).not.toHaveBeenCalled();
+
+    await c.session.handleLine("/approve");
+    expect(runs.launch).toHaveBeenCalledTimes(1);
+    expect(c.errors.join("")).toBe("");
+    const [record] = await runs.store.list();
+    backgroundId = record!.id;
+    const thread = await c.store.load(c.session.snapshot().thread!.id);
+    const dryRunAction = thread.actions.find((action) => action.operation === "run_local_pipeline")!;
+    const startAction = thread.actions.find((action) => action.operation === "start_local_pipeline")!;
+    expect(startAction.status).toBe("completed");
+    expect(record).toMatchObject({
+      status: "starting",
+      reason,
+      requested_by: { via: "agent", thread_id: thread.thread.id, action_id: startAction.id, dry_run_action_id: dryRunAction.id },
+      choices: { engine: "adapter", spec_path: "./tunedtensor.json", spec_sha256: createHash("sha256").update(JSON.stringify(reviewedSpec)).digest("hex"), target: "local" },
+      resources_at_launch: { cpu_cores: 8 },
+    });
+    expect(JSON.parse(readFileSync(runs.store.paths(record!.id).spec, "utf8"))).toMatchObject({
+      name: spec.name, pipeline: { version: 1 }, evaluation: { inference: { batchSize: batchSize ?? 4 } },
+    });
+
+    // The conversation continues while the run is active, and a second run is refused.
+    await runs.store.update(record!.id, (run) => { run.status = "running"; run.started_at = new Date().toISOString(); });
+    writeFileSync(runs.store.paths(record!.id).log, "baseline eval 4/10\n");
+    await c.session.handleLine("How is it going?");
+    expect(JSON.stringify(c.contexts[5]!.messages.at(-1))).toMatch(/baseline eval 4\/10/);
+    await expect(runs.value.store.create({ ...record!, sealed_spec: {} }, { maxParallel: 1 })).rejects.toThrow(/already active/);
+
+    await runs.store.update(record!.id, (run) => {
+      run.status = "succeeded";
+      run.finished_at = new Date().toISOString();
+      run.outcome = { exit_code: 0, metrics: { comparison: { pass_rate_delta: 0.25 } } };
+    });
+    await c.session.handleLine("Anything new?");
+    expect(JSON.stringify(c.contexts[6]!.messages.at(-1))).toMatch(/Background run outcomes.*succeeded.*pass_rate_delta/);
+    expect((await runs.store.get(record!.id)).reported_at).toBeDefined();
+  });
+
+  it("refuses to start when inference batching changed after the proposal", async () => {
+    writeFileSync(join(root, "tunedtensor.json"), JSON.stringify(spec));
+    const runs = executor();
+    const c = conversation([
+      { tool: "prepare_pipeline_run", args: {} }, "Dry-run ready.",
+      { tool: "prepare_background_run", args: { reason } }, "Ready to start.",
+    ], vi.fn<LocalPipelineCommandRunner>(async () => ({ exitCode: 0 })), runs.value);
+    await c.session.handleLine("Preview training.");
+    await c.session.handleLine("/approve");
+    await c.session.handleLine("Start it.");
+    writeFileSync(join(root, "tunedtensor.json"), JSON.stringify({ ...spec, evaluation: { inference: { batchSize: 2 } } }));
+    await c.session.handleLine("/approve");
+    expect(c.errors.join("")).toMatch(/spec changed after this pipeline action was prepared/);
+    expect(runs.launch).not.toHaveBeenCalled();
+    expect(await runs.store.list()).toEqual([]);
+  });
+
+  it("cancels an active run only after approval and records who and why", async () => {
+    writeFileSync(join(root, "tunedtensor.json"), JSON.stringify(spec));
+    const runs = executor();
+    const created = await runs.store.create({
+      reason,
+      requested_by: { user: "someone", host: hostname(), via: "cli" },
+      choices: { engine: "adapter", spec_path: "./tunedtensor.json", spec_sha256: "b".repeat(64), config_path: null, config_sha256: null, steps: [], target: "local", workspace_root: root },
+      sealed_spec: {},
+    });
+    // This live process stands in for the supervisor, so the run is not reconciled to lost.
+    await runs.store.update(created.id, (run) => { run.status = "running"; run.process = { host: hostname(), supervisor_pid: process.pid }; });
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+    try {
+      const c = conversation([
+        { tool: "prepare_cancel_background_run", args: { id: created.id.slice(0, 8), reason: "Started on the wrong spec" } }, "Ready to stop it.",
+      ], undefined, runs.value);
+      await c.session.handleLine("Stop that run.");
+      expect((await runs.store.get(created.id)).status).toBe("running");
+      await c.session.handleLine("/approve");
+      expect(await runs.store.get(created.id)).toMatchObject({
+        status: "cancel_requested",
+        cancel: { reason: "Started on the wrong spec", requested_by: { via: "agent" } },
+      });
+      expect(kill).toHaveBeenCalledWith(process.pid, "SIGTERM");
+    } finally {
+      kill.mockRestore();
+    }
   });
 });
