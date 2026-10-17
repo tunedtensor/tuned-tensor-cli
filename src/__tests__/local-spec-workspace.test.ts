@@ -3,6 +3,7 @@ import {
   existsSync,
   lstatSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -156,19 +157,20 @@ describe("local spec workspace", () => {
     expect(readFileSync(specPath(), "utf8")).toBe("external content");
   });
 
-  it("does not follow a workspace root replaced with a symlink before writing", async () => {
+  it.each(["symlink", "directory", "missing"])("reports an unknown outcome when the workspace becomes %s during writing", async (replacement) => {
     const prepared = await prepareLocalSpecProject(workspace, spec);
     const movedWorkspace = `${workspace}-moved`;
     const outside = mkdtempSync(join(tmpdir(), "tt-local-spec-root-outside-"));
 
     try {
-      await createLocalSpecProject(workspace, spec, prepared.workspaceFingerprint, {
+      await expect(createLocalSpecProject(workspace, spec, prepared.workspaceFingerprint, {
         writeFile: async (path, data, options) => {
           await rename(workspace, movedWorkspace);
-          symlinkSync(outside, workspace, "dir");
+          if (replacement === "symlink") symlinkSync(outside, workspace, "dir");
+          if (replacement === "directory") mkdirSync(workspace);
           await writeFile(path, data, options);
         },
-      });
+      })).rejects.toMatchObject({ outcome: "unknown" });
 
       expect(existsSync(join(outside, "tunedtensor.json"))).toBe(false);
       expect(existsSync(join(movedWorkspace, "tunedtensor.json"))).toBe(true);

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## Cursor Cloud specific instructions
+## Development instructions
 
 This is a single-package Node.js/TypeScript CLI (`tt`) for Tuned Tensor's
 local CUDA runner and laptop-local agent. Local workflow commands require no

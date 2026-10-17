@@ -196,6 +196,9 @@ export async function preflightPreparedAction(
     }
   } else if (action.operation === "create_local_spec") {
     const input = args(action);
+    if (input.directory !== undefined) {
+      throw new Error("This proposal targets a subfolder from an older tt version; prepare the spec again.");
+    }
     const workspaceRoot = options.workspaceRoot;
     if (!workspaceRoot) {
       throw new Error("A local workspace is required to create a local spec.");

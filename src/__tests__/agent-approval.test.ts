@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   approvePreparedAction,
+  preflightPreparedAction,
   rejectPreparedAction,
   type AgentMutationApi,
 } from "../agent-approval.js";
@@ -342,6 +343,17 @@ describe("deterministic local approvals", () => {
 
   it("refuses a create proposal that targets a subfolder from an older version", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "tt-local-spec-legacy-"));
+    const spec = {
+      name: "Sentiment",
+      base_model: "Qwen/Qwen3.5-2B",
+      system_prompt: "Classify sentiment.",
+      guidelines: ["Return one label."],
+      examples: [
+        { input: "Great", output: "positive" },
+        { input: "Awful", output: "negative" },
+      ],
+    };
+    const prepared = await prepareLocalSpecProject(workspace, spec);
     const action: AgentAction = {
       id: ACTION_ID,
       operation: "create_local_spec",
@@ -349,10 +361,13 @@ describe("deterministic local approvals", () => {
       summary: "Create ./legacy/tunedtensor.json.",
       risk: "Creates local files",
       status: "proposed",
-      arguments: { directory: "legacy", spec: {}, workspace_fingerprint: "0".repeat(64) },
+      arguments: { directory: "legacy", spec, workspace_fingerprint: prepared.workspaceFingerprint },
     };
 
     try {
+      await expect(preflightPreparedAction(action, { workspaceRoot: workspace }))
+        .rejects.toThrow(/older tt version/i);
+      expect(action.status).toBe("proposed");
       await expect(approvePreparedAction(action, api(), async () => {}, { workspaceRoot: workspace }))
         .rejects.toThrow(/older tt version/i);
       expect(action.status).toBe("failed");

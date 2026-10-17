@@ -197,6 +197,14 @@ export async function createLocalSpecProject(
       flag: "wx",
       mode: 0o600,
     });
+    const finalWorkspaceInfo = await lstat(canonicalRoot);
+    if (
+      finalWorkspaceInfo.isSymbolicLink()
+      || !finalWorkspaceInfo.isDirectory()
+      || fingerprintWorkspaceInfo(finalWorkspaceInfo) !== expectedWorkspaceFingerprint
+    ) {
+      throw new Error("The local workspace changed while the spec was being written.");
+    }
   } catch (error) {
     try { await workspaceHandle.close(); } catch { /* The outcome is already decided below. */ }
     const detail = error instanceof Error ? error.message : String(error);
