@@ -183,12 +183,13 @@ large-workload benchmarks; repeated model staging dominated elapsed time.
 
 ## Current gaps and extension rule
 
-The local agent currently has no local report-reading, activation, or serving tools.
-It can prepare dry-run previews of training and evaluation pipelines; users
-must run explicit shell commands for real training, local report inspection,
-and serving. Cloud report tools are available when signed in, but this suite
-exercises the local workflow with cloud tools disabled. The live serving handoff case
-documents that limitation; it does not certify the full chat-to-serving promise.
+The local agent can prepare dry-run previews, start approved real training in the
+background after a matching dry-run, and inspect background-run logs and outcome
+metrics. It currently has no full local report-reading, activation, or serving
+tools; those operations require explicit shell commands. Cloud report tools are
+available when signed in, but this suite exercises the local workflow with cloud
+tools disabled. The live serving handoff case documents that limitation; it does
+not certify the full chat-to-serving promise.
 When those tools ship, replace the handoff with a multi-turn scenario that
 assesses an actual report and serves the exact reviewed artifact.
 

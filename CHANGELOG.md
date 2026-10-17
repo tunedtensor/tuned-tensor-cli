@@ -2,22 +2,10 @@
 
 ## [Unreleased]
 
-### Changed
-
-- The TT agent creates a new spec as `tunedtensor.json` in the current
-  folder, where `tt` reads it by default, instead of in a new subfolder.
-- `TT` starts the CLI like `tt`, and `TT <command>` works inside the shell.
-- The startup banner is shorter: ready workflows share one line, others show
-  only their status, and the Tune row appears only when the spec's model may
-  not fit. The greeting asks a question and the hints fit on one line.
-  `/system` keeps the full reasons and next steps.
+## [0.26.0] - 2026-10-17
 
 ### Added
 
-- `/spec` shows a DATASET section with the `dataset_prebuilt` source and
-  files, and marks inline examples as not trained on when an adapter dataset
-  is set. `/spec dataset` shows it alone and explains unsupported engine settings.
-- `/usage` shows the managed agent allowance and token usage, like `tt usage`.
 - The TT agent can start real training in the background after an approved
   dry-run of the same spec, report status, logs, metrics and CPU/memory/GPU usage
   through read-only tools, and cancel a run after a second approval. The
@@ -34,9 +22,48 @@
   validates the file and shows counts and bounded samples. Reusable rows without
   a system message receive the current spec instructions in adapter run artifacts;
   explicitly conflicting system messages are still rejected.
+- Adapter evaluations run in batches, controlled by
+  `evaluation.inference.batchSize` (default 4, range 1–128), and reduce the batch
+  size after a CUDA out-of-memory error. Progress shows completed examples,
+  throughput and ETA, with timeout guidance. Prediction checkpoints let retries
+  reuse completed batches when the model, dataset and inference settings match;
+  changing adapter weights invalidates those predictions.
+- The machine panel and `tt hardware` explain which workflows are ready,
+  need setup, have limited resources, require verification, or need a remote
+  GPU on the current OS and hardware. Guidance distinguishes decision training
+  on CPU/MPS/CUDA from adapter and foundation training and Linux/CUDA serving.
+- `/spec` shows a DATASET section with the `dataset_prebuilt` source and
+  files, and marks inline examples as not trained on when an adapter dataset
+  is set. `/spec dataset` (alias `data`) and `tt spec dataset` show it alone;
+  foundation and decision specs explain that this field is unsupported.
+  Dataset summaries and warnings fit narrow terminals.
+- `/usage` shows the managed agent allowance and token usage, like `tt usage`.
+
+### Changed
+
+- The TT agent creates a new spec as `tunedtensor.json` in the current
+  folder, where `tt` reads it by default, instead of in a new subfolder.
+  Existing specs are preserved; proposed edits still require approval.
+- `TT` starts the CLI like `tt`, and `TT <command>` works inside the shell.
+- The startup banner is shorter: ready workflows share one line, others show
+  only their status, and the Tune row appears only when the spec's model may
+  not fit. The greeting asks a question and the hints fit on one line.
+  `/system` keeps the full reasons and next steps.
 
 ### Fixed
 
+- Conversation compaction ignores stale token counts from before a summary,
+  keeps fresh usage measurements after resuming, and avoids summarizing early
+  because of a duplicate context reserve.
+- `Qwen/Qwen3.5-2B` adapters trained with Transformers use the matching vLLM layer names
+  when served, so their LoRA weights are applied. The verified training archive
+  is preserved; serving remaps a temporary copy.
+- Training and evaluation stage model weights on CPU before moving them to
+  integrated CUDA GPUs such as NVIDIA GB10, reducing duplicate shared-memory
+  allocations during loading.
+- Dataset splitting keeps groups with repeated prompts in training so held-out
+  splits pass adapter validation, and preserves files created by a concurrent
+  writer if publishing the output directory fails.
 - macOS RAM usage excludes estimated reclaimable cache, and decision-training
   warnings use the same available-memory estimate. The machine panel labels
   CPU load as a one-minute average and disk usage as the cache filesystem.
