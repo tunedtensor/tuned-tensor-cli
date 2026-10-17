@@ -18,6 +18,7 @@ const literalColor = chalk.hex("#F9A8D4");
 export const SPEC_SECTIONS = [
   "identity",
   "behavior",
+  "dataset",
   "examples",
   "training",
   "evaluation",
@@ -35,7 +36,8 @@ const SECTION_ALIASES: Record<string, SpecSection> = {
   guidelines: "behavior",
   constraints: "behavior",
   example: "examples",
-  data: "examples",
+  data: "dataset",
+  dataset_prebuilt: "dataset",
   hyperparameters: "training",
   hparams: "training",
   foundation: "training",
@@ -53,6 +55,7 @@ export function resolveSpecSection(name: string): SpecSection | undefined {
 const SECTION_BLURBS: Record<SpecSection, string> = {
   identity: "what this model is",
   behavior: "what the model should do",
+  dataset: "training data files",
   examples: "teaches by demonstration",
   training: "how it is trained",
   evaluation: "how results are scored",
@@ -61,8 +64,9 @@ const SECTION_BLURBS: Record<SpecSection, string> = {
 };
 
 const SECTION_KEYS: Record<SpecSection, readonly string[]> = {
-  identity: ["name", "description", "engine", "base_model", "id", "dataset_prebuilt"],
+  identity: ["name", "description", "engine", "base_model", "id"],
   behavior: ["system_prompt", "guidelines", "constraints", "decision"],
+  dataset: ["dataset_prebuilt"],
   examples: ["examples"],
   training: ["hyperparameters", "foundation"],
   evaluation: ["evaluation"],
@@ -293,11 +297,42 @@ function renderBehavior(view: ViewBuilder, spec: JsonObject, full: boolean): voi
   renderList("Constraints", constraints, chalk.red("✗"));
 }
 
+function datasetSource(spec: JsonObject): string | undefined {
+  const dataset = spec.dataset_prebuilt;
+  if (!isObject(dataset)) return undefined;
+  const repo = isObject(dataset.huggingface) ? dataset.huggingface.repo : undefined;
+  return typeof repo === "string" ? `Hugging Face ${clean(repo)}` : "local files";
+}
+
+/** Only adapter specs accept dataset_prebuilt; it replaces inline examples as training data. */
+function trainsOnDataset(spec: JsonObject): boolean {
+  return (spec.engine === undefined || spec.engine === "adapter") && datasetSource(spec) !== undefined;
+}
+
+function renderDataset(view: ViewBuilder, spec: JsonObject, full: boolean): void {
+  const source = datasetSource(spec);
+  if (!source) {
+    if (full) {
+      view.heading("dataset", SECTION_BLURBS.dataset);
+      view.paragraph(spec.engine === "foundation"
+        ? "Foundation uses foundation.corpus_path and inline examples; see /spec training."
+        : "Not set — trains on inline examples.", "  ", chalk.dim);
+    }
+    return;
+  }
+  view.heading("dataset", `${source} · ${SECTION_BLURBS.dataset}`);
+  view.settingsGrid(flattenSettings(spec.dataset_prebuilt));
+  if (!trainsOnDataset(spec)) {
+    view.paragraph("dataset_prebuilt is not supported by this engine; remove it to validate the spec.", `  ${chalk.yellow("!")} `, chalk.dim);
+  }
+}
+
 function renderExamples(view: ViewBuilder, spec: JsonObject, full: boolean): void {
   const examples = Array.isArray(spec.examples) ? spec.examples : [];
   const count = examples.length;
   const size = count === 0 ? "none yet" : `${count} example${count === 1 ? "" : "s"}`;
-  view.heading("examples", `${size} · ${SECTION_BLURBS.examples}`);
+  const role = trainsOnDataset(spec) ? "not trained on · dataset supplies training data" : SECTION_BLURBS.examples;
+  view.heading("examples", `${size} · ${role}`);
   if (count === 0) {
     view.push(`  ${chalk.dim("Ask TT to draft examples, or add input/output pairs to tunedtensor.json.")}`);
     return;
@@ -387,9 +422,11 @@ function renderHeader(view: ViewBuilder, input: SpecViewInput, spec: JsonObject)
     view.paragraph(spec.description, "", chalk.dim, 3);
   }
   const examples = Array.isArray(spec.examples) ? spec.examples.length : 0;
+  const dataset = datasetSource(spec);
   const facts = [
     spec.engine === "foundation" ? "foundation" : spec.engine === "decision" ? "decision" : "adapter",
     typeof spec.base_model === "string" ? truncateText(spec.base_model, view.width) : undefined,
+    dataset ? truncateText(`dataset: ${dataset}`, view.width) : undefined,
     `${examples} example${examples === 1 ? "" : "s"}`,
     isObject(spec.runtime) && isObject(spec.runtime.gpu) ? "remote GPU" : undefined,
   ].filter((fact): fact is string => Boolean(fact));
@@ -428,6 +465,7 @@ export function renderSpecView(input: SpecViewInput, options: SpecViewOptions = 
   if (!section) {
     renderHeader(view, input, spec);
     renderBehavior(view, spec, false);
+    renderDataset(view, spec, false);
     renderExamples(view, spec, false);
     renderTraining(view, spec);
     renderSettingsSection(view, spec, "evaluation", false);
@@ -444,6 +482,7 @@ export function renderSpecView(input: SpecViewInput, options: SpecViewOptions = 
   switch (section) {
     case "identity": renderIdentity(view, spec, true); break;
     case "behavior": renderBehavior(view, spec, true); break;
+    case "dataset": renderDataset(view, spec, true); break;
     case "examples": renderExamples(view, spec, true); break;
     case "training": renderTraining(view, spec); break;
     default: renderSettingsSection(view, spec, section, true);

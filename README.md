@@ -95,7 +95,7 @@ npm link
 
 `tunedtensor.json` is the source of truth for behavior and training settings.
 In the shell, `/spec` shows a readable overview grouped into behavior,
-examples, training, evaluation and runtime sections; `/spec <section>` (for
+dataset, examples, training, evaluation and runtime sections; `/spec <section>` (for
 example `/spec examples`) shows one section in full and `/spec show` prints the
 highlighted JSON. `/spec diff`, `/spec validate`, and `/spec history` complete
 the review, all without a model call. Outside the shell, `tt spec view` and
@@ -307,7 +307,7 @@ CPU evaluation does not imply that `tt serve` can run on CPU. Agent chat still
 needs managed access or your own model provider; local data commands need neither.
 
 Useful shell controls include `/help`, `/status`, `/context`, `/system`,
-`/model`, `/login`, `/cd`, `/clear`, and `/exit`.
+`/usage` (managed agent allowance and token usage), `/model`, `/login`, `/cd`, `/clear`, and `/exit`.
 When the shell opens, the TT logo mark (drawn in the terminal) greets you with the current spec, a
 live machine panel (GPU utilization, VRAM and temperature from `nvidia-smi`,
 CPU, RAM, and free space on the model-cache filesystem) and whether this machine can

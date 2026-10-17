@@ -24,11 +24,17 @@ Inside the TT shell, in your project directory:
 
 `/spec` shows a readable overview: name, engine, base model and example count,
 then highlighted sections for behavior (system prompt, guidelines, constraints),
-examples, training settings, evaluation, runtime and pipeline, followed by
+the `dataset_prebuilt` data source when set, examples, training settings, evaluation, runtime and pipeline, followed by
 validation results. `/spec <section>` shows one section in full; sections are
-`identity`, `behavior`, `examples`, `training`, `evaluation`, `runtime` and
+`identity`, `behavior`, `dataset`, `examples`, `training`, `evaluation`, `runtime` and
 `pipeline`. `/spec show` prints the complete file with JSON highlighting,
 validation results and SHA-256.
+
+For adapter specs, `dataset_prebuilt` replaces inline examples as training data;
+the examples section labels this explicitly. Foundation and decision specs reject
+`dataset_prebuilt`; remove it to validate the spec. Foundation corpus settings
+are shown under `/spec training`.
+
 `/spec diff` shows pending spec edits in the current conversation; otherwise it
 shows the latest approved edit, or external changes since that revision.
 `/spec history` lists up to 50 recent revision records. These commands require
