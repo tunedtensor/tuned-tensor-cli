@@ -69,6 +69,9 @@
   CPU load as a one-minute average and disk usage as the cache filesystem.
 - Store permission repair tolerates temporary state files and append locks
   disappearing during concurrent updates, while still rejecting unsafe entries.
+- Live-agent release evaluations accept downloads that already inspect and seal
+  the configured spec, while checking its path, content hash and workspace and
+  rejecting a replacement dataset source.
 
 ## [0.25.0] - 2026-10-14
 

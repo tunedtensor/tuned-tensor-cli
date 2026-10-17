@@ -147,7 +147,11 @@ export function gradeAgentWorkflow(
   } else if (scenario.id === "dataset-handoff") {
     const action = actions[0];
     const args = record(action?.arguments);
-    check("dataset guidance inspects the current spec", calls.some(call => call.payload.name === "get_local_spec"));
+    // prepare_download reads and validates the configured spec itself. Grade
+    // its durable seal, rather than requiring a redundant get_local_spec call.
+    check("download binds the configured spec and workspace", args.spec_path === "./tunedtensor.json"
+      && args.spec_sha256 === evidence.specSha256
+      && args.workspace_fingerprint === evidence.workspaceFingerprint && args.source === undefined);
     check("one dataset download awaits approval", turn?.status === "waiting_for_approval"
       && actions.length === 1 && action?.operation === "prefetch_local" && action.status === "proposed"
       && args.kind === "dataset" && args.spec_sha256 === evidence.specSha256);

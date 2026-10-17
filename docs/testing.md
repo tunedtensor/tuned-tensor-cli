@@ -90,6 +90,10 @@ Hugging Face dataset download handoff, and foundation dataset compatibility.
 Assertions check tool use, sealed proposal contents, requested execution mode,
 pipeline stages and settings, persisted state, and lack of workspace changes.
 They do not compare exact prose or ask a judge model to approve another model.
+The configured-dataset download case verifies the proposal's spec path, content
+hash and workspace fingerprint, and rejects an explicit replacement source.
+`prepare_download` inspects that spec itself, so a separate `get_local_spec` call
+is not required for this case.
 
 Every case creates a fresh temporary project and conversation. Nothing is
 approved. The runner permits spec inspection and edit proposals as well as pipeline description, validation,

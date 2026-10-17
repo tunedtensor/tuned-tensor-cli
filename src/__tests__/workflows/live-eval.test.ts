@@ -7,6 +7,7 @@ import type { AgentAction } from "../../agent-client.js";
 import { LocalAgentStore } from "../../agent-store.js";
 import { createLocalAgentClient } from "../../local-agent-client.js";
 import { prepareLocalPipelineAction } from "../../local-pipeline-action.js";
+import { prepareLocalPrefetch } from "../../local-prefetch-action.js";
 import * as hardware from "../../local-runtime/hardware.js";
 import {
   agentWorkflowScenarios, gradeAgentWorkflow, guardAgentEvalEvent,
@@ -76,6 +77,45 @@ async function realPreparedEvidence(
 }
 
 describe("live agent workflow grading", () => {
+  async function downloadEvidence(): Promise<AgentWorkflowEvidence> {
+    const workspace = await mkdtemp(join(tmpdir(), "tt-live-eval-download-"));
+    try {
+      await writeFile(join(workspace, "tunedtensor.json"), scenario("dataset-handoff").specSource);
+      const prepared = await prepareLocalPrefetch(workspace, "dataset");
+      const action: AgentAction = {
+        id: "download", title: "Download", summary: prepared.summary, risk: "medium",
+        operation: "prefetch_local", status: "proposed", arguments: prepared.args, preview: prepared.preview,
+      };
+      return {
+        turn: { threadId: "thread", turnId: "turn", status: "waiting_for_approval",
+          response: "Approve the configured dataset download. Dry-runs do not download it.", actions: [action] },
+        events: [
+          { type: "tool_call", payload: { name: "prepare_download", toolUseId: "download", input: { kind: "dataset" } } },
+          { type: "tool_result", payload: { toolUseId: "download", status: "success" } },
+        ],
+        persistedActions: [action], specSha256: prepared.args.spec_sha256,
+        workspaceFingerprint: prepared.args.workspace_fingerprint, workspaceUnchanged: true, violations: [],
+      };
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }
+
+  it("accepts a download sealed by production spec inspection without a redundant read tool", async () => {
+    expect(failedChecks("dataset-handoff", await downloadEvidence())).toEqual([]);
+  });
+
+  it.each([
+    { spec_path: "./other/tunedtensor.json" },
+    { spec_sha256: "stale-spec" },
+    { workspace_fingerprint: "another-workspace" },
+    { source: { repo: "other/dataset", training: "other.jsonl" } },
+  ])("rejects a download redirected away from the configured spec: %j", async (changes) => {
+    const evidence = await downloadEvidence();
+    Object.assign(evidence.turn!.actions[0]!.arguments!, changes);
+    expect(failedChecks("dataset-handoff", evidence)).toContain("download binds the configured spec and workspace");
+  });
+
   it("accepts a sealed canonical dry-run proposal without requiring exact prose", () => {
     expect(failedChecks("adapter-dry-run", preparedEvidence())).toEqual([]);
   });
