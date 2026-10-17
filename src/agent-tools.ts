@@ -660,7 +660,7 @@ export function createTunedTensorTools(
         spec_settings_example: {
           hyperparameters: { n_epochs: 1, learning_rate: 0.0001, batch_size: 4, gradient_accumulation_steps: 4,
             lora_rank: 16, lora_alpha: 32, max_seq_length: 1024 },
-          evaluation: { inference: { maxNewTokens: 32, temperature: 0 }, scoring: { mode: "exact_match" },
+          evaluation: { inference: { batchSize: 4, maxNewTokens: 32, temperature: 0 }, scoring: { mode: "exact_match" },
             maxExamples: 100, sampleSeed: 42 },
         },
         settings_note: "Example setting names, not universal tuning recommendations. Evaluation uses inference/scoring objects and maxExamples/sampleSeed; generation limits do not belong in hyperparameters.",

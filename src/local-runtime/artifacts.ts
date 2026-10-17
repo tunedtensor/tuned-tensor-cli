@@ -300,6 +300,8 @@ async function listArtifactFiles(root: string, current = root): Promise<string[]
       throw new Error(`Artifact tree must not contain symbolic links: ${absolute}`);
     }
     if (entry.isDirectory()) {
+      // Mutable prediction recovery is not evidence for a completed stage.
+      if (portableRelative(root, absolute) === "inference-checkpoints") continue;
       files.push(...await listArtifactFiles(root, absolute));
       continue;
     }

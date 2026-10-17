@@ -48,6 +48,28 @@ if counter_path:
     open(counter_path, "w").write(str(current + 1))
 
 mode = config.get("mode", "success")
+if mode in ("batch-interrupt", "batch-success"):
+    import contextlib
+    from types import SimpleNamespace
+    sys.path.insert(0, config["fixtures"])
+    import test_evaluate as fixtures
+    import evaluate
+    model = fixtures.FakeModel(fail_call=2 if mode == "batch-interrupt" else None)
+    evaluate.import_runtime_dependencies = lambda: None
+    evaluate.torch = SimpleNamespace(inference_mode=contextlib.nullcontext,
+        cuda=SimpleNamespace(OutOfMemoryError=fixtures.OutOfMemoryError, empty_cache=lambda: None))
+    evaluate.load_text_model = lambda *args: (model, fixtures.FakeTokenizer(), "cpu")
+    checkpoint = sys.argv[sys.argv.index("--checkpoint") + 1]
+    sys.argv = ["evaluate.py", "--input", input_path, "--output", output_path, "--checkpoint", checkpoint]
+    try:
+        evaluate.main()
+    finally:
+        Path(config["batches"]).write_text(json.dumps(model.calls))
+    raise SystemExit(0)
+if mode == "timeout":
+    import time
+    print('@@tt-evaluation {"phase":"generating","completed":1,"total":2,"batch_size":1,"elapsed_seconds":1,"eta_seconds":3600}', flush=True)
+    time.sleep(60)
 if mode == "no-output":
     raise SystemExit(0)
 if mode == "invalid-json":
@@ -158,6 +180,7 @@ test("Transformers evaluation uses the strict text-only protocol and opaque IDs"
     assert.equal(payload.base_model_revision, QWEN_3_5_2B_REVISION);
     assert.equal(payload.model_loader, "causal_lm");
     assert.equal(payload.trust_remote_code, false);
+    assert.equal(payload.batch_size, 4);
     assert.equal(payload.adapter_path, join(root, "adapter"));
     assert.deepEqual(payload.examples, [
       { id: "0", input: "first" },
@@ -175,6 +198,58 @@ test("Transformers evaluation uses the strict text-only protocol and opaque IDs"
     ) as Record<string, string>;
     assert.equal(cacheLine.HF_HOME, join(root, "huggingface"));
     assert.equal(cacheLine.HF_HUB_CACHE, join(root, "huggingface", "hub"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("interrupted Python batches resume across baseline runs and timeout changes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-evaluation-resume-"));
+  try {
+    await writeFakeUv(root);
+    const config = configFor(root, { baselineCache: true });
+    config.evaluation.inference.batchSize = 2;
+    config.evaluation.inference.maxNewTokens = 8;
+    const fixtureConfig = (mode: string) => writeFile(join(root, "fake-uv-config.json"), JSON.stringify({
+      mode, fixtures: resolve("training/adapter/tests"), batches: join(root, "batches.json"),
+    }));
+    const events: Array<{ message: string; details?: Record<string, unknown> }> = [];
+    const common = {
+      kind: "baseline" as const, modelId: "Qwen/Qwen3.5-2B",
+      examples: ["a", "long prompt", "third", "fourth", "last"].map((input) => ({ input, output: `reply:${input}` })),
+      system: "Answer.", config, reporter: { onEvent(event: typeof events[number]) { events.push(event); } },
+    };
+    await fixtureConfig("batch-interrupt");
+    await assert.rejects(evaluateExamples({ ...common, outputPath: join(root, "first", "baseline.json") }), /interrupted/);
+    assert.deepEqual(JSON.parse(await readFile(join(root, "batches.json"), "utf8")), [2, 2]);
+    const checkpoints = await readdir(join(config.storeRoot!, "cache", "baseline-evals"));
+    assert.equal(checkpoints.filter((name) => name.endsWith(".checkpoint.json")).length, 1);
+    await fixtureConfig("batch-success");
+    config.evaluation.timeoutMs *= 2;
+    const report = await evaluateExamples({ ...common, outputPath: join(root, "retry", "baseline.json") });
+    assert.equal(report.avg_score, 1);
+    assert.deepEqual(JSON.parse(await readFile(join(root, "batches.json"), "utf8")), [2, 1]);
+    assert.ok(events.some((event) => event.message.includes("resuming: 2/5")));
+    assert.ok(events.some((event) => event.message.includes("generating: 5/5")));
+    assert.deepEqual(report.results.map((entry) => entry.actual), common.examples.map((entry) => entry.output));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("progress warns before timeout and failure identifies recovery checkpoint", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-evaluation-timeout-"));
+  try {
+    await writeFakeUv(root);
+    const config = configFor(root, { mode: "timeout" });
+    config.evaluation.timeoutMs = 300;
+    const messages: string[] = [];
+    await assert.rejects(evaluateExamples({
+      kind: "baseline", modelId: "Qwen/Qwen3.5-2B", examples: [{ input: "a", output: "a" }, { input: "b", output: "b" }],
+      system: "Answer.", config, outputPath: join(root, "baseline.json"),
+      reporter: { onEvent(event) { messages.push(event.message); } },
+    }), /timed out.*Completed 1\/2.*inference-checkpoints.*evaluation.timeoutMs/);
+    assert.ok(messages.some((message) => message.includes("Estimated completion exceeds the timeout")));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

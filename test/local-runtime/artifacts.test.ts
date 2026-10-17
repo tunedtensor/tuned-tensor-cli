@@ -117,6 +117,26 @@ test("writes and verifies an atomic artifact manifest with model contract metada
   }
 });
 
+test("evaluation recovery can change or be removed without invalidating completed artifacts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-checkpoint-manifest-"));
+  try {
+    const artifacts = resolveRunArtifacts({ artifactRoot: root, prefix: "run" });
+    await prepareRunDirectories(artifacts);
+    await writeFile(artifacts.baselineEvalJson, '{"completed":true}');
+    const recovery = join(artifacts.runDir, "inference-checkpoints");
+    await mkdir(recovery);
+    await writeFile(join(recovery, "candidate.json"), '{"results":[]}');
+    const manifest = await writeArtifactManifest(artifacts);
+    assert.deepEqual(manifest.files.map((file) => file.path), ["baseline-eval.json"]);
+    await writeFile(join(recovery, "candidate.json"), '{"results":["updated"]}');
+    assert.equal((await verifyArtifactManifest(artifacts.artifactManifestJson)).valid, true);
+    await rm(recovery, { recursive: true });
+    assert.equal((await verifyArtifactManifest(artifacts.artifactManifestJson)).valid, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("rejects an artifact whose checksum changes after manifest creation", async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-artifacts-test-"));
   try {

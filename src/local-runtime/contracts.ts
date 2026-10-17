@@ -429,6 +429,7 @@ export const runReportSchema = z.object({
 }).strict();
 
 const inferenceConfigSchema = z.object({
+  batchSize: z.number().int().min(1).max(128).default(4),
   maxNewTokens: z.number().int().min(1).default(256),
   temperature: z.number().min(0).default(0),
   topP: z.number().min(0).max(1).default(1),
@@ -442,6 +443,7 @@ const scoringConfigSchema = z.object({
 
 const evaluationConfigSchema = z.object({
   inference: inferenceConfigSchema.default({
+    batchSize: 4,
     maxNewTokens: 256,
     temperature: 0,
     topP: 1,
@@ -480,6 +482,7 @@ export const localRunnerConfigSchema = z.object({
   }).strict().default({}),
   evaluation: evaluationConfigSchema.default({
     inference: {
+      batchSize: 4,
       maxNewTokens: 256,
       temperature: 0,
       topP: 1,

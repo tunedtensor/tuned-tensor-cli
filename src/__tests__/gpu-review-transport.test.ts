@@ -105,6 +105,24 @@ it("returns checkpoint pruning from a directory that is uploaded and downloaded"
   expect(await readFile(join(output, "new-checkpoint"), "utf8")).toBe("new");
 }, 20_000);
 
+it("returns an evaluation checkpoint file on timeout and uploads it on retry", async () => {
+  const checkpoint = join(root, "evaluation.checkpoint.json");
+  const run = (seconds: number, script: string) => runGpuProcess({
+    gpu: { ...gpu, maxSeconds: seconds }, runtime: "adapter", command: "python3",
+    commandArgs: ["-u", "-c", script, checkpoint], stage: "evaluating_baseline", logPath,
+    files: [{ path: checkpoint, direction: "both" }],
+  });
+  const failed = await run(1,
+    "import pathlib,sys,time; pathlib.Path(sys.argv[1]).write_text('partial predictions'); time.sleep(300)");
+  expect(failed.exitCode).toBe(124);
+  expect(await readFile(checkpoint, "utf8")).toBe("partial predictions");
+  const retry = await run(30,
+    "import pathlib,sys; p=pathlib.Path(sys.argv[1]); assert p.read_text() == 'partial predictions'; p.write_text('complete predictions')");
+  expect(retry.exitCode).toBe(0);
+  expect(await readFile(checkpoint, "utf8")).toBe("complete predictions");
+  await expect(access(remote)).rejects.toThrow();
+}, 20_000);
+
 it.each(["same", "parent", "symlink"])("rejects %s writable directory mappings before contacting AWS", async (overlap) => {
   const output = join(root, "recovery");
   await mkdir(output);
