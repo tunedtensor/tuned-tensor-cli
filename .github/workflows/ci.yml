@@ -70,6 +70,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const names = Object.keys(JSON.parse(readFileSync('package.json', 'utf8')).bin);
+          assert.equal(new Set(names.map(name => name.toLowerCase())).size, names.length,
+            'npm binaries must not collide on case-insensitive filesystems');
+          JS
           tarball="$(npm pack | tail -n 1)"
           tarball_path="$(pwd)/${tarball}"
           smoke_dir="$(mktemp -d)"
@@ -77,10 +84,17 @@ jobs:
           npm init -y >/dev/null
           npm install "${tarball_path}" --silent
           npx --no-install tt --version
-          npx --no-install TT --version
           npx --no-install tt --help >/dev/null
-          npx --no-install TT --help >/dev/null
           npx --no-install tt status --json >/dev/null
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            ./node_modules/.bin/TT --version
+            ./node_modules/.bin/TT --help >/dev/null
+          fi
+          # Real global installs exercise npm's bin-link creation. Repeat to
+          # catch upgrade/reinstall races as well as first-install failures.
+          npm install -g --ignore-scripts --no-audit --no-fund --prefix "${smoke_dir}/global" "${tarball_path}"
+          npm install -g --ignore-scripts --no-audit --no-fund --prefix "${smoke_dir}/global" "${tarball_path}"
+          "${smoke_dir}/global/bin/tt" --version
 
   hardware-guidance:
     name: hardware guidance (${{ matrix.os }})
