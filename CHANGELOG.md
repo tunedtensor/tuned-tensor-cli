@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-10-17
+
 ### Fixed
 
 - npm installs and upgrades no longer race to create `tt` and `TT` on
