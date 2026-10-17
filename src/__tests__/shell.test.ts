@@ -531,6 +531,27 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     expect(stderr.join("")).toMatch(/Shell operator/);
   });
 
+  it("runs the usage command from /usage", async () => {
+    const requests: ShellCommandRequest[] = [];
+    const stderr: string[] = [];
+    const session = await createShellSession({
+      cwd: "/tmp/local-project",
+      env: {},
+      io: { write: () => {}, writeError: (text) => stderr.push(text), clear: vi.fn() },
+      runner: async (request) => {
+        requests.push(request);
+        return { exitCode: 0 };
+      },
+      contextProvider: async ({ cwd }) => fakeContext(cwd),
+    });
+
+    await session.handleLine("/usage");
+    await session.handleLine("/usage now");
+
+    expect(requests).toEqual([{ args: ["usage"], cwd: "/tmp/local-project" }]);
+    expect(stderr.join("")).toMatch(/\/usage does not accept arguments/);
+  });
+
   it("stays local even when the discovered context favours cloud", async () => {
     const stdout: string[] = [];
     const stderr: string[] = [];

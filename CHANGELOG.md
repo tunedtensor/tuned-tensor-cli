@@ -14,6 +14,10 @@
 
 ### Added
 
+- `/spec` shows a DATASET section with the `dataset_prebuilt` source and
+  files, and marks inline examples as not trained on when an adapter dataset
+  is set. `/spec dataset` shows it alone and explains unsupported engine settings.
+- `/usage` shows the managed agent allowance and token usage, like `tt usage`.
 - The TT agent can start real training in the background after an approved
   dry-run of the same spec, report status, logs, metrics and CPU/memory/GPU usage
   through read-only tools, and cancel a run after a second approval. The

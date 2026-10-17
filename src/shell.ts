@@ -260,6 +260,7 @@ export type SlashCommandName =
   | "status"
   | "context"
   | "system"
+  | "usage"
   | "model"
   | "login"
   | "clear"
@@ -277,6 +278,7 @@ const SLASH_NAMES = new Set([
   "status",
   "context",
   "system",
+  "usage",
   "model",
   "login",
   "clear",
@@ -896,6 +898,10 @@ export class TunedTensorShellSession {
         this.writeLines(renderMachinePanel(usage, this.context, { columns: this.columns(), detailed: true }));
         return "continue";
       }
+      case "usage":
+        assertNoArgs("usage", command.args);
+        await this.runner({ args: ["usage"], cwd: this.cwd });
+        return "continue";
       case "palette":
         this.io.write(helpText(this.mode, undefined, true));
         return "continue";

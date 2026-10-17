@@ -127,6 +127,7 @@ export interface SlashCommand {
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { path: "/spec", description: "Readable behavior spec; add a section, show, diff, validate or history." },
   { path: "/system", description: "Live GPU, CPU and memory use, and what this machine can fine-tune." },
+  { path: "/usage", description: "Show managed agent allowance and token usage." },
   { path: "/help", description: "Show commands; add a word to filter." },
   { path: "/status", description: "Show lightweight workflow status." },
   { path: "/context", description: "Show the current project context." },

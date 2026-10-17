@@ -12,6 +12,7 @@ import {
   type SpecViewInput,
 } from "../spec-view.js";
 import { terminalWidth } from "../terminal-markdown.js";
+import { localBehaviorSpecFileSchema } from "../local-runtime/contracts.js";
 
 const document = {
   name: "Support triage",
@@ -137,10 +138,66 @@ describe("spec highlighting", () => {
     }
   });
 
+  it("shows a prebuilt dataset and marks inline examples as not trained on", () => {
+    const withDataset = { ...document, dataset_prebuilt: {
+      training: "data/train.jsonl", validation: "data/validation.jsonl",
+      huggingface: { repo: "org/tickets", revision: "abc123" },
+    } };
+    const view = plain(renderSpecView(input({ document: withDataset })));
+    expect(view).toContain("dataset: Hugging Face org/tickets · 5 examples");
+    expect(view).toContain("▍DATASET  Hugging Face org/tickets · training data files");
+    expect(view).toMatch(/training\s+data\/train\.jsonl/);
+    expect(view).toMatch(/huggingface\.revision\s+abc123/);
+    expect(view).toContain("▍EXAMPLES  5 examples · not trained on · dataset supplies training data");
+    expect(view.indexOf("▍DATASET")).toBeLessThan(view.indexOf("▍EXAMPLES"));
+    expect(view).not.toContain("▍OTHER\n  dataset_prebuilt");
+
+    expect(plain(renderSpecView(input()))).not.toContain("▍DATASET");
+    expect(plain(renderSpecView(input(), { section: "dataset" }))).toContain("Not set — trains on inline examples.");
+    expect(plain(renderSpecView(input({ document: { ...withDataset, dataset_prebuilt: { training: "train.jsonl", test: "test.jsonl" } } }), { section: "dataset" })))
+      .toContain("DATASET  local files");
+    const decision = plain(renderSpecView(input({ document: { ...withDataset, engine: "decision" } })));
+    expect(decision).toContain("dataset_prebuilt is not supported by this engine; remove it to validate the spec.");
+    expect(decision).toContain("▍EXAMPLES  5 examples · teaches by demonstration");
+  });
+
+  it.each([
+    { engine: "foundation", foundation: {} },
+    { engine: "decision", base_model: "convaiinnovations/laya", decision: { type: "noul" } },
+  ])("explains rejected datasets for $engine specs", (settings) => {
+    const { base_model, hyperparameters, evaluation, runtime, custom_note, ...behavior } = document;
+    const spec = { ...behavior, ...settings };
+    expect(localBehaviorSpecFileSchema.safeParse(spec).success).toBe(true);
+    const documentWithDataset = { ...spec, dataset_prebuilt: { training: "train.jsonl", validation: "val.jsonl" } };
+    expect(localBehaviorSpecFileSchema.safeParse(documentWithDataset).success).toBe(false);
+    const view = plain(renderSpecView(input({ document: documentWithDataset }), { section: "dataset" }));
+    expect(view).toContain("dataset_prebuilt is not supported by this engine; remove it to validate the spec.");
+  });
+
+  it("directs foundation users to their corpus settings when no prebuilt dataset is set", () => {
+    const view = plain(renderSpecView(input({ document: {
+      ...document, engine: "foundation", foundation: { corpus_path: "corpus.txt" },
+    } }), { section: "dataset" }));
+    expect(view).toContain("Foundation uses foundation.corpus_path and inline examples; see /spec training.");
+    expect(view).not.toContain("Not set — trains on inline examples.");
+  });
+
+  it.each(["adapter", "foundation", "decision"])("keeps dataset information within narrow terminals for %s", (engine) => {
+    const documentWithDataset = { ...document, engine, dataset_prebuilt: {
+      training: "data/train.jsonl", validation: "data/validation.jsonl",
+      huggingface: { repo: `${"o".repeat(90)}/${"d".repeat(90)}` },
+    } };
+    for (const section of [undefined, "dataset"] as const) {
+      const view = renderSpecView(input({ document: documentWithDataset }), { columns: 44, section });
+      for (const line of view.split("\n")) expect(terminalWidth(line)).toBeLessThanOrEqual(44);
+    }
+  });
+
   it("resolves section names and aliases", () => {
     expect(resolveSpecSection("Examples")).toBe("examples");
     expect(resolveSpecSection("hyperparameters")).toBe("training");
     expect(resolveSpecSection("eval")).toBe("evaluation");
+    expect(resolveSpecSection("data")).toBe("dataset");
     expect(resolveSpecSection("diff")).toBeUndefined();
   });
 
