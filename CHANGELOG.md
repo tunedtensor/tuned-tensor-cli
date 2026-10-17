@@ -4,6 +4,8 @@
 
 ### Changed
 
+- The TT agent creates a new spec as `tunedtensor.json` in the current
+  folder, where `tt` reads it by default, instead of in a new subfolder.
 - `TT` starts the CLI like `tt`, and `TT <command>` works inside the shell.
 - The startup banner is shorter: ready workflows share one line, others show
   only their status, and the Tune row appears only when the spec's model may

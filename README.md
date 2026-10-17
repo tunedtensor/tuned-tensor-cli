@@ -186,12 +186,12 @@ tt › What would you like to work on?
 Known commands such as `runs list` run directly; tab completes them. Ordinary
 sentences go through the locally orchestrated model session. The
 model has no shell or general filesystem tool. It can read and propose reviewed
-edits to an existing spec, or prepare one new folder directly beneath the shell's current working directory with a validated
-`tunedtensor.json`, or prepare a local pipeline dry-run sealed to the reviewed
+edits to an existing spec, or prepare a validated `tunedtensor.json` in the shell's current working directory
+when none exists, or prepare a local pipeline dry-run sealed to the reviewed
 workspace and spec contents. Writes and pipeline previews wait for your approval: after the
 answer, tt shows the proposal and asks inline, where `y` approves, `n` rejects and `Esc`
 leaves it pending for a later `/approve` or `/reject`. Any other key is ignored. The tools refuse path
-traversal, symlinked workspace roots, overwriting a new-project target, unsupported spec
+traversal, symlinked workspace roots, overwriting an existing spec, unsupported spec
 fields, cloud pipeline targets, and spec changes after review. Known CLI
 commands such as `runs list`, `doctor`, and `models list` still execute directly.
 Prefix a command with `:` when you want to make that intent explicit.

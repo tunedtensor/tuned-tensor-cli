@@ -284,7 +284,7 @@ describe("conversation workflow contracts (scripted provider, real agent and too
     expect(c.forbidden).not.toHaveBeenCalled();
   });
 
-  it("creates a reviewed project, resumes the conversation, and approves the same plan through the real CLI", async () => {
+  it("creates a reviewed spec, resumes the conversation, and approves the same plan through the real CLI", async () => {
     const plans: Array<{ dry_run: boolean; steps: Array<{ id: string; uses: string }> }> = [];
     const runCommand = vi.fn<LocalPipelineCommandRunner>(async (args, options) => {
       const { stdout } = await execFileAsync(process.execPath, [
@@ -297,18 +297,18 @@ describe("conversation workflow contracts (scripted provider, real agent and too
       return { exitCode: 0, signal: null };
     });
     const c = conversation([
-      { tool: "prepare_create_local_spec", args: { directory: "feedback", spec } },
+      { tool: "prepare_create_local_spec", args: { spec } },
       "The project is ready for review. Use /approve to create it.",
-      { tool: "prepare_pipeline_run", args: { spec_path: "feedback/tunedtensor.json" } },
+      { tool: "prepare_pipeline_run", args: {} },
       "The dry-run plan is ready for /approve.",
     ], runCommand);
 
     await c.session.handleLine("Create a feedback classifier project with positive and negative labels.");
     expect(c.errors).toEqual([]);
-    expect(existsSync(join(root, "feedback"))).toBe(false);
+    expect(existsSync(join(root, "tunedtensor.json"))).toBe(false);
     expect(c.session.snapshot().pendingActions).toHaveLength(1);
     await c.session.handleLine("/approve");
-    expect(JSON.parse(readFileSync(join(root, "feedback/tunedtensor.json"), "utf8"))).toMatchObject(spec);
+    expect(JSON.parse(readFileSync(join(root, "tunedtensor.json"), "utf8"))).toMatchObject(spec);
 
     // A fresh UI session reads durable conversation state, including tool results.
     const resumed = c.newSession();
@@ -317,7 +317,7 @@ describe("conversation workflow contracts (scripted provider, real agent and too
     await resumed.handleLine("Preview fine-tuning and compare it with the base model; do not train yet.");
     expect(runCommand).not.toHaveBeenCalled();
     expect(resumed.snapshot().pendingActions[0]).toMatchObject({
-      operation: "run_local_pipeline", arguments: { dry_run: true, spec_path: "./feedback/tunedtensor.json" },
+      operation: "run_local_pipeline", arguments: { dry_run: true, spec_path: "./tunedtensor.json" },
     });
     expect(c.contexts[2].messages.some((message) => message.role === "toolResult")).toBe(true);
     await resumed.handleLine("/approve");

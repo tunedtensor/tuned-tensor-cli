@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, realpath, rmdir, writeFile } from "node:fs/promises";
+import { lstat, open, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
@@ -10,12 +10,6 @@ import { DECISION_MODELS } from "./local-runtime/decision-models.js";
 import { parseLocalRunInput } from "./local-runtime/local-project.js";
 import { pipelineForRunInput } from "./pipeline.js";
 
-const FolderName = Type.String({
-  minLength: 1,
-  maxLength: 120,
-  pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-  description: "One new folder name directly beneath the current workspace",
-});
 const LocalBaseModel = Type.String({
   minLength: 3,
   maxLength: 193,
@@ -48,28 +42,27 @@ export const LocalProjectSpecSchema = Type.Object({
 }, { additionalProperties: false });
 
 export type LocalProjectSpec = Static<typeof LocalProjectSpecSchema>;
-export { FolderName as LocalProjectFolderSchema };
+
+// New specs live where tt reads them by default: the workspace root.
+const SPEC_FILE = "tunedtensor.json";
+const SPEC_DISPLAY_PATH = `./${SPEC_FILE}`;
 
 export interface PreparedLocalSpecProject {
-  directory: string;
   specPath: string;
   workspaceFingerprint: string;
 }
 
 export interface CreatedLocalSpecProject {
   created: true;
-  directory: string;
   path: string;
 }
 
 export interface LocalSpecFileOperations {
-  mkdir(path: string, options: { mode: number }): Promise<unknown>;
   writeFile(
     path: string,
     data: string,
     options: { encoding: "utf8"; flag: "wx"; mode: number },
   ): Promise<unknown>;
-  rmdir(path: string): Promise<unknown>;
 }
 
 export class LocalSpecMutationError extends Error {
@@ -87,11 +80,7 @@ export function isKnownLocalSpecFailure(error: unknown): boolean {
   return error instanceof LocalSpecMutationError && error.outcome === "not_applied";
 }
 
-const NODE_FILE_OPERATIONS: LocalSpecFileOperations = {
-  mkdir,
-  writeFile,
-  rmdir,
-};
+const NODE_FILE_OPERATIONS: LocalSpecFileOperations = { writeFile };
 
 function errorCode(error: unknown): string | undefined {
   return typeof error === "object" && error !== null && "code" in error
@@ -99,17 +88,12 @@ function errorCode(error: unknown): string | undefined {
     : undefined;
 }
 
-function validateInputs(directory: string, spec: unknown): asserts spec is LocalProjectSpec {
-  if (!Value.Check(FolderName, directory)) {
-    throw new Error(
-      "Local spec directory must be one portable folder name using only letters, numbers, dots, underscores, or hyphens.",
-    );
-  }
+function validateInputs(spec: unknown): asserts spec is LocalProjectSpec {
   if (!Value.Check(LocalProjectSpecSchema, spec)) {
     throw new Error("Local spec content does not match the canonical tunedtensor.json schema.");
   }
   // Same behavior-spec rules as review, edits and execution.
-  pipelineForRunInput(parseLocalRunInput(spec, join(directory, "tunedtensor.json")));
+  pipelineForRunInput(parseLocalRunInput(spec, SPEC_FILE));
 }
 
 export async function canonicalWorkspace(workspaceRoot: string): Promise<string> {
@@ -133,7 +117,6 @@ function fingerprintWorkspaceInfo(
 
 export async function prepareLocalSpecProject(
   workspaceRoot: string,
-  directory: string,
   spec: unknown,
   expectedWorkspaceFingerprint?: string,
 ): Promise<PreparedLocalSpecProject> {
@@ -147,60 +130,32 @@ export async function prepareLocalSpecProject(
       "The local workspace changed after this action was prepared; return to the original workspace and prepare it again.",
     );
   }
-  validateInputs(directory, spec);
-  const targetDirectory = join(canonicalRoot, directory);
+  validateInputs(spec);
   try {
-    await lstat(targetDirectory);
+    await lstat(join(canonicalRoot, SPEC_FILE));
   } catch (error) {
     if (errorCode(error) === "ENOENT") {
-      return {
-        directory: `./${directory}`,
-        specPath: `./${directory}/tunedtensor.json`,
-        workspaceFingerprint,
-      };
+      return { specPath: SPEC_DISPLAY_PATH, workspaceFingerprint };
     }
     throw error;
   }
-  throw new Error(`Refusing to overwrite existing path ./${directory}.`);
+  throw new Error(
+    `Refusing to overwrite existing ${SPEC_DISPLAY_PATH}; edit it with prepare_update_local_spec instead.`,
+  );
 }
 
 export async function createLocalSpecProject(
   workspaceRoot: string,
-  directory: string,
   spec: unknown,
   expectedWorkspaceFingerprint: string,
   operationOverrides: Partial<LocalSpecFileOperations> = {},
 ): Promise<CreatedLocalSpecProject> {
   let prepared: PreparedLocalSpecProject;
-  try {
-    prepared = await prepareLocalSpecProject(
-      workspaceRoot,
-      directory,
-      spec,
-      expectedWorkspaceFingerprint,
-    );
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new LocalSpecMutationError(detail, "not_applied", error);
-  }
-  if (prepared.workspaceFingerprint !== expectedWorkspaceFingerprint) {
-    throw new LocalSpecMutationError(
-      "The local workspace changed after this action was prepared; return to the original workspace and prepare it again.",
-      "not_applied",
-    );
-  }
-
   let canonicalRoot: string;
   try {
+    prepared = await prepareLocalSpecProject(workspaceRoot, spec, expectedWorkspaceFingerprint);
     canonicalRoot = await canonicalWorkspace(workspaceRoot);
-    if (await fingerprintWorkspace(canonicalRoot) !== expectedWorkspaceFingerprint) {
-      throw new LocalSpecMutationError(
-        "The local workspace changed after this action was prepared; return to the original workspace and prepare it again.",
-        "not_applied",
-      );
-    }
   } catch (error) {
-    if (error instanceof LocalSpecMutationError) throw error;
     const detail = error instanceof Error ? error.message : String(error);
     throw new LocalSpecMutationError(detail, "not_applied", error);
   }
@@ -217,8 +172,7 @@ export async function createLocalSpecProject(
       canonicalRoot,
       constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
     );
-    const openedWorkspaceInfo = await workspaceHandle.stat();
-    if (fingerprintWorkspaceInfo(openedWorkspaceInfo) !== expectedWorkspaceFingerprint) {
+    if (fingerprintWorkspaceInfo(await workspaceHandle.stat()) !== expectedWorkspaceFingerprint) {
       throw new LocalSpecMutationError(
         "The local workspace changed after this action was prepared; return to the original workspace and prepare it again.",
         "not_applied",
@@ -232,48 +186,17 @@ export async function createLocalSpecProject(
     const detail = error instanceof Error ? error.message : String(error);
     throw new LocalSpecMutationError(detail, "not_applied", error);
   }
-  if (!workspaceHandle) {
-    throw new LocalSpecMutationError("The local workspace could not be opened safely.", "not_applied");
-  }
 
-  const stableWorkspaceRoot = `/proc/self/fd/${workspaceHandle.fd}`;
-  const targetDirectory = join(stableWorkspaceRoot, directory);
   const operations = { ...NODE_FILE_OPERATIONS, ...operationOverrides };
-  let createdDirectory = false;
-  let writeStarted = false;
-  let directoryHandle: Awaited<ReturnType<typeof open>> | undefined;
+  // Write through the opened workspace handle so a swapped root is never followed.
+  const stableSpecPath = join(`/proc/self/fd/${workspaceHandle.fd}`, SPEC_FILE);
   try {
-    await operations.mkdir(targetDirectory, { mode: 0o700 });
-    createdDirectory = true;
-    const targetInfo = await lstat(targetDirectory);
-    if (targetInfo.isSymbolicLink() || !targetInfo.isDirectory()) {
-      throw new Error(`Local spec destination ./${directory} changed before the spec could be written.`);
-    }
-    directoryHandle = await open(
-      targetDirectory,
-      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
-    );
-    const openedInfo = await directoryHandle.stat();
-    if (openedInfo.dev !== targetInfo.dev || openedInfo.ino !== targetInfo.ino) {
-      throw new Error(`Local spec destination ./${directory} changed before the spec could be written.`);
-    }
-    const stableSpecPath = join(`/proc/self/fd/${directoryHandle.fd}`, "tunedtensor.json");
-    writeStarted = true;
     // A stable ID keeps run identity and the eval split fixed across later edits.
-    await operations.writeFile(stableSpecPath, `${JSON.stringify({ id: randomUUID(), ...(spec as LocalProjectSpec) }, null, 2)}\n`, {
+    await operations.writeFile(stableSpecPath, `${JSON.stringify({ id: randomUUID(), ...spec as LocalProjectSpec }, null, 2)}\n`, {
       encoding: "utf8",
       flag: "wx",
       mode: 0o600,
     });
-    const finalInfo = await lstat(targetDirectory);
-    if (
-      finalInfo.isSymbolicLink()
-      || !finalInfo.isDirectory()
-      || finalInfo.dev !== openedInfo.dev
-      || finalInfo.ino !== openedInfo.ino
-    ) {
-      throw new Error(`Local spec destination ./${directory} changed while the spec was being written.`);
-    }
     const finalWorkspaceInfo = await lstat(canonicalRoot);
     if (
       finalWorkspaceInfo.isSymbolicLink()
@@ -282,60 +205,20 @@ export async function createLocalSpecProject(
     ) {
       throw new Error("The local workspace changed while the spec was being written.");
     }
-    await directoryHandle.close();
-    directoryHandle = undefined;
-    await workspaceHandle.close();
   } catch (error) {
-    const rollbackErrors: unknown[] = [];
-    if (directoryHandle) {
-      try {
-        await directoryHandle.close();
-      } catch (rollbackError) {
-        rollbackErrors.push(rollbackError);
-      }
+    try { await workspaceHandle.close(); } catch { /* The outcome is already decided below. */ }
+    const detail = error instanceof Error ? error.message : String(error);
+    if (errorCode(error) === "EEXIST") {
+      throw new LocalSpecMutationError(`Refusing to overwrite existing ${SPEC_DISPLAY_PATH}.`, "not_applied", error);
     }
-    if (createdDirectory) {
-      // Never unlink the spec path after an ambiguous write: a racing writer
-      // may own it. Only remove the directory when it is still empty.
-      try {
-        await operations.rmdir(targetDirectory);
-      } catch (rollbackError) {
-        if (errorCode(rollbackError) !== "ENOENT") rollbackErrors.push(rollbackError);
-      }
-    }
-    try {
-      await workspaceHandle.close();
-    } catch (rollbackError) {
-      rollbackErrors.push(rollbackError);
-    }
-    if (writeStarted) {
-      throw new LocalSpecMutationError(
-        `Local spec writing did not complete conclusively for ./${directory}; inspect the workspace before retrying.`,
-        "unknown",
-        error,
-      );
-    }
-    if (rollbackErrors.length > 0) {
-      throw new LocalSpecMutationError(
-        `Local spec creation failed and rollback could not be completed for ./${directory}; inspect the workspace before retrying.`,
-        "unknown",
-        error,
-      );
-    }
-    if (createdDirectory || errorCode(error) === "EEXIST") {
-      const detail = error instanceof Error ? error.message : String(error);
-      throw new LocalSpecMutationError(detail, "not_applied", error);
-    }
+    // Never unlink the spec after an ambiguous write: a racing writer may own it.
     throw new LocalSpecMutationError(
-      `Local spec directory creation failed for ./${directory}; inspect the workspace before retrying.`,
+      `Local spec writing did not complete conclusively for ${SPEC_DISPLAY_PATH}; inspect the workspace before retrying. ${detail}`,
       "unknown",
       error,
     );
   }
+  try { await workspaceHandle.close(); } catch { /* The spec is written. */ }
 
-  return {
-    created: true,
-    directory: prepared.directory,
-    path: prepared.specPath,
-  };
+  return { created: true, path: prepared.specPath };
 }

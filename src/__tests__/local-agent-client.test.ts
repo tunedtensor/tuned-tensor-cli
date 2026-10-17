@@ -393,7 +393,7 @@ describe("local agent conversation client", () => {
         { input: "This is disappointing.", output: "negative" },
       ],
     };
-    const prepared = await prepareLocalSpecProject(activeWorkspace, "sentiment-demo", spec);
+    const prepared = await prepareLocalSpecProject(activeWorkspace, spec);
     await store.save({
       thread: {
         id: threadId,
@@ -408,11 +408,10 @@ describe("local agent conversation client", () => {
         id: actionId,
         operation: "create_local_spec",
         title: "Create local spec",
-        summary: "Create ./sentiment-demo/tunedtensor.json",
+        summary: "Create ./tunedtensor.json",
         risk: "Creates local files",
         status: "proposed",
         arguments: {
-          directory: "sentiment-demo",
           spec,
           workspace_fingerprint: prepared.workspaceFingerprint,
         },
@@ -434,7 +433,6 @@ describe("local agent conversation client", () => {
       mutationApi,
     });
 
-    mkdirSync(join(root, "sentiment-demo"));
     await expect(client.approveAction(actionId, () => {}, undefined, {
       mode: "local",
       workspaceRoot: root,
@@ -448,7 +446,7 @@ describe("local agent conversation client", () => {
       status: "completed",
     });
     expect(JSON.parse(readFileSync(
-      join(activeWorkspace, "sentiment-demo", "tunedtensor.json"),
+      join(activeWorkspace, "tunedtensor.json"),
       "utf8",
     )))
       .toEqual({ id: expect.any(String), ...spec });

@@ -90,7 +90,7 @@ describe("Tuned Tensor agent tools", () => {
     try {
       const output = await tool("prepare_create_local_spec", api, workspace).execute(
         "call-local-spec",
-        { directory: "sentiment-demo", spec },
+        { spec },
       );
 
       expect(api.get).not.toHaveBeenCalled();
@@ -98,14 +98,10 @@ describe("Tuned Tensor agent tools", () => {
       expect(api.propose).toHaveBeenCalledWith(expect.objectContaining({
         operation: "create_local_spec",
         arguments: {
-          directory: "sentiment-demo",
           spec,
           workspace_fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
         },
-        preview: {
-          directory: "./sentiment-demo",
-          spec_path: "./sentiment-demo/tunedtensor.json",
-        },
+        preview: { spec_path: "./tunedtensor.json" },
       }));
       expect(output.details).toMatchObject({ operation: "create_local_spec" });
     } finally {
