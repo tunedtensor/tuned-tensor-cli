@@ -202,9 +202,13 @@ The agent can describe the built-in adapter and foundation pipeline stages,
 including optional foundation RL. When asked to train or dry-run, it derives or
 validates the pipeline, shows the exact plan, and prepares a deterministic
 dry-run. `/approve` starts that preview outside the model, and Ctrl-C stops the
-child process group. Real training is intentionally not model-mediated: run the
-displayed `tt pipeline run` command directly when you choose to execute. It can also
-search public Hugging Face model or dataset metadata for foundation and
+child process group. Dry-run approval never starts real training. After a dry-run
+of the same spec bytes completes in the conversation, the agent can propose a
+background run; a separate approval starts real training in the background.
+Review the target and reason before approving; user-owned AWS compute costs
+remain your responsibility. Cancellation also requires approval. You can still
+run `tt pipeline run` directly. See [background runs](docs/local-runtime/background-runs.md).
+The agent can also search public Hugging Face model or dataset metadata for foundation and
 fine-tuning discovery. A Hub search sends only the search query to
 `huggingface.co`; it uses no Hugging Face token, downloads nothing, and omits
 model-card and dataset-card text. Search results are discovery metadata, not a
