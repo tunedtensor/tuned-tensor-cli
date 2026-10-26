@@ -574,7 +574,21 @@ if __name__ == "__main__":
     main()
 `;
 
+function validateDownloadFilename(filename: string): void {
+  // API metadata is untrusted. Require a single portable filename before using
+  // it beneath either the working directory or a user-selected directory.
+  if (
+    typeof filename !== "string" || !filename.trim() ||
+    /[. ]$/.test(filename) ||
+    /[<>"\\/:|?*\x00-\x1f\x7f]/.test(filename) ||
+    /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(filename)
+  ) {
+    throw new Error("Invalid model download filename returned by the API.");
+  }
+}
+
 function resolveOutputPath(output: string | undefined, filename: string): string {
+  validateDownloadFilename(filename);
   if (!output) return filename;
   if (existsSync(output) && statSync(output).isDirectory()) {
     return join(output, filename);
@@ -936,6 +950,8 @@ async function resolveServeTarget(
   const fullId = await resolveModelId(target, opts);
   const { data: model } = await get<Model>(`/models/${fullId}`, undefined, opts);
   const { data } = await get<ModelDownload>(`/models/${fullId}/download`, undefined, opts);
+  validateDownloadFilename(fullId);
+  validateDownloadFilename(data.filename);
   const modelCacheDir = join(cacheDir, fullId);
   const archivePath = join(modelCacheDir, data.filename);
   const extractDir = join(modelCacheDir, "model");

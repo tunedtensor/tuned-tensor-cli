@@ -1,11 +1,15 @@
 # Local serving and coding harnesses
 
-`tt serve` verifies TT artifacts and launches **vLLM 0.28.0**. vLLM owns model
+`tt serve` verifies TT artifacts and launches **vLLM 0.32.0**. vLLM owns model
 execution, batching, KV/prefix caching, streaming, and native tool-call parsing.
 This local serving path connects the harness directly to vLLM; TT's managed
 agent proxy is a separate inference option. The serving dependencies are locked
 separately from training, in an external cache environment; an npm upgrade does
 not mutate the training runtime.
+
+The legacy `tt cloud models serve --managed` wrapper accepts completion bodies
+up to 8 MiB and up to eight simultaneous requests, including uploads and queued
+generations. It returns HTTP 413 for larger bodies and HTTP 503 when full.
 
 ## Requirements and scope
 
@@ -185,6 +189,6 @@ budgets, and fresh harness sessions on an otherwise-idle machine. Test generated
 code independently; a tiny one-step adapter proves integration, not better
 coding. Pi's zero provider token prices do not mean zero hardware cost.
 
-References: [vLLM LoRA](https://docs.vllm.ai/en/v0.28.0/features/lora/),
+References: [vLLM LoRA](https://docs.vllm.ai/en/v0.32.0/features/lora/),
 [Nemotron tool configuration](https://docs.nvidia.com/nim/large-language-models/latest/get-started/advanced/get-started-nemotron-3.5-lightning.html),
 [OpenCode custom providers](https://opencode.ai/docs/providers/#custom-provider).

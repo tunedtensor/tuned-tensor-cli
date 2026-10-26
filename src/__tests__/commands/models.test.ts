@@ -181,6 +181,23 @@ describe("models commands", () => {
   });
 
   describe("models download", () => {
+    it.each([
+      "../escape.tar.gz", "nested/../../escape.tar.gz", "/tmp/escape.tar.gz",
+      "..\\escape.tar.gz", "C:\\escape.tar.gz", "model.tar.gz:stream",
+      ".", "..", "", "\nmodel.tar.gz", "model\0.tar.gz",
+      ".. ", ".. .", "model.tar.gz.", "model.tar.gz ",
+      "CON", "nul.tar.gz", "LPT1.bin", "COM¹.txt", "model?.tar.gz",
+    ])("rejects an unsafe API filename %j before downloading", async (filename) => {
+      vi.mocked(client.get)
+        .mockResolvedValueOnce({ data: [mockModel], meta: { page: 1, per_page: 100, total: 1 } })
+        .mockResolvedValueOnce({ data: { url: "https://signed.example/model.tar.gz", filename } });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      await expect(buildProgram().parseAsync([
+        "node", "tt", "models", "download", "model-1234", "--output", tmpdir(), "--force",
+      ])).rejects.toThrow("Invalid model download filename");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
     it("downloads a model artifact to the requested path", async () => {
       const outputPath = join(tmpdir(), `tt-model-download-${process.pid}.tar.gz`);
       if (existsSync(outputPath)) rmSync(outputPath);
@@ -380,6 +397,36 @@ describe("models commands", () => {
   });
 
   describe("models serve", () => {
+    it("rejects a non-portable cached model ID before fetching an artifact", async () => {
+      const root = join(tmpdir(), `tt-model-serve-unsafe-id-${process.pid}`);
+      vi.mocked(client.get)
+        .mockResolvedValueOnce({ data: [{ ...mockModel, id: "model-1234. " }], meta: { page: 1, per_page: 100, total: 1 } })
+        .mockResolvedValueOnce({ data: mockModel })
+        .mockResolvedValueOnce({ data: { filename: "model.tar.gz", url: "https://signed.example/model.tar.gz" } });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      try {
+        await expect(buildProgram().parseAsync([
+          "node", "tt", "models", "serve", "model-1234", "--cache-dir", root, "--print-command",
+        ])).rejects.toThrow("Invalid model download filename");
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    });
+
+    it("rejects an unsafe cached download filename before fetching an artifact", async () => {
+      const root = join(tmpdir(), `tt-model-serve-unsafe-${process.pid}`);
+      vi.mocked(client.get)
+        .mockResolvedValueOnce({ data: [mockModel], meta: { page: 1, per_page: 100, total: 1 } })
+        .mockResolvedValueOnce({ data: mockModel })
+        .mockResolvedValueOnce({ data: { filename: "../../escape.tar.gz", url: "https://signed.example/model.tar.gz" } });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      try {
+        await expect(buildProgram().parseAsync([
+          "node", "tt", "models", "serve", "model-1234", "--cache-dir", root, "--print-command",
+        ])).rejects.toThrow("Invalid model download filename");
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    });
+
     it("prints a local reference server command with the spec prompt enabled", async () => {
       setJsonMode(true);
       const root = join(tmpdir(), `tt-model-serve-${process.pid}`);

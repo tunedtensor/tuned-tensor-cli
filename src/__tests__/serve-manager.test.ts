@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import type { ChildProcess } from "node:child_process";
-import { ManagedModelServer, type ManagedServeLogRecord } from "../serve-manager.js";
+import { ManagedModelServer, MAX_SERVE_REQUEST_BYTES, MAX_SERVE_PENDING_REQUESTS, type ManagedServeLogRecord } from "../serve-manager.js";
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -118,6 +118,68 @@ afterEach(() => {
 });
 
 describe("ManagedModelServer", () => {
+  it("rejects oversized declared bodies before reading them or starting the model", async () => {
+    const { server, port, fake } = await createManagedServer();
+    try {
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        const req = httpRequest(`http://127.0.0.1:${port}/v1/chat/completions`, {
+          method: "POST", headers: { "content-length": MAX_SERVE_REQUEST_BYTES + 1 },
+        }, (res) => { res.resume(); resolve(res.statusCode); });
+        req.on("error", reject);
+        req.flushHeaders(); // No body: rejection must not wait for it.
+      });
+      expect(status).toBe(413);
+      expect(fake.spawn).not.toHaveBeenCalled();
+    } finally { await server.stop(); }
+  });
+
+  it("bounds chunked uploads and releases their admission slot on rejection", async () => {
+    const { server, port, fake } = await createManagedServer();
+    try {
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        const req = httpRequest(`http://127.0.0.1:${port}/v1/chat/completions`, {
+          method: "POST", headers: { "transfer-encoding": "chunked" },
+        }, (res) => { res.resume(); resolve(res.statusCode); });
+        req.on("error", reject);
+        req.end(Buffer.alloc(MAX_SERVE_REQUEST_BYTES + 1));
+      });
+      expect(status).toBe(413);
+      expect(fake.spawn).not.toHaveBeenCalled();
+      const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: "POST", body: Buffer.alloc(MAX_SERVE_REQUEST_BYTES),
+      });
+      expect(response.status).toBe(200);
+      await response.arrayBuffer();
+    } finally { await server.stop(); }
+  });
+
+  it("limits concurrent uploads before buffering or starting the model", async () => {
+    const { server, port, fake } = await createManagedServer();
+    const requests: ReturnType<typeof httpRequest>[] = [];
+    try {
+      for (let index = 0; index < MAX_SERVE_PENDING_REQUESTS; index += 1) {
+        await new Promise<void>((resolve, reject) => {
+          const req = httpRequest(`http://127.0.0.1:${port}/v1/chat/completions`, {
+            method: "POST", headers: { Expect: "100-continue", "content-length": "100" },
+          });
+          requests.push(req);
+          req.on("error", reject);
+          req.once("continue", resolve);
+          req.flushHeaders();
+        });
+      }
+      const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: "POST", body: "{}",
+      });
+      expect(response.status).toBe(503);
+      await response.arrayBuffer();
+      expect(fake.spawn).not.toHaveBeenCalled();
+    } finally {
+      requests.forEach((req) => req.destroy());
+      await server.stop();
+    }
+  });
+
   it("starts the model on demand and logs request metrics", async () => {
     const { server, port, logs, fake } = await createManagedServer();
     try {

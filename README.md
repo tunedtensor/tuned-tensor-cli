@@ -849,6 +849,11 @@ npm run test:workflows  # Focused product workflow regressions; no model key or 
 npm run check           # Typecheck, all tests, and build (the release gate)
 ```
 
+The npm package bundles the agent, pipeline contract, and Zod dependency trees
+so the security overrides also reach installed CLI users. npm does not apply a
+dependency's own overrides. CI audits a fresh installation of the packed CLI;
+keep that check when changing dependency pins or packaging.
+
 See [testing and workflow contracts](docs/testing.md) for what the
 suite guarantees, how to evaluate a real agent with `npm run eval:agent`, and
 the remaining steps toward the full conversational product promise.

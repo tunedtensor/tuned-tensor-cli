@@ -12,7 +12,7 @@ dependencies = [
 
 [dependency-groups]
 # Match the pinned serving runtime for CPU export parity tests.
-test = ["transformers==5.16.1"]
+test = ["transformers==5.19.0"]
 
 [tool.uv.sources]
 torch = [
