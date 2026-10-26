@@ -579,8 +579,9 @@ function validateDownloadFilename(filename: string): void {
   // it beneath either the working directory or a user-selected directory.
   if (
     typeof filename !== "string" || !filename.trim() ||
-    filename === "." || filename === ".." ||
-    /[\\/:\x00-\x1f\x7f]/.test(filename)
+    /[. ]$/.test(filename) ||
+    /[<>"\\/:|?*\x00-\x1f\x7f]/.test(filename) ||
+    /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(filename)
   ) {
     throw new Error("Invalid model download filename returned by the API.");
   }

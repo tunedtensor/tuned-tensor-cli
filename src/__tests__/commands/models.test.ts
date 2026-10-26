@@ -185,6 +185,8 @@ describe("models commands", () => {
       "../escape.tar.gz", "nested/../../escape.tar.gz", "/tmp/escape.tar.gz",
       "..\\escape.tar.gz", "C:\\escape.tar.gz", "model.tar.gz:stream",
       ".", "..", "", "\nmodel.tar.gz", "model\0.tar.gz",
+      ".. ", ".. .", "model.tar.gz.", "model.tar.gz ",
+      "CON", "nul.tar.gz", "LPT1.bin", "COM¹.txt", "model?.tar.gz",
     ])("rejects an unsafe API filename %j before downloading", async (filename) => {
       vi.mocked(client.get)
         .mockResolvedValueOnce({ data: [mockModel], meta: { page: 1, per_page: 100, total: 1 } })
@@ -395,6 +397,21 @@ describe("models commands", () => {
   });
 
   describe("models serve", () => {
+    it("rejects a non-portable cached model ID before fetching an artifact", async () => {
+      const root = join(tmpdir(), `tt-model-serve-unsafe-id-${process.pid}`);
+      vi.mocked(client.get)
+        .mockResolvedValueOnce({ data: [{ ...mockModel, id: "model-1234. " }], meta: { page: 1, per_page: 100, total: 1 } })
+        .mockResolvedValueOnce({ data: mockModel })
+        .mockResolvedValueOnce({ data: { filename: "model.tar.gz", url: "https://signed.example/model.tar.gz" } });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      try {
+        await expect(buildProgram().parseAsync([
+          "node", "tt", "models", "serve", "model-1234", "--cache-dir", root, "--print-command",
+        ])).rejects.toThrow("Invalid model download filename");
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    });
+
     it("rejects an unsafe cached download filename before fetching an artifact", async () => {
       const root = join(tmpdir(), `tt-model-serve-unsafe-${process.pid}`);
       vi.mocked(client.get)
