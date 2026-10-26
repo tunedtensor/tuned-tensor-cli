@@ -83,6 +83,9 @@ jobs:
           cd "${smoke_dir}"
           npm init -y >/dev/null
           npm install "${tarball_path}" --silent
+          # Check the bundled dependency fixes after a consumer installation:
+          # npm ignores this package's overrides when installing it as a dependency.
+          npm audit --omit=dev --audit-level=high
           npx --no-install tt --version
           npx --no-install tt --help >/dev/null
           npx --no-install tt status --json >/dev/null

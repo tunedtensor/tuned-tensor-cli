@@ -54,6 +54,14 @@ interface ForwardResult {
 }
 
 const COMPLETION_ROUTES = new Set(["/v1/chat/completions", "/chat/completions"]);
+export const MAX_SERVE_REQUEST_BYTES = 8 * 1024 * 1024;
+export const MAX_SERVE_PENDING_REQUESTS = 8;
+
+class RequestTooLargeError extends Error {
+  constructor() {
+    super("Completion request exceeds the 8 MiB limit.");
+  }
+}
 
 function parsePositiveInteger(value: number, fallback: number): number {
   return Number.isInteger(value) && value >= 0 ? value : fallback;
@@ -65,11 +73,48 @@ function sleep(ms: number) {
 
 function readRequestBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
+    if (Number(req.headers["content-length"]) > MAX_SERVE_REQUEST_BYTES) {
+      reject(new RequestTooLargeError());
+      return;
+    }
     const chunks: Buffer[] = [];
-    req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
+    let bytes = 0;
+    const cleanup = () => {
+      req.off("data", onData);
+      req.off("end", onEnd);
+      req.off("error", onError);
+      req.off("aborted", onAborted);
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      chunks.length = 0;
+      reject(error);
+    };
+    const onAborted = () => onError(new Error("Request aborted"));
+    const onData = (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > MAX_SERVE_REQUEST_BYTES) {
+        req.pause();
+        onError(new RequestTooLargeError());
+        return;
+      }
+      chunks.push(chunk);
+    };
+    const onEnd = () => {
+      cleanup();
+      resolve(Buffer.concat(chunks, bytes));
+    };
+    req.on("data", onData);
+    req.on("end", onEnd);
+    req.on("error", onError);
+    req.on("aborted", onAborted);
   });
+}
+
+function rejectRequest(req: IncomingMessage, res: ServerResponse, status: number, message: string) {
+  res.setHeader("connection", "close");
+  res.once("finish", () => req.destroy());
+  sendJson(res, status, { error: { message } });
 }
 
 function sendJson(res: ServerResponse, status: number, payload: unknown) {
@@ -239,12 +284,26 @@ export class ManagedModelServer {
     }
 
     if (req.method === "POST" && COMPLETION_ROUTES.has(route)) {
+      if (this.queuedRequests >= MAX_SERVE_PENDING_REQUESTS) {
+        rejectRequest(req, res, 503, "Model server is busy. Retry later.");
+        return;
+      }
       const receivedAt = Date.now();
-      const body = await readRequestBody(req);
+      // Reserve a slot before buffering so concurrent uploads are bounded too.
       this.queuedRequests += 1;
-      const work = this.queue.then(() => this.processGeneration(route, body, res, receivedAt));
-      this.queue = work.catch(() => undefined);
       try {
+        let body: Buffer;
+        try {
+          body = await readRequestBody(req);
+        } catch (error) {
+          if (error instanceof RequestTooLargeError) {
+            rejectRequest(req, res, 413, error.message);
+            return;
+          }
+          throw error;
+        }
+        const work = this.queue.then(() => this.processGeneration(route, body, res, receivedAt));
+        this.queue = work.catch(() => undefined);
         await work;
       } finally {
         this.queuedRequests -= 1;
