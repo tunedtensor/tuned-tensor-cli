@@ -81,6 +81,8 @@ Account commands, the conversational interface, hardware discovery, spec
 inspection, data commands, and pipeline previews run from PowerShell. Environment
 variables use PowerShell syntax, for example `$env:TT_NO_UPDATE_CHECK = '1'`.
 Use Windows paths and quotes around paths containing spaces.
+Inside TT's conversational terminal, backslashes stay literal on Windows:
+`/cd "C:\work files"` and `spec view .\tunedtensor.json` work as expected.
 
 Some existing runtime features have narrower platform requirements:
 

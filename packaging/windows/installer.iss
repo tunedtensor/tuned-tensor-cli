@@ -31,6 +31,16 @@ Type: filesandordirs; Name: "{app}\node_modules"
 Type: filesandordirs; Name: "{app}\runtime"
 
 [Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if not FileExists(ExpandConstant('{app}\tt-install.json')) and
+     (DirExists(ExpandConstant('{app}\node_modules')) or
+      DirExists(ExpandConstant('{app}\runtime')) or
+      FileExists(ExpandConstant('{app}\tt.cmd'))) then
+    Result := 'This directory contains files not managed by Tuned Tensor setup. Choose an empty install directory.';
+end;
+
 function PathContains(Value, Entry: String): Boolean;
 begin
   Result := Pos(';' + Lowercase(Entry) + ';', ';' + Lowercase(Value) + ';') > 0;

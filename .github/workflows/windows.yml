@@ -9,6 +9,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -17,7 +18,7 @@ jobs:
           cache: npm
       - run: npm.cmd ci
       - name: Check native CLI behavior
-        run: npm.cmd run test:cli -- src/__tests__/hardware-guidance.test.ts src/__tests__/commands/upgrade.test.ts src/__tests__/windows-upgrade.test.ts
+        run: npm.cmd run test:cli -- src/__tests__/hardware-guidance.test.ts src/__tests__/commands/upgrade.test.ts src/__tests__/windows-upgrade.test.ts src/__tests__/windows-shell.test.ts
       - name: Build installer and manifests
         shell: powershell
         run: |

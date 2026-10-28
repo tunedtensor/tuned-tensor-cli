@@ -9,6 +9,7 @@ $version = (Get-Content (Join-Path $repo 'package.json') -Raw | ConvertFrom-Json
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('tt smoke ' + [guid]::NewGuid())
 $installDir = Join-Path $temporary 'Tuned Tensor'
 $originalPath = $env:Path
+$shellExecutable = (Get-Process -Id $PID).Path
 $originalHome = $env:TUNED_TENSOR_HOME
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 New-Item -ItemType Directory -Force $temporary | Out-Null
@@ -19,6 +20,13 @@ Set-Content (Join-Path $env:TUNED_TENSOR_HOME 'keep.txt') 'user data'
 $uninstaller = Join-Path $installDir 'unins000.exe'
 Push-Location $temporary
 try {
+    $collision = Join-Path $temporary 'existing project'
+    New-Item -ItemType Directory (Join-Path $collision 'node_modules') -Force | Out-Null
+    Set-Content (Join-Path $collision 'node_modules\keep.txt') 'unrelated project'
+    $refused = Start-Process -FilePath $Installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$collision`"" -Wait -PassThru
+    if ($refused.ExitCode -eq 0 -or (Get-Content (Join-Path $collision 'node_modules\keep.txt')) -ne 'unrelated project') {
+        throw 'Setup must refuse to replace unrelated files.'
+    }
     foreach ($attempt in 1..2) {
         $setup = Start-Process -FilePath $Installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installDir`"" -Wait -PassThru
         if ($setup.ExitCode -ne 0) { throw "Setup attempt $attempt failed: $($setup.ExitCode)" }
@@ -29,13 +37,15 @@ try {
         $env:Path = "$installDir;$env:WINDIR\System32"
         $actual = & tt --version
         if ($LASTEXITCODE -ne 0 -or $actual.Trim() -ne $version) { throw "Unexpected version: $actual" }
+        $restrictedVersion = & $shellExecutable -NoProfile -ExecutionPolicy Restricted -Command 'tt --version'
+        if ($LASTEXITCODE -ne 0 -or $restrictedVersion.Trim() -ne $version) { throw 'tt must work under Restricted execution policy.' }
         & TT --help | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Case-insensitive command lookup failed.' }
         $status = & tt status --json
         if ($LASTEXITCODE -ne 0) { throw 'Local status failed.' }
         $status | ConvertFrom-Json | Out-Null
         Copy-Item (Join-Path $repo 'examples\local-runtime\smoke-spec.json') (Join-Path $temporary 'tunedtensor.json') -Force
-        & tt spec view | Out-Null
+        & tt spec view '.\tunedtensor.json' | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Spec inspection failed.' }
         $preview = & tt pipeline run --dry-run --json
         if ($LASTEXITCODE -ne 0) { throw 'Pipeline preview failed.' }
@@ -64,3 +74,6 @@ try {
     Remove-Item $temporary -Recurse -Force
 }
 Write-Host "Windows installer smoke passed in PowerShell $($PSVersionTable.PSVersion)."
+# The negative upgrade test deliberately leaves LASTEXITCODE nonzero. Report the
+# suite result explicitly so CI does not mistake that expected refusal for failure.
+exit 0

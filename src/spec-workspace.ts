@@ -50,7 +50,7 @@ async function readBounded(path: string, limit = MAX_BYTES): Promise<string> {
 /** Restrict agent reads and writes to a named spec under real workspace directories. */
 async function specLocation(workspaceRoot: string, specPath: string) {
   const root = await canonicalWorkspace(workspaceRoot);
-  const parts = specPath.replace(/^\.\//, "").split(/[\\/]/);
+  const parts = specPath.replace(/^\.[\\/]/, "").split(/[\\/]/);
   if (isAbsolute(specPath) || parts.some(part => !part || part === "." || part === "..") || parts.at(-1) !== "tunedtensor.json") {
     throw new Error("spec_path must name tunedtensor.json inside the current workspace (no traversal or symlinks).");
   }
