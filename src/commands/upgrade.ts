@@ -115,7 +115,13 @@ function defaultNpmRunner(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): Np
   });
 }
 
-function formatCommand(args: string[]): string {
+function formatCommand(args: string[], platform: NodeJS.Platform): string {
+  if (platform === "win32") {
+    // PowerShell does not interpret JSON's doubled backslashes as path separators.
+    return ["npm.cmd", ...args].map((arg) => (
+      /^[a-zA-Z0-9_@./:\\+=-]+$/.test(arg) ? arg : "'" + arg.replaceAll("'", "''") + "'"
+    )).join(" ");
+  }
   return ["npm", ...args].map((arg) => (/\s/.test(arg) ? JSON.stringify(arg) : arg)).join(" ");
 }
 
@@ -200,25 +206,25 @@ Set TT_NO_UPDATE_CHECK=1 to silence update notices.
         throw new Error(
           `tt is installed in ${install.prefix}, which this user can't write to. `
           + (platform === "win32"
-            ? `Use an account with access to that directory and run:\n  ${formatCommand(npmArgs)}`
-            : `Run:\n  sudo ${formatCommand(npmArgs)}`),
+            ? `Use an account with access to that directory and run:\n  ${formatCommand(npmArgs, platform)}`
+            : `Run:\n  sudo ${formatCommand(npmArgs, platform)}`),
         );
       }
 
       if (!isJsonMode()) {
         console.log(`Upgrading tt ${current} → ${chalk.bold(latest ?? target)}`);
-        console.log(chalk.dim(`$ ${formatCommand(npmArgs)}`));
+        console.log(chalk.dim(`$ ${formatCommand(npmArgs, platform)}`));
       }
       let code: number;
       try {
         code = await (deps.runNpm ?? defaultNpmRunner(platform, deps.env))(npmArgs);
       } catch (error) {
         throw new Error(
-          `Could not run npm (${error instanceof Error ? error.message : String(error)}). Run it yourself:\n  ${formatCommand(npmArgs)}`,
+          `Could not run npm (${error instanceof Error ? error.message : String(error)}). Run it yourself:\n  ${formatCommand(npmArgs, platform)}`,
         );
       }
       if (code !== 0) {
-        throw new Error(`npm exited with code ${code}. Run it yourself to see details:\n  ${formatCommand(npmArgs)}`);
+        throw new Error(`npm exited with code ${code}. Run it yourself to see details:\n  ${formatCommand(npmArgs, platform)}`);
       }
 
       const installed = installedVersion(install.packageDir) ?? latest ?? target;

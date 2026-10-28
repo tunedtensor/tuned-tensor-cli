@@ -5,7 +5,23 @@ Set-StrictMode -Version Latest
 $fixtureDirectory = Join-Path ([IO.Path]::GetTempPath()) ('tt-download-' + [guid]::NewGuid())
 New-Item -ItemType Directory $fixtureDirectory | Out-Null
 $originalPath = $env:Path
+$originalArchitecture = $env:PROCESSOR_ARCHITECTURE
+$originalArchitectureW6432 = $env:PROCESSOR_ARCHITEW6432
 try {
+    # Check unsupported hosts before mocking x64 downloader cases. No network
+    # or setup is reached on either unsupported architecture.
+    foreach ($architecture in @('ARM64', 'x86')) {
+        $env:PROCESSOR_ARCHITECTURE = $architecture
+        $env:PROCESSOR_ARCHITEW6432 = $architecture
+        $failure = $null
+        try { & (Join-Path $PSScriptRoot 'install.ps1') -Version '1.2.3' }
+        catch { $failure = $_.Exception.Message }
+        if (-not $failure -or $failure -notmatch 'standalone installer requires Windows x64') {
+            throw "Unsupported architecture $architecture was not refused: $failure"
+        }
+    }
+    $env:PROCESSOR_ARCHITECTURE = 'AMD64'
+    $env:PROCESSOR_ARCHITEW6432 = 'AMD64'
     '@echo off', 'echo 1.2.3', 'exit /b 0' | Set-Content (Join-Path $fixtureDirectory 'tt.cmd') -Encoding Ascii
     $payload = Join-Path $fixtureDirectory 'fixture.exe'
     [IO.File]::WriteAllText($payload, 'fixture installer')
@@ -34,7 +50,7 @@ try {
             }
         }
         function Start-Process {
-            param($FilePath, $ArgumentList, [switch]$Wait, [switch]$PassThru)
+            param($FilePath, $ArgumentList, $WindowStyle, [switch]$Wait, [switch]$PassThru)
             $testState.setupCalled = $true
             if ($ArgumentList -notcontains '/VERYSILENT') { throw 'Setup must be unattended.' }
             if ($Case -eq 'exit') { return @{ ExitCode = 7 } }
@@ -61,6 +77,8 @@ try {
     Invoke-Case 'success' ''
 } finally {
     $env:Path = $originalPath
+    $env:PROCESSOR_ARCHITECTURE = $originalArchitecture
+    $env:PROCESSOR_ARCHITEW6432 = $originalArchitectureW6432
     Remove-Item $fixtureDirectory -Recurse -Force
 }
 Write-Host 'PowerShell download installer checks passed.'

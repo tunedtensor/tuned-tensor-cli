@@ -72,6 +72,10 @@ ships only `tt.cmd`, so plain `tt` works there even with Restricted policy.
 For npm installs, uninstall with `npm.cmd uninstall -g @tuned-tensor/cli`.
 If you selected a custom npm `--prefix`, supply the same prefix on uninstall
 and add that directory itself (not a `bin` subdirectory) to your user PATH.
+Use an install prefix without `&`: npm's generated `tt.cmd` launcher can fail
+when that character appears in its directory, including in a Windows username.
+If affected, select an accessible prefix such as `C:\TunedTensor` and add it
+to your user PATH. Quoted paths containing spaces work.
 `tt upgrade` finds the prefix of the running installation automatically.
 Use `Get-Command tt -All` to find older installations if the wrong version runs.
 
@@ -113,7 +117,10 @@ The Windows CI job runs on PRs and gates npm releases. It tests the built
 installer in PowerShell 5.1 and 7: repeated install, private runtime without
 system Node on PATH, CLI inspection and dry-run, upgrade ownership, and uninstall
 with unrelated PATH entries and user data preserved. It also exercises npm
-global installation. This is CLI/distribution coverage, not a real model-training
+global installation, including actual status, spec inspection, hardware discovery
+and pipeline previews in both shells. A native Windows ARM64 job checks the npm
+route, architecture rejection in the x64 downloader, and the same CLI regressions.
+This is CLI/distribution coverage, not a real model-training
 certification.
 
 The release workflow attaches the tested `.exe`, `.exe.sha256`, and, for stable

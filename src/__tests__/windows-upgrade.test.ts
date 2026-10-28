@@ -43,4 +43,18 @@ describe("native Windows upgrades", () => {
       "install", "-g", "--ignore-scripts", "--prefix", prefix, "@tuned-tensor/cli@beta",
     ], { env, shell: false, stdio: ["ignore", "inherit", "inherit"] });
   });
+
+  it("prints a PowerShell retry command with literal Windows separators and quotes", async () => {
+    const prefix = "C:\\Users\\A & B's files\\npm";
+    const entrypoint = win32.join(prefix, "node_modules", "@tuned-tensor", "cli", "dist", "index.js");
+    mocks.realpathSync.mockReturnValue(entrypoint);
+    mocks.readFileSync.mockImplementation(() => { throw new Error("absent"); });
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const program = new Command().exitOverride();
+    registerUpgradeCommand(program, {
+      version: "0.26.2", entrypoint, env: {}, platform: "win32", runNpm: async () => 1,
+    });
+    await expect(program.parseAsync(["node", "tt", "upgrade", "beta"]))
+      .rejects.toThrow("npm.cmd install -g --ignore-scripts --prefix 'C:\\Users\\A & B''s files\\npm' @tuned-tensor/cli@beta");
+  });
 });

@@ -33,7 +33,7 @@ try {
     $expected = (Get-Content "$installer.sha256" -Raw).Trim()
     if ($expected -notmatch ('^([A-Fa-f0-9]{64})  ' + [regex]::Escape($filename) + '$')) { throw 'Invalid release checksum file.' }
     if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne $Matches[1]) { throw 'Installer checksum mismatch.' }
-    $setup = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+    $setup = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -WindowStyle Hidden -Wait -PassThru
     if ($setup.ExitCode -ne 0) { throw "Installer exited with code $($setup.ExitCode)." }
     $installDir = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\TunedTensor.CLI_is1' -Name InstallLocation).InstallLocation
     $env:Path = "$installDir;$env:Path"

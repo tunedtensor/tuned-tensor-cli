@@ -119,8 +119,9 @@ describe("tt upgrade", () => {
   });
 
   it("reports npm failures with the command to retry", async () => {
+    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
     await expect(run([], { fetchImpl: registry("0.22.0"), runNpm: async () => 1 }))
-      .rejects.toThrow(`npm install -g --ignore-scripts --prefix ${prefix} @tuned-tensor/cli@latest`);
+      .rejects.toThrow(`${npm} install -g --ignore-scripts --prefix`);
   });
 
   it("fails clearly when the registry is unreachable", async () => {

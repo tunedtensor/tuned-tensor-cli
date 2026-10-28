@@ -11,6 +11,7 @@ $installDir = Join-Path $temporary 'Tuned Tensor'
 $originalPath = $env:Path
 $shellExecutable = (Get-Process -Id $PID).Path
 $originalHome = $env:TUNED_TENSOR_HOME
+$originalUpdateCheck = $env:TT_NO_UPDATE_CHECK
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 New-Item -ItemType Directory -Force $temporary | Out-Null
 $env:TUNED_TENSOR_HOME = Join-Path $temporary 'user state'
@@ -20,15 +21,25 @@ Set-Content (Join-Path $env:TUNED_TENSOR_HOME 'keep.txt') 'user data'
 $uninstaller = Join-Path $installDir 'unins000.exe'
 Push-Location $temporary
 try {
-    $collision = Join-Path $temporary 'existing project'
-    New-Item -ItemType Directory (Join-Path $collision 'node_modules') -Force | Out-Null
-    Set-Content (Join-Path $collision 'node_modules\keep.txt') 'unrelated project'
-    $refused = Start-Process -FilePath $Installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$collision`"" -Wait -PassThru
-    if ($refused.ExitCode -eq 0 -or (Get-Content (Join-Path $collision 'node_modules\keep.txt')) -ne 'unrelated project') {
-        throw 'Setup must refuse to replace unrelated files.'
+    foreach ($case in @('node_modules', 'ordinary files', 'wrong marker')) {
+        $collision = Join-Path $temporary $case
+        New-Item -ItemType Directory $collision -Force | Out-Null
+        $keep = Join-Path $collision 'keep.txt'
+        if ($case -ne 'ordinary files') {
+            New-Item -ItemType Directory (Join-Path $collision 'node_modules') | Out-Null
+            $keep = Join-Path $collision 'node_modules\keep.txt'
+        }
+        Set-Content $keep 'unrelated project'
+        if ($case -eq 'wrong marker') {
+            '{"manager":"another-app"}' | Set-Content (Join-Path $collision 'tt-install.json') -Encoding Ascii
+        }
+        $refused = Start-Process -FilePath $Installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$collision`"" -WindowStyle Hidden -Wait -PassThru
+        if ($refused.ExitCode -eq 0 -or (Get-Content $keep) -ne 'unrelated project') {
+            throw "Setup must refuse unrelated files ($case)."
+        }
     }
     foreach ($attempt in 1..2) {
-        $setup = Start-Process -FilePath $Installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installDir`"" -Wait -PassThru
+        $setup = Start-Process -FilePath $Installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installDir`"" -WindowStyle Hidden -Wait -PassThru
         if ($setup.ExitCode -ne 0) { throw "Setup attempt $attempt failed: $($setup.ExitCode)" }
         if (Test-Path (Join-Path $installDir 'tt.ps1')) { throw 'A .ps1 shim would shadow tt.cmd under Restricted execution policy.' }
         $updatedPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -57,7 +68,7 @@ try {
     # User PATH edits made after installation must survive uninstall.
     $sentinel = Join-Path $temporary 'another app'
     [Environment]::SetEnvironmentVariable('Path', "$updatedPath;$sentinel", 'User')
-    $remove = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+    $remove = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -WindowStyle Hidden -Wait -PassThru
     if ($remove.ExitCode -ne 0) { throw 'Uninstall failed.' }
     $remainingPath = [Environment]::GetEnvironmentVariable('Path', 'User').Split(';')
     if ($remainingPath -contains $installDir -or $remainingPath -notcontains $sentinel) { throw 'Uninstall changed unrelated PATH entries.' }
@@ -66,8 +77,9 @@ try {
 } finally {
     $env:Path = $originalPath
     $env:TUNED_TENSOR_HOME = $originalHome
+    $env:TT_NO_UPDATE_CHECK = $originalUpdateCheck
     if (Test-Path $uninstaller) {
-        Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait | Out-Null
+        Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -WindowStyle Hidden -Wait | Out-Null
     }
     [Environment]::SetEnvironmentVariable('Path', $userPath, 'User')
     Pop-Location

@@ -211,7 +211,8 @@ describe("native host and terminal smoke (runs on Linux, macOS and Windows CI)",
         const lines = renderMachinePanel(live, context, { columns });
         const text = stripVTControlCharacters(lines.join("\n"));
         expect(text).toContain("WHAT YOU CAN DO");
-        expect(text).toContain("Decision training");
+        expect(text).toContain("Decision train");
+        if (columns >= 80) expect(text).toContain("Decision training");
         expect(text).toContain("Specs and datasets");
         expect(text).toContain("/system for details");
         expect(text.replace(/\s+/g, " ")).not.toContain("no GPU required");

@@ -36,13 +36,37 @@ Type: filesandordirs; Name: "{app}\node_modules"
 Type: filesandordirs; Name: "{app}\runtime"
 
 [Code]
+function IsManagedInstall: Boolean;
+var
+  Marker: AnsiString;
+begin
+  Result := LoadStringFromFile(ExpandConstant('{app}\tt-install.json'), Marker) and
+    (Trim(String(Marker)) = '{"manager":"windows-installer"}');
+end;
+
+function DirectoryHasFiles(Path: String): Boolean;
+var
+  Entry: TFindRec;
+begin
+  Result := False;
+  if FindFirst(AddBackslash(Path) + '*', Entry) then begin
+    try
+      repeat
+        if (Entry.Name <> '.') and (Entry.Name <> '..') then begin
+          Result := True;
+          Break;
+        end;
+      until not FindNext(Entry);
+    finally
+      FindClose(Entry);
+    end;
+  end;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
-  if not FileExists(ExpandConstant('{app}\tt-install.json')) and
-     (DirExists(ExpandConstant('{app}\node_modules')) or
-      DirExists(ExpandConstant('{app}\runtime')) or
-      FileExists(ExpandConstant('{app}\tt.cmd'))) then
+  if not IsManagedInstall and DirectoryHasFiles(ExpandConstant('{app}')) then
     Result := 'This directory contains files not managed by Tuned Tensor setup. Choose an empty install directory.';
 end;
 
