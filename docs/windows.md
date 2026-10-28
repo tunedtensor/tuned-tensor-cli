@@ -103,8 +103,11 @@ See the platform table in the [README](../README.md) and the
 
 `scripts/build-windows.ps1` builds the CLI, packs and installs the npm artifact
 with `--ignore-scripts`, includes the build's Node 22 x64 runtime and its license,
-and compiles an Inno Setup 6 installer. Run it on Windows with Node/npm and
-Inno Setup installed. Outputs are under `windows-dist/`.
+and compiles an Inno Setup 7 installer. Run it on Windows with Node/npm and
+Inno Setup 7 installed (or supply `-CompilerPath`). Version 7 is required for
+[extended-length dependency paths](https://jrsoftware.org/files/is7-whatsnew.htm).
+CI downloads a pinned compiler and verifies its SHA-256. Outputs are under
+`windows-dist/`.
 
 The Windows CI job runs on PRs and gates npm releases. It tests the built
 installer in PowerShell 5.1 and 7: repeated install, private runtime without

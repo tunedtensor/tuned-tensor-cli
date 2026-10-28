@@ -1,5 +1,6 @@
 ; Build through scripts/build-windows.ps1. Keep AppId stable across versions.
 [Setup]
+SetupArchitecture=x64
 AppId=TunedTensor.CLI
 AppName=Tuned Tensor CLI
 AppVersion={#Version}

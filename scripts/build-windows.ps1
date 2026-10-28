@@ -1,6 +1,9 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param([string]$OutputDirectory = (Join-Path $PSScriptRoot '..\windows-dist'))
+param(
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\windows-dist'),
+    [string]$CompilerPath = (Join-Path $env:ProgramFiles 'Inno Setup 7\ISCC.exe')
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -11,8 +14,11 @@ $version = $manifest.version
 if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw 'Invalid package version.' }
 $node = (Get-Command node.exe -ErrorAction Stop).Source
 if ((& $node -p 'process.arch') -ne 'x64') { throw 'An x64 Node.js runtime is required.' }
-$compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-if (-not (Test-Path $compiler)) { throw 'Install Inno Setup 6 before building.' }
+$compiler = $CompilerPath
+if (-not (Test-Path $compiler)) { throw 'Install Inno Setup 7 or provide -CompilerPath before building.' }
+if ([Diagnostics.FileVersionInfo]::GetVersionInfo($compiler).FileMajorPart -lt 7) {
+    throw 'Inno Setup 7 is required for dependency paths longer than 260 characters.'
+}
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force $output | Out-Null
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('tt-windows-' + [guid]::NewGuid())

@@ -19,11 +19,21 @@ jobs:
       - run: npm.cmd ci
       - name: Check native CLI behavior
         run: npm.cmd run test:cli -- src/__tests__/hardware-guidance.test.ts src/__tests__/commands/upgrade.test.ts src/__tests__/windows-upgrade.test.ts src/__tests__/windows-shell.test.ts
+      - name: Install pinned Inno Setup with long-path support
+        shell: pwsh
+        run: |
+          $setup = Join-Path $env:RUNNER_TEMP 'innosetup.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe' -OutFile $setup
+          if ((Get-FileHash $setup -Algorithm SHA256).Hash -ne '8a5a6711c3766a6e5fb74f280ba0e3551e719ce94538d901fdbd1f8f9920b3f0') {
+            throw 'Inno Setup checksum mismatch'
+          }
+          $install = Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$env:RUNNER_TEMP\inno7`"" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw 'Inno Setup installation failed' }
       - name: Build installer and manifests
         shell: powershell
         run: |
           ./scripts/test-install.ps1
-          ./scripts/build-windows.ps1
+          ./scripts/build-windows.ps1 -CompilerPath (Join-Path $env:RUNNER_TEMP 'inno7\ISCC.exe')
       - name: Validate stable WinGet manifests
         shell: pwsh
         run: |
