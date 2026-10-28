@@ -7,6 +7,9 @@ on:
     branches: [main]
 
 jobs:
+  windows:
+    uses: ./.github/workflows/windows.yml
+
   ci:
     runs-on: ubuntu-latest
 

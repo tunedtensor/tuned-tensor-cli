@@ -1,0 +1,62 @@
+name: Windows package
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm.cmd ci
+      - name: Check native CLI behavior
+        run: npm.cmd run test:cli -- src/__tests__/hardware-guidance.test.ts src/__tests__/commands/upgrade.test.ts src/__tests__/windows-upgrade.test.ts
+      - name: Build installer and manifests
+        shell: powershell
+        run: |
+          ./scripts/test-install.ps1
+          ./scripts/build-windows.ps1
+      - name: Validate stable WinGet manifests
+        shell: pwsh
+        run: |
+          if (Test-Path windows-dist/manifests) {
+            if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+              Install-Module Microsoft.WinGet.Client -Repository PSGallery -Scope CurrentUser -Force
+              Repair-WinGetPackageManager
+            }
+            $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+            winget.exe validate --manifest "windows-dist/manifests/t/TunedTensor/CLI/$version" --disable-interactivity
+            if ($LASTEXITCODE -ne 0) { throw 'WinGet manifest validation failed' }
+          }
+      - name: Install, upgrade and uninstall from Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/test-windows.ps1 -Installer (Get-ChildItem windows-dist/*.exe).FullName
+      - name: Install, upgrade and uninstall from PowerShell 7
+        shell: pwsh
+        run: |
+          ./scripts/test-install.ps1
+          ./scripts/test-windows.ps1 -Installer (Get-ChildItem windows-dist/*.exe).FullName
+      - name: Pack and install through npm
+        shell: pwsh
+        run: |
+          $tarball = (npm.cmd pack --json | ConvertFrom-Json)[0].filename
+          if ($LASTEXITCODE -ne 0) { throw 'npm pack failed' }
+          $prefix = Join-Path $env:RUNNER_TEMP 'npm prefix with spaces'
+          foreach ($attempt in 1..2) {
+            npm.cmd install -g --ignore-scripts --no-audit --no-fund --prefix $prefix (Join-Path $PWD $tarball)
+            if ($LASTEXITCODE -ne 0) { throw 'npm install failed' }
+            & (Join-Path $prefix 'tt.cmd') --version
+            if ($LASTEXITCODE -ne 0) { throw 'npm shim failed' }
+          }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-package
+          path: windows-dist/
+          if-no-files-found: error

@@ -38,6 +38,7 @@
     "training/decision/src/*.py",
     "docs/local-runtime",
     "docs/spec-workflow.md",
+    "docs/windows.md",
     "docs/spec-architecture.html",
     "examples/local-runtime/*.json",
     "examples/local-runtime/*.jsonl",

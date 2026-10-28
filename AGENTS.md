@@ -87,6 +87,10 @@ gate before `npm publish`.
   stay on stable while testers opt in with `npm i -g @tuned-tensor/cli@beta`.
 - The workflow refuses to publish if the release tag and `package.json` version
   do not match.
+- Native Windows installation is checked in PowerShell 5.1 and 7 before npm
+  publication. The release also attaches a tested x64 installer, checksum and
+  stable WinGet manifests. See `docs/windows.md` for the catalog submission step;
+  merging a PR does not publish a release or list it in WinGet.
 
 ## Hosted decision models
 

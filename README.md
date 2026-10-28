@@ -47,6 +47,20 @@ hidden in the local-only release are available under `tt cloud`.
 
 ## Install
 
+On Windows (PowerShell 5.1 or 7), with Node.js 22.19+ installed:
+
+```powershell
+winget install --id OpenJS.NodeJS.LTS --exact --source winget # if Node is missing
+# Open a new terminal after installing Node.
+npm.cmd install -g --ignore-scripts @tuned-tensor/cli
+tt.cmd --version
+```
+
+The [Windows guide](docs/windows.md) covers native setup with a bundled Node
+runtime, PowerShell execution policies, upgrades, and the WinGet distribution
+process. `TunedTensor.CLI` will become installable through WinGet after the first
+Windows release and catalog submission are accepted.
+
 On Linux or macOS:
 
 ```bash
@@ -303,8 +317,11 @@ models or certify their fit. Old snapshots without a decision probe show
 | Native Windows x64 | CPU path; end-to-end training not yet certified | Not certified natively; check a Linux/WSL2 environment or use AWS | Linux/CUDA host |
 | Intel macOS / Windows ARM64 | No compatible wheels in the current lockfiles | Remote AWS GPU | Remote Linux/CUDA host |
 
-The native Windows CI job verifies hardware discovery and displayed guidance,
-not model training. WSL is assessed as its own Linux environment. AMD/Intel GPU
+The native Windows CI job verifies installation, PowerShell CLI commands,
+pipeline previews, hardware discovery and displayed guidance, not model training.
+Agent-approved spec writes still require Linux; AWS transport/background training
+should run inside WSL2/Linux. See [Windows limitations](docs/windows.md#native-cli-scope).
+WSL is assessed as its own Linux environment. AMD/Intel GPU
 acceleration is not enabled by the packaged CUDA runtime. Decision resource
 warnings use conservative advisory thresholds (8 GiB available working memory,
 6 GiB free model-cache disk, 4 CPU cores); they are not measured model minima.

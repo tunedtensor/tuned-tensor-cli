@@ -21,7 +21,11 @@ npm run check          # Typecheck, all tests, and build
 The existing PR and npm publishing workflows run typecheck, `npm test`, and
 build; no separate opt-in CI job is needed to enforce the new tests. CI also
 installs the packed npm artifact on Linux/macOS and Node 22/24 to check the
-shipped entrypoint. Standard tests need no provider key or GPU. The first
+shipped entrypoint. The reusable Windows job checks native npm installs and the
+bundled installer from PowerShell 5.1 and 7, including repeated installation,
+pipeline previews, upgrade ownership, PATH handling and uninstall. It gates
+publication too; see [Windows release checks](windows.md#release-and-winget-maintenance).
+Standard tests need no provider key or GPU. The first
 Python run may need network access to install its locked `uv` dependencies.
 
 | User expectation | Executable contract | Real boundary exercised |
