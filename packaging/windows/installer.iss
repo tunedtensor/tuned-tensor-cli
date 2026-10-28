@@ -1,4 +1,8 @@
 ; Build through scripts/build-windows.ps1. Keep AppId stable across versions.
+#if Ver < EncodeVer(7, 0, 0)
+  #error Inno Setup 7 is required for long dependency paths.
+#endif
+
 [Setup]
 SetupArchitecture=x64
 AppId=TunedTensor.CLI

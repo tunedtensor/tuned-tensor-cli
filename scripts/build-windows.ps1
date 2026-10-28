@@ -16,9 +16,6 @@ $node = (Get-Command node.exe -ErrorAction Stop).Source
 if ((& $node -p 'process.arch') -ne 'x64') { throw 'An x64 Node.js runtime is required.' }
 $compiler = $CompilerPath
 if (-not (Test-Path $compiler)) { throw 'Install Inno Setup 7 or provide -CompilerPath before building.' }
-if ([Diagnostics.FileVersionInfo]::GetVersionInfo($compiler).FileMajorPart -lt 7) {
-    throw 'Inno Setup 7 is required for dependency paths longer than 260 characters.'
-}
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force $output | Out-Null
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('tt-windows-' + [guid]::NewGuid())
