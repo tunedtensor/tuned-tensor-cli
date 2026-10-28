@@ -50,5 +50,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'WinGet manifest generation failed.' }
 } finally {
     Pop-Location
-    Remove-Item $temporary -Recurse -Force
+    # Windows PowerShell 5.1 needs extended paths for nested npm dependencies.
+    $cleanup = [IO.Path]::GetFullPath($temporary)
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if (-not $cleanup.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Cleanup escaped the temporary directory.' }
+    if ($cleanup.StartsWith('\\')) { $cleanup = '\\?\UNC\' + $cleanup.Substring(2) }
+    else { $cleanup = '\\?\' + $cleanup }
+    Remove-Item -LiteralPath $cleanup -Recurse -Force
 }

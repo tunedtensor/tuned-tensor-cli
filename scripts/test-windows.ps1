@@ -83,7 +83,13 @@ try {
     }
     [Environment]::SetEnvironmentVariable('Path', $userPath, 'User')
     Pop-Location
-    Remove-Item $temporary -Recurse -Force
+    # Windows PowerShell 5.1 needs extended paths for nested npm dependencies.
+    $cleanup = [IO.Path]::GetFullPath($temporary)
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if (-not $cleanup.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Cleanup escaped the temporary directory.' }
+    if ($cleanup.StartsWith('\\')) { $cleanup = '\\?\UNC\' + $cleanup.Substring(2) }
+    else { $cleanup = '\\?\' + $cleanup }
+    Remove-Item -LiteralPath $cleanup -Recurse -Force
 }
 Write-Host "Windows installer smoke passed in PowerShell $($PSVersionTable.PSVersion)."
 # The negative upgrade test deliberately leaves LASTEXITCODE nonzero. Report the
