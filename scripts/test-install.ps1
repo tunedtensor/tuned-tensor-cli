@@ -12,11 +12,10 @@ try {
     $hash = (Get-FileHash $payload -Algorithm SHA256).Hash
 
     function Invoke-Case([string]$Case, [string]$ExpectedError) {
-        $script:setupCalled = $false
-        $script:requestedUrl = ''
+        $testState = @{ setupCalled = $false; requestedUrl = '' }
         function Invoke-RestMethod {
             param($Uri, $Headers)
-            $script:requestedUrl = $Uri
+            $testState.requestedUrl = $Uri
             $assets = @(
                 @{ name = 'tuned-tensor-cli-1.2.3-windows-x64.exe'; browser_download_url = 'https://example.test/setup' },
                 @{ name = 'tuned-tensor-cli-1.2.3-windows-x64.exe.sha256'; browser_download_url = 'https://example.test/hash' }
@@ -36,7 +35,7 @@ try {
         }
         function Start-Process {
             param($FilePath, $ArgumentList, [switch]$Wait, [switch]$PassThru)
-            $script:setupCalled = $true
+            $testState.setupCalled = $true
             if ($ArgumentList -notcontains '/VERYSILENT') { throw 'Setup must be unattended.' }
             if ($Case -eq 'exit') { return @{ ExitCode = 7 } }
             return @{ ExitCode = 0 }
@@ -51,9 +50,9 @@ try {
         if ($ExpectedError) {
             if (-not $failure -or $failure -notmatch $ExpectedError) { throw "Case $Case expected '$ExpectedError', got '$failure'." }
         } elseif ($failure) { throw "Case $Case failed: $failure" }
-        if ($script:requestedUrl -notmatch '/tags/v1.2.3$') { throw 'Pinned version was not requested.' }
-        if ($Case -in @('missing', 'checksum') -and $script:setupCalled) { throw 'Unverified setup must never execute.' }
-        if ($Case -eq 'success' -and -not $script:setupCalled) { throw 'Verified setup did not execute.' }
+        if ($testState.requestedUrl -notmatch '/tags/v1.2.3$') { throw 'Pinned version was not requested.' }
+        if ($Case -in @('missing', 'checksum') -and $testState.setupCalled) { throw 'Unverified setup must never execute.' }
+        if ($Case -eq 'success' -and -not $testState.setupCalled) { throw 'Verified setup did not execute.' }
     }
 
     Invoke-Case 'missing' 'does not have a Windows installer'
