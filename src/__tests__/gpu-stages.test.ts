@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { localRunnerConfigSchema, fineTuneRunRequestSchema } from "../local-runtime/contracts.js";
-import { resolveRunArtifacts } from "../local-runtime/artifacts.js";
+import { fileUri, resolveRunArtifacts } from "../local-runtime/artifacts.js";
 import { launchProcessTraining } from "../local-runtime/process-training.js";
 import { defaultFoundationSpawn } from "../local-runtime/foundation-runner.js";
 import { runGpuProcess } from "../local-runtime/gpu-executor.js";
@@ -33,7 +33,7 @@ it.each([false, true])("adapter training preserves local artifacts and dryRun=%s
   });
   const report = await launchProcessTraining({ request, config, artifacts, baseModelRevision: QWEN_3_5_2B_REVISION });
   expect(report.provider).toBe(dryRun ? "local-uv" : "aws-ssh");
-  expect(report.model_artifact_uri).toBe(`file://${artifacts.trainingModelDir}`);
+  expect(report.model_artifact_uri).toBe(fileUri(artifacts.trainingModelDir));
   expect(runGpuProcess).toHaveBeenCalledTimes(dryRun ? 0 : 1);
 });
 

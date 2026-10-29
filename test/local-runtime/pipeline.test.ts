@@ -118,7 +118,7 @@ test("runs a reordered partial local pipeline and finishes without a synthetic f
     assert.equal(result.status, "stage_completed");
     assert.equal(result.report, undefined);
     assert.deepEqual(Object.keys(result.outputs), ["train", "baseline", "candidate"]);
-    assert.ok(result.outputs.candidate?.reportPath.endsWith("evaluations/candidate.json"));
+    assert.ok(result.outputs.candidate?.reportPath.endsWith(join("evaluations", "candidate.json")));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

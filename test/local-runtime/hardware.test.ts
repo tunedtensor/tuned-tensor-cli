@@ -7,7 +7,7 @@ import { localRunnerConfigSchema } from "../../src/local-runtime/contracts.js";
 import { assessHardware } from "../../src/local-runtime/hardware.js";
 import { hardwareSnapshotPath } from "../../src/local-runtime/hardware-snapshot.js";
 
-test("hardware inventory uses nvidia-smi and writes a snapshot without requiring CUDA torch", async () => {
+test("hardware inventory uses nvidia-smi and writes a snapshot without requiring CUDA torch", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-hardware-"));
   const previousPath = process.env.PATH;
   const previousHome = process.env.TUNED_TENSOR_HOME;
@@ -70,7 +70,7 @@ exit 0
   }
 });
 
-test("hardware inventory reports no GPU as CUDA unavailable", async () => {
+test("hardware inventory reports no GPU as CUDA unavailable", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-hardware-cpu-"));
   const previousPath = process.env.PATH;
   const previousHome = process.env.TUNED_TENSOR_HOME;
@@ -100,7 +100,7 @@ test("hardware inventory reports no GPU as CUDA unavailable", async () => {
   }
 });
 
-test("hardware inventory parses the nvidia-smi table instead of the weekday header", async () => {
+test("hardware inventory parses the nvidia-smi table instead of the weekday header", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-hardware-table-"));
   const previousPath = process.env.PATH;
   const previousHome = process.env.TUNED_TENSOR_HOME;

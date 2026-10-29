@@ -147,7 +147,7 @@ function configFor(root: string, options: {
   });
 }
 
-test("Transformers evaluation uses the strict text-only protocol and opaque IDs", async () => {
+test("Transformers evaluation uses the strict text-only protocol and opaque IDs", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-evaluation-"));
   try {
     await writeFakeUv(root);
@@ -203,7 +203,7 @@ test("Transformers evaluation uses the strict text-only protocol and opaque IDs"
   }
 });
 
-test("interrupted Python batches resume across baseline runs and timeout changes", async () => {
+test("interrupted Python batches resume across baseline runs and timeout changes", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-evaluation-resume-"));
   try {
     await writeFakeUv(root);
@@ -237,7 +237,7 @@ test("interrupted Python batches resume across baseline runs and timeout changes
   }
 });
 
-test("progress warns before timeout and failure identifies recovery checkpoint", async () => {
+test("progress warns before timeout and failure identifies recovery checkpoint", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-evaluation-timeout-"));
   try {
     await writeFakeUv(root);
@@ -255,7 +255,7 @@ test("progress warns before timeout and failure identifies recovery checkpoint",
   }
 });
 
-test("local evaluation keeps canonical model identity separate from the snapshot source", async () => {
+test("local evaluation keeps canonical model identity separate from the snapshot source", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-evaluation-source-"));
   try {
     await writeFakeUv(root);
@@ -312,7 +312,7 @@ test("local evaluation rejects a non-certified explicit Nemotron revision before
   }
 });
 
-test("strict evaluator output rejects incomplete, duplicate, and malformed predictions", async (t) => {
+test("strict evaluator output rejects incomplete, duplicate, and malformed predictions", { skip: process.platform === "win32" }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-evaluation-invalid-"));
   try {
     await writeFakeUv(root);
@@ -348,7 +348,7 @@ test("strict evaluator output rejects incomplete, duplicate, and malformed predi
   }
 });
 
-test("JSON-field scoring is deterministic and reports per-field accuracy", async () => {
+test("JSON-field scoring is deterministic and reports per-field accuracy", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-evaluation-json-"));
   try {
     await writeFakeUv(root);
@@ -462,7 +462,7 @@ test("evaluateExamples records the deterministic sample seed only when truncated
   }
 });
 
-test("baseline cache reuses a report only for identical stable inputs", async () => {
+test("baseline cache reuses a report only for identical stable inputs", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-evaluation-cache-"));
   try {
     await writeFakeUv(root);

@@ -57,6 +57,9 @@ import {
 import type { LocalRunReporter } from "./run-reporter.js";
 import { activateModel, getActiveModel, rollbackActiveModel } from "./active-model.js";
 import { localRuntimePackageRoot } from "./package-root.js";
+import { listenForParentSignals } from "./parent-signals.js";
+
+listenForParentSignals();
 
 export * from "./compare.js";
 export * from "./contracts.js";

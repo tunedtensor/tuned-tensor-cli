@@ -1,6 +1,7 @@
-import { appendFile, chmod, copyFile, lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, chmod, copyFile, lstat, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
+import { renameAtomicFile } from "./atomic-rename.js";
 import { defaultStoreRoot } from "../paths.js";
 import type { FineTuneRunRequest, RunReport, SpecSnapshot, TrainingReport } from "./contracts.js";
 import { chainEvent, parseJsonlTolerant, readJsonlTail, sha256File, withAppendLock } from "./audit.js";
@@ -210,7 +211,7 @@ export async function writePrivateJsonAtomic(path: string, value: unknown): Prom
     encoding: "utf8",
     mode: 0o600,
   });
-  await rename(tmp, path);
+  await renameAtomicFile(tmp, path);
   await chmod(path, 0o600);
 }
 

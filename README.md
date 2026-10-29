@@ -319,8 +319,9 @@ models or certify their fit. Old snapshots without a decision probe show
 
 The native Windows CI job verifies installation, PowerShell CLI commands,
 pipeline previews, hardware discovery and displayed guidance, not model training.
-Agent-approved spec writes still require Linux; AWS transport/background training
-should run inside WSL2/Linux. See [Windows limitations](docs/windows.md#native-cli-scope).
+Agent-approved spec creation, editing and history work on native Windows and Linux.
+AWS transport/background training should run inside WSL2/Linux. See
+[Windows limitations](docs/windows.md#native-cli-scope).
 WSL is assessed as its own Linux environment. AMD/Intel GPU
 acceleration is not enabled by the packaged CUDA runtime. Decision resource
 warnings use conservative advisory thresholds (8 GiB available working memory,

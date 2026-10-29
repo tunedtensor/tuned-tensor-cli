@@ -1,5 +1,6 @@
+import { symlink, canCreateFileSymlinks } from "./platform-fixtures.js";
 import { afterEach, expect, it, vi } from "vitest";
-import { chmod, mkdir, mkdtemp, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { hardenExistingLocalStore } from "../local-runtime/store.js";
@@ -31,10 +32,10 @@ it.each(["file", "directory"])("tolerates a transient %s disappearing after list
     return entries;
   });
   expect(await hardenExistingLocalStore(root)).toBe(true);
-  expect((await stat(persistent)).mode & 0o777).toBe(0o600);
+  if (process.platform !== "win32") expect((await stat(persistent)).mode & 0o777).toBe(0o600);
 });
 
-it("continues to reject unsafe entries during permission repair", async () => {
+it.skipIf(!canCreateFileSymlinks)("continues to reject unsafe entries during permission repair", async () => {
   root = await mkdtemp(join(tmpdir(), "tt-store-hardening-"));
   await symlink(join(root, "missing"), join(root, "link"));
   await expect(hardenExistingLocalStore(root)).rejects.toThrow(/symbolic link/);

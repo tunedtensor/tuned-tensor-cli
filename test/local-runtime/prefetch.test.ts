@@ -1,6 +1,7 @@
+import { symlink, linkOrCopySnapshot } from "../../src/__tests__/platform-fixtures.js";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -62,7 +63,7 @@ test("indexed shards are contained and inventoried while HF blob symlinks remain
     await mkdir(join(root, "blobs"));
     await writeFile(join(root, "blobs", "shard"), "shard");
     await mkdir(join(snapshot, "nested"));
-    await symlink("../../../blobs/shard", join(snapshot, "nested", "shard.safetensors"));
+    await linkOrCopySnapshot("../../../blobs/shard", join(snapshot, "nested", "shard.safetensors"));
     await writeFile(index, JSON.stringify({ weight_map: { tensor: "nested/shard.safetensors" } }));
     const report = await verifyLocalBaseModel(snapshot);
     assert.equal(report.fileCount, 7);
@@ -342,7 +343,7 @@ test("modelCache defines one Hugging Face home and removes legacy overrides", ()
   assert.equal(offline.TRANSFORMERS_OFFLINE, "1");
 });
 
-test("bundled prefetch verifies the cached Qwen snapshot and blob checksums", async () => {
+test("bundled prefetch verifies the cached Qwen snapshot and blob checksums", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-prefetch-python-"));
   try {
     const fakePackage = join(root, "fake-python", "huggingface_hub");
@@ -458,7 +459,7 @@ def snapshot_download(**kwargs):
   }
 });
 
-test("bundled prefetch rejects a downloader result from a different requested revision", async () => {
+test("bundled prefetch rejects a downloader result from a different requested revision", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-prefetch-revision-mismatch-"));
   try {
     const receivedRevision = join(root, "received-revision.txt");

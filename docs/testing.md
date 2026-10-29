@@ -25,6 +25,18 @@ shipped entrypoint. The reusable Windows job checks native npm installs and the
 bundled installer from PowerShell 5.1 and 7, including repeated installation,
 pipeline previews, upgrade ownership, PATH handling and uninstall. It gates
 publication too; see [Windows release checks](windows.md#release-and-winget-maintenance).
+Windows x64 and ARM64 run the full CLI suite, including deterministic agent
+conversations and the native directory-handle write implementation. Linux-only
+rsync/shell transport fixtures remain in the Linux gate. File-symlink fixtures
+are skipped only when Windows denies that fixture capability; junction refusal,
+private Windows file ACLs, stale approvals, concurrent edits and directory
+replacement protection are exercised natively without administrator access.
+Run `npm run test:windows` from PowerShell for the CLI suite and portable runtime
+contracts. Runtime fixtures that execute Unix shebang scripts or need unavailable
+file-symlink privileges are explicitly skipped there and retained in Linux CI.
+Windows cache fixtures also exercise the ordinary-file snapshot layout used by
+Hugging Face when symlink creation is unavailable. Python unit tests and real
+training/serving acceptance remain separate checks.
 Standard tests need no provider key or GPU. The first
 Python run may need network access to install its locked `uv` dependencies.
 

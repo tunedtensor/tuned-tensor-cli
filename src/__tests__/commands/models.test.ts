@@ -54,8 +54,8 @@ describe("models commands", () => {
     });
 
     it("allows normal nested model artifact entries", () => {
-      expect(validateArchiveEntryPath("model/config.json")).toBe("model/config.json");
-      expect(validateArchiveEntryPath("./model/tokenizer.json")).toBe("model/tokenizer.json");
+      expect(validateArchiveEntryPath("model/config.json")).toBe(join("model", "config.json"));
+      expect(validateArchiveEntryPath("./model/tokenizer.json")).toBe(join("model", "tokenizer.json"));
     });
   });
 

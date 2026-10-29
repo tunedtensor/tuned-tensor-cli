@@ -1,5 +1,6 @@
+import { symlink, canCreateFileSymlinks } from "./platform-fixtures.js";
 import { discoverShellContext } from "../shell-context.js";
-import { mkdtemp, readFile, writeFile, rm, access, symlink } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -176,7 +177,7 @@ describe("single-spec review regressions", () => {
     expect(await readFile(join(root, "local-runner.json.bak"), "utf8")).toBe("existing backup");
   });
 
-  it("rejects symlink migration and preserves both the source and legacy inputs", async () => {
+  it.skipIf(!canCreateFileSymlinks)("rejects symlink migration and preserves both the source and legacy inputs", async () => {
     await writeFile(join(root, "local-runner.json"), "{}");
     const link = join(root, "linked.json");
     await symlink(file, link);

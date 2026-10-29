@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, rename, unlink, type FileHandle } from "node:fs/promises";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { WindowsWorkspace } from "./windows-workspace.js";
 import { canonicalWorkspace, fingerprintWorkspace, LocalSpecMutationError } from "./local-spec-workspace.js";
 import { parseLocalRunInput, specHash, validateBehaviorSpec, type SpecValidation } from "./local-runtime/local-project.js";
 
@@ -29,6 +30,11 @@ function validateDocument(document: unknown, path: string): SpecValidation {
 }
 
 async function readBounded(path: string, limit = MAX_BYTES): Promise<string> {
+  if (process.platform === "win32") {
+    const windows = await WindowsWorkspace.open(dirname(path));
+    try { return await windows.read(dirname(path), basename(path), limit); }
+    finally { await windows.close(); }
+  }
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const info = await handle.stat();
@@ -79,6 +85,13 @@ async function assertCurrentLocation(location: Awaited<ReturnType<typeof specLoc
 }
 
 async function readSpecSource(location: Awaited<ReturnType<typeof specLocation>>): Promise<string> {
+  if (process.platform === "win32") {
+    const windows = await WindowsWorkspace.open(location.parent);
+    try {
+      await assertCurrentLocation(location);
+      return await windows.read(location.parent, "tunedtensor.json", MAX_BYTES);
+    } finally { await windows.close(); }
+  }
   if (process.platform !== "linux") return await readBounded(location.path);
   const handles: FileHandle[] = [];
   try {
@@ -263,6 +276,7 @@ async function atomicText(parent: FileHandle, name: string, source: string) {
 
 /** Cooperative writer lock, reviewed-byte check, atomic replacement and durable revision journal. */
 export async function applySpecUpdate(workspaceRoot: string, update: SpecUpdate) {
+  if (process.platform === "win32") return await applyWindowsSpecUpdate(workspaceRoot, update);
   let committing = false;
   let lock: FileHandle | undefined;
   const handles: FileHandle[] = [];
@@ -315,6 +329,38 @@ export async function applySpecUpdate(workspaceRoot: string, update: SpecUpdate)
     }
     for (const handle of handles.reverse()) await handle.close();
   }
+}
+
+async function applyWindowsSpecUpdate(workspaceRoot: string, update: SpecUpdate) {
+  let windows: WindowsWorkspace | undefined;
+  let committing = false;
+  try {
+    const prepared = await validateSpecUpdate(workspaceRoot, update);
+    windows = await WindowsWorkspace.open(prepared.current.parent);
+    await assertCurrentLocation(prepared.current);
+    const parent = prepared.current.parent;
+    await windows.lock(parent, ".tunedtensor-spec.lock");
+    const before = await windows.read(parent, "tunedtensor.json", MAX_BYTES);
+    if (specHash(before) !== update.expected_sha256) throw new Error("The behavior spec changed; inspect it and prepare the edit again.");
+    const state = await windows.childDirectory(parent, ".tuned-tensor");
+    const history = await windows.childDirectory(state, "spec-history");
+    const id = `${Date.now()}-${randomUUID()}`;
+    const revision: SpecRevision = {
+      id, status: "prepared", at: new Date().toISOString(),
+      before_sha256: update.expected_sha256, after_sha256: update.after_sha256,
+      before: prepared.current.document, after: prepared.next,
+    };
+    await windows.atomic(history, `${id}.json`, JSON.stringify(revision));
+    if (specHash(await windows.read(parent, "tunedtensor.json", MAX_BYTES)) !== update.expected_sha256) {
+      throw new Error("The behavior spec changed before commit; prepare the edit again.");
+    }
+    committing = true;
+    await windows.atomic(parent, "tunedtensor.json", prepared.source);
+    await windows.atomic(history, `${id}.json`, JSON.stringify({ ...revision, status: "applied" }));
+    return { updated: true, path: update.spec_path, revision: id, sha256: revision.after_sha256, diff: prepared.diff };
+  } catch (error) {
+    throw new LocalSpecMutationError((error as Error).message, committing ? "unknown" : "not_applied", error);
+  } finally { await windows?.close(); }
 }
 
 export interface SpecRevision {

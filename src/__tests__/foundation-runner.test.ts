@@ -1,5 +1,6 @@
+import { symlink, canCreateFileSymlinks } from "./platform-fixtures.js";
 import { createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -263,7 +264,7 @@ describe("foundation pipeline runner", () => {
     })).rejects.toThrow(expected);
   });
 
-  it("rejects symlinks inside produced artifacts", async () => {
+  it.skipIf(!canCreateFileSymlinks)("rejects symlinks inside produced artifacts", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tt-foundation-"));
     dirs.push(dir);
     const recipe = pipelineFromFoundationHyperparameters(spec.name, spec.foundation);
@@ -309,7 +310,7 @@ describe("foundation pipeline runner", () => {
     await expect(access(join(target, "tokenize"))).rejects.toThrow();
   });
 
-  it("rejects preserved symlinks before reading resume configuration", async () => {
+  it.skipIf(!canCreateFileSymlinks)("rejects preserved symlinks before reading resume configuration", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tt-foundation-resume-entry-link-"));
     dirs.push(dir);
     const outputDir = join(dir, "run");
@@ -354,9 +355,9 @@ describe("foundation pipeline runner", () => {
     expect(result.steps.map((step) => step.id)).toEqual(plan.steps.map((step) => step.id));
     expect(result.steps[0]?.artifacts.tokenizer?.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(result.steps[1]?.artifacts.model?.sha256).toMatch(/^[a-f0-9]{64}$/);
-    expect((await stat(join(dir, "run"))).mode & 0o777).toBe(0o700);
-    expect((await stat(join(dir, "run", "tokenize", "config.json"))).mode & 0o777).toBe(0o600);
-    expect((await stat(result.report_path)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect((await stat(join(dir, "run"))).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") expect((await stat(join(dir, "run", "tokenize", "config.json"))).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect((await stat(result.report_path)).mode & 0o777).toBe(0o600);
     const report = JSON.parse(await readFile(result.report_path, "utf8")) as { status: string; steps: unknown[] };
     expect(report.status).toBe("succeeded");
     expect(report.steps).toHaveLength(plan.steps.length);

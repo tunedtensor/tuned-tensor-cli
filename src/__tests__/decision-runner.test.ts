@@ -184,7 +184,7 @@ describe("decision pipeline runner", () => {
       question: { type: "choice", labels },
       split: { train: 8, eval: 2 },
     });
-    expect((await stat(String(train!.config.train_path))).mode & 0o077).toBe(0);
+    if (process.platform !== "win32") expect((await stat(String(train!.config.train_path))).mode & 0o077).toBe(0);
   });
 
   it("refuses to reuse an existing run directory", async () => {

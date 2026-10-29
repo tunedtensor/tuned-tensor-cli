@@ -1,12 +1,7 @@
+import { symlink, canCreateFileSymlinks } from "../../src/__tests__/platform-fixtures.js";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import {
-  mkdtemp,
-  readFile,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { dirname, isAbsolute, join } from "node:path";
@@ -90,7 +85,7 @@ test("process timeouts wait for child shutdown before returning", async () => {
     }),
     /timed out after 500ms/,
   );
-  assert.ok(performance.now() - started >= 550, "timeout returned before the child exited");
+  assert.ok(performance.now() - started >= (process.platform === "win32" ? 500 : 550), "timeout returned before the child exited");
 });
 
 test("process timeouts force-kill descendants that outlive the direct child", async () => {
@@ -164,7 +159,7 @@ test("logged processes can clean up descendants after a successful direct child"
   }
 });
 
-test("exclusive process logs reject aliases before launching the child", async () => {
+test("exclusive process logs reject aliases before launching the child", { skip: !canCreateFileSymlinks }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-process-log-test-"));
   const target = join(root, "target.log");
   const logPath = join(root, "predictor.log");

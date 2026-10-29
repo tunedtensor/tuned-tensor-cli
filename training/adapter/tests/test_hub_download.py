@@ -3,6 +3,7 @@ import errno
 import hashlib
 import io
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -183,7 +184,13 @@ class DatasetFileTests(unittest.TestCase):
             blob.write_bytes(content)
             target = snapshot / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.symlink_to(blob)
+            try:
+                target.symlink_to(blob)
+            except OSError as error:
+                if sys.platform != "win32" or getattr(error, "winerror", None) != 1314:
+                    raise
+                # huggingface_hub uses copied snapshot files without this privilege.
+                shutil.copyfile(blob, target)
         return snapshot
 
     def test_verified_files_report_sha256_and_size(self):
@@ -203,7 +210,12 @@ class DatasetFileTests(unittest.TestCase):
                 verify_dataset_files(snapshot, {"validation": "valid.jsonl"})
             outside = root / "outside.jsonl"
             outside.write_bytes(b"x")
-            (snapshot / "escape.jsonl").symlink_to(outside)
+            try:
+                (snapshot / "escape.jsonl").symlink_to(outside)
+            except OSError as error:
+                if sys.platform == "win32" and getattr(error, "winerror", None) == 1314:
+                    self.skipTest("File-symlink fixture requires Windows symlink privilege")
+                raise
             with self.assertRaisesRegex(ValueError, "escapes"):
                 verify_dataset_files(snapshot, {"training": "escape.jsonl"})
 

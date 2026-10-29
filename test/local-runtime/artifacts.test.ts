@@ -1,5 +1,6 @@
+import { symlink, canCreateFileSymlinks } from "../../src/__tests__/platform-fixtures.js";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
@@ -195,7 +196,7 @@ test("rejects artifact prefixes that escape the configured root", () => {
   );
 });
 
-test("refuses symbolic links in artifact trees", async () => {
+test("refuses symbolic links in artifact trees", { skip: !canCreateFileSymlinks }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-artifacts-symlink-test-"));
   try {
     const artifacts = resolveRunArtifacts({ artifactRoot: root, prefix: "runs/run-symlink" });

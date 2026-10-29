@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+// These fixtures execute POSIX shell scripts and rsync; run them in Linux/WSL.
+import { afterEach, beforeEach, expect, it as posixTest, vi } from "vitest";
+const it = posixTest.skipIf(process.platform === "win32");
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

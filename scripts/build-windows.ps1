@@ -27,6 +27,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'CLI build failed.' }
     $pack = & npm.cmd pack --json --pack-destination $temporary | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { throw 'npm pack failed.' }
+    Copy-Item (Join-Path $temporary $pack[0].filename) (Join-Path $output $pack[0].filename)
     & npm.cmd install -g --ignore-scripts --no-audit --no-fund --prefix $payload (Join-Path $temporary $pack[0].filename)
     if ($LASTEXITCODE -ne 0) { throw 'Installing the packed CLI failed.' }
     # Keep Node private: putting node.exe on PATH would shadow the user's Node.

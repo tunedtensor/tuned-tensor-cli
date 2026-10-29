@@ -54,6 +54,12 @@ async function fakeEntrypoint(root: string): Promise<string> {
   const path = join(root, "fake-local.mjs");
   await writeFile(path, `
 import { readFileSync } from "node:fs";
+if (process.channel) {
+  process.on("message", message => {
+    if (message?.ttSignal === "SIGINT" || message?.ttSignal === "SIGTERM") process.emit(message.ttSignal);
+  });
+  process.channel.unref();
+}
 
 const args = process.argv.slice(2);
 console.error("tt-local progress");

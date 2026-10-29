@@ -9,7 +9,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -18,7 +18,8 @@ jobs:
           cache: npm
       - run: npm.cmd ci
       - name: Check native CLI behavior
-        run: npm.cmd run test:cli -- src/__tests__/hardware-guidance.test.ts src/__tests__/commands/upgrade.test.ts src/__tests__/windows-upgrade.test.ts src/__tests__/windows-shell.test.ts src/__tests__/shell.test.ts src/__tests__/winget.test.ts src/__tests__/update-check.test.ts
+        run: npm.cmd run test:windows
+      - run: npm.cmd run typecheck
       - name: Install pinned Inno Setup with long-path support
         shell: pwsh
         run: |
@@ -54,12 +55,6 @@ jobs:
         run: |
           ./scripts/test-install.ps1
           ./scripts/test-windows.ps1 -Installer (Get-ChildItem windows-dist/*.exe).FullName
-      - name: Check npm installation from Windows PowerShell 5.1
-        shell: powershell
-        run: ./scripts/test-npm-windows.ps1
-      - name: Check npm installation from PowerShell 7
-        shell: pwsh
-        run: ./scripts/test-npm-windows.ps1
       - uses: actions/upload-artifact@v7
         with:
           name: windows-package
@@ -78,16 +73,61 @@ jobs:
           cache: npm
       - run: npm.cmd ci
       - name: Check native ARM64 CLI behavior
-        run: npm.cmd run test:cli -- src/__tests__/hardware-guidance.test.ts src/__tests__/commands/upgrade.test.ts src/__tests__/windows-upgrade.test.ts src/__tests__/windows-shell.test.ts src/__tests__/shell.test.ts src/__tests__/winget.test.ts src/__tests__/update-check.test.ts
+        run: npm.cmd run test:windows
       - run: npm.cmd run typecheck
       - run: npm.cmd run build
-      - name: Check downloader and npm installation from Windows PowerShell 5.1
+      - name: Check downloader from Windows PowerShell 5.1
         shell: powershell
-        run: |
-          ./scripts/test-install.ps1
-          ./scripts/test-npm-windows.ps1
-      - name: Check downloader and npm installation from PowerShell 7
+        run: ./scripts/test-install.ps1
+      - name: Check downloader from PowerShell 7
         shell: pwsh
+        run: ./scripts/test-install.ps1
+      - name: Pack the tested ARM64 package
         run: |
-          ./scripts/test-install.ps1
-          ./scripts/test-npm-windows.ps1
+          New-Item -ItemType Directory -Force windows-dist | Out-Null
+          npm.cmd pack --json --pack-destination windows-dist | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'npm pack failed.' }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-npm-arm64
+          path: windows-dist/*.tgz
+          if-no-files-found: error
+
+  npm-smoke:
+    needs: [windows, windows-arm64]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            arch: x64
+            shell: powershell
+            artifact: windows-package
+          - runner: windows-latest
+            arch: x64
+            shell: pwsh
+            artifact: windows-package
+          - runner: windows-11-arm
+            arch: arm64
+            shell: powershell
+            artifact: windows-npm-arm64
+          - runner: windows-11-arm
+            arch: arm64
+            shell: pwsh
+            artifact: windows-npm-arm64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          architecture: ${{ matrix.arch }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ runner.temp }}/tt-package
+      - name: Check installed CLI from ${{ matrix.shell }} on ${{ matrix.arch }}
+        shell: ${{ matrix.shell }}
+        run: |
+          ./scripts/test-npm-windows.ps1 -PackagePath (Get-ChildItem (Join-Path $env:RUNNER_TEMP 'tt-package/*.tgz')).FullName

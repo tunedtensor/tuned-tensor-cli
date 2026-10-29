@@ -1,5 +1,5 @@
 import { lstat, readdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { verifyTarGzipArchive } from "./artifacts.js";
 
@@ -344,7 +344,12 @@ export interface ModelArtifactInspection {
 }
 
 export function localModelArtifactPath(uri: string): string {
-  if (uri.startsWith("file://")) return fileURLToPath(new URL(uri));
+  if (uri.startsWith("file://")) {
+    const legacy = uri.slice("file://".length);
+    if (process.platform === "win32" && /^[a-z]:[\\/]/i.test(legacy)) return resolve(legacy);
+    return fileURLToPath(new URL(uri));
+  }
+  if (isAbsolute(uri)) return resolve(uri);
   if (/^[a-z][a-z0-9+.-]*:/i.test(uri)) {
     throw new Error(`Model artifact must be a local path or file URI: ${uri}`);
   }

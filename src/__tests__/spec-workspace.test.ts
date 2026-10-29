@@ -1,4 +1,5 @@
-import { mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { symlink, canCreateFileSymlinks } from "./platform-fixtures.js";
+import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -123,9 +124,11 @@ describe("behavior spec review and editing", () => {
     await symlink(join(root, "elsewhere"), join(root, ".tuned-tensor"));
     await expect(applySpecUpdate(root, prepared.update)).rejects.toThrow();
     expect((await inspectLocalSpec(root)).document).toEqual(spec);
-    await rm(join(root, "tunedtensor.json"));
-    await symlink(join(root, "real/tunedtensor.json"), join(root, "tunedtensor.json"));
-    await expect(inspectLocalSpec(root)).rejects.toThrow();
+    if (canCreateFileSymlinks) {
+      await rm(join(root, "tunedtensor.json"));
+      await symlink(join(root, "real/tunedtensor.json"), join(root, "tunedtensor.json"));
+      await expect(inspectLocalSpec(root)).rejects.toThrow();
+    }
   });
 
 

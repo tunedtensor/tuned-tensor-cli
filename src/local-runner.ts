@@ -380,13 +380,15 @@ async function spawnLocalCli(args: {
     [args.entrypoint, ...args.commandArgs],
     {
       cwd: args.cwd,
-      env: childEnv,
+      env: process.platform === "win32" ? { ...childEnv, TT_PARENT_IPC: "1" } : childEnv,
       stdio: [
         pipeInput ? "pipe" : "inherit",
         args.streamingStdout && !pipeStreamingOutput ? "inherit" : "pipe",
         "pipe",
+        ...(process.platform === "win32" ? ["ipc" as const] : []),
       ],
       detached: process.platform !== "win32",
+      windowsHide: true,
     },
   );
 
@@ -417,10 +419,21 @@ async function spawnLocalCli(args: {
 
   return new Promise((resolveChild) => {
     let spawnError: Error | undefined;
+    let forceKillTimer: NodeJS.Timeout | undefined;
     const forwardSignal = (signal: NodeJS.Signals) => {
       // SIGHUP has no cleanup handler in the standalone local CLI. Translate
       // it to SIGTERM so its Python/server subtree is stopped deliberately.
       const childSignal = signal === "SIGHUP" ? "SIGTERM" : signal;
+      if (process.platform === "win32" && child.connected) {
+        child.send({ ttSignal: childSignal }, () => {});
+        if (!forceKillTimer) forceKillTimer = setTimeout(() => {
+          if (child.pid) {
+            spawn(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"),
+              ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }).on("error", () => child.kill());
+          }
+        }, 5_000);
+        return;
+      }
       if (child.pid && process.platform !== "win32") {
         try {
           process.kill(-child.pid, childSignal);
@@ -435,6 +448,7 @@ async function spawnLocalCli(args: {
     const onSigterm = () => forwardSignal("SIGTERM");
     const onSighup = () => forwardSignal("SIGHUP");
     const cleanup = () => {
+      if (forceKillTimer) clearTimeout(forceKillTimer);
       process.off("SIGINT", onSigint);
       process.off("SIGTERM", onSigterm);
       if (process.platform !== "win32") process.off("SIGHUP", onSighup);

@@ -167,7 +167,7 @@ describe("loginAgentProvider", () => {
     expect(JSON.parse(readFileSync(authPath, "utf-8"))).toEqual({
       openrouter: { type: "api_key", key: "sk-or-test" },
     });
-    expect(statSync(authPath).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(authPath).mode & 0o777).toBe(0o600);
   });
 
   it("persists even when the current session has no in-memory overlay", async () => {

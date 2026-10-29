@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   fineTuneRunRequestSchema,
   localRunnerConfigSchema,
@@ -111,7 +112,7 @@ test("runs the complete dry SFT workflow with distinct train and holdout data", 
     );
 
     const dataset = await readFile(
-      result.report.artifact_uris.dataset.replace(/^file:\/\//, ""),
+      fileURLToPath(result.report.artifact_uris.dataset),
       "utf8",
     );
     const evaluatedPrompt = result.report.baseline.results[0]?.prompt;
@@ -522,7 +523,7 @@ test("normalizes prebuilt training JSONL and evaluates the validation split", as
     assert.equal(result.report.baseline.results[0]?.prompt, "validation input");
     assert.equal(result.report.run_metadata.training_example_count, 2);
     const persisted = await readFile(
-      result.report.artifact_uris.dataset.replace(/^file:\/\//, ""),
+      fileURLToPath(result.report.artifact_uris.dataset),
       "utf8",
     );
     assert.equal(persisted, `${trainRows.join("\n")}\n`);
@@ -547,7 +548,7 @@ test("uses current spec instructions for reusable system-free data without modif
     request.spec_snapshot.guidelines = ["Use the allowed labels."];
     request.spec_snapshot.constraints = ["Do not add explanations."];
     const result = await runLocalFineTune({ request, config: configFixture(root) });
-    const persisted = JSON.parse((await readFile(result.report.artifact_uris.dataset.replace(/^file:\/\//, ""), "utf8")).trim());
+    const persisted = JSON.parse((await readFile(fileURLToPath(result.report.artifact_uris.dataset), "utf8")).trim());
     assert.equal(persisted.messages[0].role, "system");
     assert.equal(persisted.messages[0].content, "Return labels.\n\nGuidelines:\n- Use the allowed labels.\n\nConstraints:\n- Do not add explanations.");
     assert.equal(result.report.baseline.eval_split, "prebuilt_validation");

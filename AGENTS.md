@@ -31,6 +31,7 @@ All standard dev commands are in `package.json` scripts and documented in `READM
 - `npm run typecheck` — TypeScript type checking
 - `npm test` — CLI, workflow, local runtime, and Python regression tests
 - `npm run test:workflows` — focused conversation and model lifecycle contracts
+- `npm run test:windows` — CLI and portable runtime tests on native Windows
 - `npm run check` — typecheck, all tests, and build
 - `npm run eval:agent -- --help` — opt-in real model evaluation; see `docs/testing.md`
 

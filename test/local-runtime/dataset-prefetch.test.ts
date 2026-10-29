@@ -1,7 +1,8 @@
+import { symlink, canCreateFileSymlinks, linkOrCopySnapshot } from "../../src/__tests__/platform-fixtures.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -53,7 +54,7 @@ async function cacheDataset(hfHome: string, files: Record<string, string | Uint8
     const blob = join(repository, "blobs", createHash("sha256").update(content).digest("hex"));
     await writeFile(blob, content);
     await mkdir(join(snapshot, name, ".."), { recursive: true });
-    await symlink(blob, join(snapshot, name));
+    await linkOrCopySnapshot(blob, join(snapshot, name));
   }
   if (options.ref !== false) {
     await mkdir(join(repository, "refs"), { recursive: true });
@@ -109,7 +110,7 @@ test("Hugging Face split paths are not resolved against the spec directory", () 
   const local = resolveLocalRunInputPaths({
     dataset_prebuilt: { training: "train.jsonl", test: "test.jsonl" },
   }, "/project/tunedtensor.json") as { dataset_prebuilt: Record<string, unknown> };
-  assert.equal(local.dataset_prebuilt.training, "/project/train.jsonl");
+  assert.equal(local.dataset_prebuilt.training, resolve("/project/train.jsonl"));
 });
 
 test("an uncached dataset fails offline with the prefetch command", async () => {
@@ -174,7 +175,7 @@ test("a cached chat JSONL dataset resolves to verified snapshot files with prove
   }
 });
 
-test("a corrupted or escaping cache entry is rejected", async () => {
+test("a corrupted or escaping cache entry is rejected", { skip: !canCreateFileSymlinks }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-dataset-corrupt-"));
   try {
     const { snapshot } = await cacheDataset(join(root, "hf"), { "train.jsonl": chatRow("a", "b"), "test.jsonl": chatRow("c", "d") });
@@ -346,7 +347,7 @@ test("a messages column maps each conversation's first exchange", async () => {
   }
 });
 
-test("bundled dataset prefetch pins the commit, emits progress and verifies files", async () => {
+test("bundled dataset prefetch pins the commit, emits progress and verifies files", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-dataset-prefetch-python-"));
   try {
     const fakePackage = join(root, "fake-python", "huggingface_hub");

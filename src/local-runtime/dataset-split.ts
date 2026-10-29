@@ -247,7 +247,9 @@ export async function executeDatasetSplit(workspaceRoot: string, input: Record<s
     signal?.throwIfAborted();
     await location(workspaceRoot, p.options.output, true);
     if (await fingerprintWorkspace(dirname(p.target.path)) !== p.parent_fingerprint) throw new Error("Output parent changed during splitting.");
-    await mkdir(p.target.path, { mode: 0o700 }); reserved = true;
+    // Windows refuses to rename a directory over even an empty directory.
+    // Its rename already refuses a destination created by a racing writer.
+    if (process.platform !== "win32") { await mkdir(p.target.path, { mode: 0o700 }); reserved = true; }
     await rename(stage, p.target.path);
     reserved = false;
     return report;

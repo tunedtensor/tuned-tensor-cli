@@ -88,11 +88,15 @@ Use Windows paths and quotes around paths containing spaces.
 Inside TT's conversational terminal, backslashes stay literal on Windows:
 `/cd "C:\work files"` and `spec view .\tunedtensor.json` work as expected.
 
-Some existing runtime features have narrower platform requirements:
+Agent-approved spec creation, editing and revision history also work on Windows.
+TT pins real workspace directories while applying the reviewed changes. These
+operations require the built-in Windows PowerShell host with .NET interop allowed;
+an organizational policy that blocks it causes TT to refuse the write. No global
+execution-policy change is made. `tt init`, your editor, `tt spec view` and
+`tt pipeline run --dry-run` remain available for manual workflows.
 
-- Agent-approved spec creation/editing requires Linux filesystem handle support.
-  On Windows, create a spec with `tt init` and edit it in your editor;
-  inspect it with `tt spec view` and preview with `tt pipeline run --dry-run`.
+Some runtime features have narrower platform requirements:
+
 - Native Windows x64 decision training is not yet end-to-end certified; Windows
   ARM64 lacks compatible wheels in the current Python lockfiles. The packaged
   LLM training/serving stack still requires a supported Linux/CUDA environment.
@@ -120,6 +124,11 @@ with unrelated PATH entries and user data preserved. It also exercises npm
 global installation, including actual status, spec inspection, hardware discovery
 and pipeline previews in both shells. A native Windows ARM64 job checks the npm
 route, architecture rejection in the x64 downloader, and the same CLI regressions.
+The complete CLI suite runs on both Windows architectures, including the real
+agent loop with scripted provider responses, approved spec writes, resume,
+dataset splitting, CLI handoff and cancellation. POSIX rsync transport fixtures
+run in Linux/WSL; file-symlink fixtures require Developer Mode or the relevant
+Windows privilege. Directory junction refusal is tested without that privilege.
 This is CLI/distribution coverage, not a real model-training
 certification.
 
