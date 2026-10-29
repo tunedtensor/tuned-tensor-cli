@@ -6,12 +6,17 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows:
     uses: ./.github/workflows/windows.yml
 
   ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     strategy:
       matrix:
@@ -48,6 +53,7 @@ jobs:
     name: smoke (${{ matrix.os }}, node ${{ matrix.node-version }})
     runs-on: ${{ matrix.os }}
     needs: ci
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -105,6 +111,7 @@ jobs:
   hardware-guidance:
     name: hardware guidance (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:

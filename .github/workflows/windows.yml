@@ -7,7 +7,32 @@ permissions:
   contents: read
 
 jobs:
+  windows-cli:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm.cmd ci
+      - run: npm.cmd run test:windows
+      - run: npm.cmd run typecheck
+      - run: npm.cmd run build
+      - name: Pack the tested x64 package
+        run: |
+          New-Item -ItemType Directory -Force windows-dist | Out-Null
+          npm.cmd pack --json --pack-destination windows-dist | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'npm pack failed.' }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-npm-x64
+          path: windows-dist/*.tgz
+          if-no-files-found: error
+
   windows:
+    needs: windows-cli
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -16,10 +41,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm.cmd ci
-      - name: Check native CLI behavior
-        run: npm.cmd run test:windows
-      - run: npm.cmd run typecheck
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-npm-x64
+          path: ${{ runner.temp }}/tt-package
       - name: Install pinned Inno Setup with long-path support
         shell: pwsh
         run: |
@@ -34,7 +59,7 @@ jobs:
         shell: powershell
         run: |
           ./scripts/test-install.ps1
-          ./scripts/build-windows.ps1 -CompilerPath (Join-Path $env:RUNNER_TEMP 'inno7\ISCC.exe')
+          ./scripts/build-windows.ps1 -CompilerPath (Join-Path $env:RUNNER_TEMP 'inno7\ISCC.exe') -PackagePath (Get-ChildItem (Join-Path $env:RUNNER_TEMP 'tt-package/*.tgz')).FullName
       - name: Validate stable WinGet manifests
         shell: pwsh
         run: |
@@ -55,6 +80,14 @@ jobs:
         run: |
           ./scripts/test-install.ps1
           ./scripts/test-windows.ps1 -Installer (Get-ChildItem windows-dist/*.exe).FullName
+      - name: Retain installer npm diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-installer-npm-logs
+          path: windows-dist/npm-logs/
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
           name: windows-package
@@ -94,10 +127,10 @@ jobs:
           if-no-files-found: error
 
   npm-smoke:
-    needs: [windows, windows-arm64]
+    needs: [windows-cli, windows-arm64]
     runs-on: ${{ matrix.runner }}
-    # Cold x64 PowerShell 5.1 installs can take 20 minutes each on hosted runners.
-    # Keep both first-install and reinstall checks within one bounded job.
+    # First install and cross-shell upgrade share one prefix per architecture.
+    # Each npm process has its own deadline, heartbeat and retained timing logs.
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -105,19 +138,9 @@ jobs:
         include:
           - runner: windows-latest
             arch: x64
-            shell: powershell
-            artifact: windows-package
-          - runner: windows-latest
-            arch: x64
-            shell: pwsh
-            artifact: windows-package
+            artifact: windows-npm-x64
           - runner: windows-11-arm
             arch: arm64
-            shell: powershell
-            artifact: windows-npm-arm64
-          - runner: windows-11-arm
-            arch: arm64
-            shell: pwsh
             artifact: windows-npm-arm64
     steps:
       - uses: actions/checkout@v7
@@ -130,13 +153,26 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: ${{ runner.temp }}/tt-package
-      - name: Check installed CLI from Windows PowerShell 5.1
-        if: matrix.shell == 'powershell'
+      - name: First installation from Windows PowerShell 5.1
         shell: powershell
         run: |
-          ./scripts/test-npm-windows.ps1 -PackagePath (Get-ChildItem (Join-Path $env:RUNNER_TEMP 'tt-package/*.tgz')).FullName
-      - name: Check installed CLI from PowerShell 7
-        if: matrix.shell == 'pwsh'
+          ./scripts/test-npm-windows.ps1 -Phase Install -Workspace (Join-Path $env:RUNNER_TEMP 'tt npm smoke') -PackagePath (Get-ChildItem (Join-Path $env:RUNNER_TEMP 'tt-package/*.tgz')).FullName
+      - name: Upgrade and check installed CLI from PowerShell 7
         shell: pwsh
         run: |
-          ./scripts/test-npm-windows.ps1 -PackagePath (Get-ChildItem (Join-Path $env:RUNNER_TEMP 'tt-package/*.tgz')).FullName
+          ./scripts/test-npm-windows.ps1 -Phase Upgrade -Workspace (Join-Path $env:RUNNER_TEMP 'tt npm smoke') -PackagePath (Get-ChildItem (Join-Path $env:RUNNER_TEMP 'tt-package/*.tgz')).FullName
+      - name: Check upgraded CLI from Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/test-npm-windows.ps1 -Phase Verify -Workspace (Join-Path $env:RUNNER_TEMP 'tt npm smoke')
+      - name: Retain npm timing and failure diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-npm-logs-${{ matrix.arch }}
+          path: ${{ runner.temp }}/tt npm smoke/npm-logs/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Clean isolated npm workspace
+        if: always()
+        shell: pwsh
+        run: ./scripts/test-npm-windows.ps1 -Phase Cleanup -Workspace (Join-Path $env:RUNNER_TEMP 'tt npm smoke')

@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\windows-dist'),
-    [string]$CompilerPath = (Join-Path $env:ProgramFiles 'Inno Setup 7\ISCC.exe')
+    [string]$CompilerPath = (Join-Path $env:ProgramFiles 'Inno Setup 7\ISCC.exe'),
+    [string]$PackagePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,13 +24,20 @@ $payload = Join-Path $temporary 'payload'
 New-Item -ItemType Directory -Force $payload | Out-Null
 Push-Location $repo
 try {
-    & npm.cmd run build
-    if ($LASTEXITCODE -ne 0) { throw 'CLI build failed.' }
-    $pack = & npm.cmd pack --json --pack-destination $temporary | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0) { throw 'npm pack failed.' }
-    Copy-Item (Join-Path $temporary $pack[0].filename) (Join-Path $output $pack[0].filename)
-    & npm.cmd install -g --ignore-scripts --no-audit --no-fund --prefix $payload (Join-Path $temporary $pack[0].filename)
+    if (-not $PackagePath) {
+        & npm.cmd run build
+        if ($LASTEXITCODE -ne 0) { throw 'CLI build failed.' }
+        $pack = & npm.cmd pack --json --pack-destination $temporary | ConvertFrom-Json
+        if ($LASTEXITCODE -ne 0) { throw 'npm pack failed.' }
+        $PackagePath = Join-Path $temporary $pack[0].filename
+    }
+    $PackagePath = [IO.Path]::GetFullPath($PackagePath)
+    Copy-Item -LiteralPath $PackagePath -Destination (Join-Path $output ([IO.Path]::GetFileName($PackagePath)))
+    $npm = Join-Path (Split-Path (Get-Command npm.cmd -ErrorAction Stop).Source -Parent) 'node_modules\npm\bin\npm-cli.js'
+    & $node (Join-Path $repo 'scripts\run-npm-windows.mjs') --npm-cli $npm --package $PackagePath --label 'installer payload' -- install -g --ignore-scripts --no-audit --no-fund --prefer-offline --timing --logs-dir (Join-Path $temporary 'npm-logs') --prefix $payload
     if ($LASTEXITCODE -ne 0) { throw 'Installing the packed CLI failed.' }
+    $installed = Get-Content (Join-Path $payload 'node_modules\@tuned-tensor\cli\package.json') -Raw | ConvertFrom-Json
+    if ($installed.version -ne $version) { throw 'The tested package version does not match the installer version.' }
     # Keep Node private: putting node.exe on PATH would shadow the user's Node.
     New-Item -ItemType Directory (Join-Path $payload 'runtime') | Out-Null
     Copy-Item $node (Join-Path $payload 'runtime\node.exe')
@@ -51,6 +59,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'WinGet manifest generation failed.' }
 } finally {
     Pop-Location
+    if (Test-Path -LiteralPath (Join-Path $temporary 'npm-logs')) {
+        $logs = Join-Path $output 'npm-logs'
+        New-Item -ItemType Directory -Force $logs | Out-Null
+        Copy-Item (Join-Path $temporary 'npm-logs\*') -Destination $logs -Force
+    }
     # Windows PowerShell 5.1 needs extended paths for nested npm dependencies.
     $cleanup = [IO.Path]::GetFullPath($temporary)
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'

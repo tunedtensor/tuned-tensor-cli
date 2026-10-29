@@ -25,6 +25,20 @@ shipped entrypoint. The reusable Windows job checks native npm installs and the
 bundled installer from PowerShell 5.1 and 7, including repeated installation,
 pipeline previews, upgrade ownership, PATH handling and uninstall. It gates
 publication too; see [Windows release checks](windows.md#release-and-winget-maintenance).
+Windows CLI checks build one npm artifact per architecture. Installer packaging
+reuses that tested artifact, and npm lifecycle checks run alongside installer
+work instead of waiting for it. Each architecture uses one isolated prefix for
+installation from PowerShell 5.1 and upgrade from PowerShell 7; both shells check
+the upgraded commands. This keeps first-install and reinstall coverage with four
+npm installs across the two architectures, rather than eight. npm processes emit
+heartbeats, have a 25-minute deadline, and retain timing/debug logs as CI artifacts.
+Windows installs use a loopback registry fixture serving the exact packed tarball
+and its own manifest/integrity. This follows the published-package install path
+and avoids npm's repeated full-tree extraction to inspect a local tarball.
+Dependencies continue to resolve from the public npm registry. Linux/macOS smoke
+checks retain direct tarball installation coverage.
+Superseded PR CI runs are cancelled. The longer job timeout is a ceiling for slow
+hosted runners, not a substitute for the command deadlines or performance logs.
 Windows x64 and ARM64 run the full CLI suite, including deterministic agent
 conversations and the native directory-handle write implementation. Linux-only
 rsync/shell transport fixtures remain in the Linux gate. File-symlink fixtures
