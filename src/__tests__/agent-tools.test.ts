@@ -35,6 +35,37 @@ function tool(name: string, api: AgentToolApi, workspaceRoot?: string) {
 }
 
 describe("Tuned Tensor agent tools", () => {
+  it.each([[2, 1, 1], [5, 4, 1], [10, 8, 2]])("grounds inline adapter review in the real split for %i examples", async (count, training, heldout) => {
+    const root = mkdtempSync(join(tmpdir(), "tt-agent-inline-split-"));
+    try {
+      writeFileSync(join(root, "tunedtensor.json"), JSON.stringify({
+        name: "Sentiment", base_model: "Qwen/Qwen3.5-2B", system_prompt: "Return a label.",
+        examples: Array.from({ length: count }, (_, index) => ({ input: `Feedback ${index}`, output: index % 2 ? "negative" : "positive" })),
+      }));
+      const api = fakeApi();
+      const result = await tool("get_local_spec", api, root).execute("inspect", {});
+      expect(result.details).toMatchObject({ inline_data_split: {
+        method: "deterministic_holdout", training_examples: training, heldout_examples: heldout,
+      } });
+      expect(api.propose).not.toHaveBeenCalled();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it.each(["prebuilt", "foundation"])("does not apply the inline adapter split to %s data", async kind => {
+    const root = mkdtempSync(join(tmpdir(), "tt-agent-engine-split-"));
+    try {
+      writeFileSync(join(root, "tunedtensor.json"), JSON.stringify({
+        name: "Sentiment", system_prompt: "Return a label.",
+        examples: [{ input: "Good", output: "positive" }, { input: "Bad", output: "negative" }],
+        ...(kind === "foundation" ? { engine: "foundation", foundation: { depth: 2 } }
+          : { base_model: "Qwen/Qwen3.5-2B", dataset_prebuilt: { training: "training.jsonl", validation: "validation.jsonl", format: "chat_jsonl" } }),
+      }));
+      const result = await tool("get_local_spec", fakeApi(), root).execute("inspect", {});
+      expect(result.details).toMatchObject({ validation: { valid: true } });
+      expect(result.details).not.toHaveProperty("inline_data_split");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   it("executes typed read tools immediately and bounds untrusted output", async () => {
     const api = fakeApi();
     const result = await tool("list_specs", api).execute(
