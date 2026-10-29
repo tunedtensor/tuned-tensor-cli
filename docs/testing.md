@@ -31,6 +31,9 @@ rsync/shell transport fixtures remain in the Linux gate. File-symlink fixtures
 are skipped only when Windows denies that fixture capability; junction refusal,
 private Windows file ACLs, stale approvals, concurrent edits and directory
 replacement protection are exercised natively without administrator access.
+Windows cancellation tests cover foreground handoff, background cancellation
+without terminating the supervisor, and forced shutdown after the cleanup grace
+period when a child does not respond.
 Run `npm run test:windows` from PowerShell for the CLI suite and portable runtime
 contracts. Runtime fixtures that execute Unix shebang scripts or need unavailable
 file-symlink privileges are explicitly skipped there and retained in Linux CI.
