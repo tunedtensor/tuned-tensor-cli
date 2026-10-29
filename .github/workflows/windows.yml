@@ -127,7 +127,13 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: ${{ runner.temp }}/tt-package
-      - name: Check installed CLI from ${{ matrix.shell }} on ${{ matrix.arch }}
-        shell: ${{ matrix.shell }}
+      - name: Check installed CLI from Windows PowerShell 5.1
+        if: matrix.shell == 'powershell'
+        shell: powershell
+        run: |
+          ./scripts/test-npm-windows.ps1 -PackagePath (Get-ChildItem (Join-Path $env:RUNNER_TEMP 'tt-package/*.tgz')).FullName
+      - name: Check installed CLI from PowerShell 7
+        if: matrix.shell == 'pwsh'
+        shell: pwsh
         run: |
           ./scripts/test-npm-windows.ps1 -PackagePath (Get-ChildItem (Join-Path $env:RUNNER_TEMP 'tt-package/*.tgz')).FullName
