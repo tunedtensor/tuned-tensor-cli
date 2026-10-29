@@ -635,7 +635,7 @@ export function createTunedTensorTools(
             dry_run: "tt pipeline run --dry-run --spec tunedtensor.json",
             run: "tt pipeline run --spec tunedtensor.json",
           },
-          note: "Runs locally on CPU, Apple MPS or CUDA; runtime.gpu (AWS) is not used. The tuned model directory loads in Python with laya.load(<model_dir>).",
+          note: "Runs locally on CPU, Apple MPS or CUDA; runtime.gpu (AWS) is not used. The tuned model directory loads in Python with laya.load(<model_dir>). For paid serverless CPU hosting, the user can run tt cloud endpoints create --model <model_dir> --name <name>; see docs/local-runtime/hosting.md. This uploads weights to the TT account, returns an authenticated inference URL and scoped key, and charges prepaid credits per successful request.",
           ...(host ? { host } : {}),
         };
       }

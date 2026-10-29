@@ -135,7 +135,8 @@ print(answer["choice"], answer["probabilities"])
 Pass the same instructions and criteria the model was trained with: they are
 part of its input. `resolved-workflow.json` records them under `question`.
 The tuned model is not registered with `tt models` and is not served through
-vLLM.
+vLLM. To move inference off your machine, use [serverless hosting](hosting.md)
+with `tt cloud endpoints create`.
 
 ## Limits
 
