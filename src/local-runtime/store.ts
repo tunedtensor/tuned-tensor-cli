@@ -211,8 +211,10 @@ export async function writePrivateJsonAtomic(path: string, value: unknown): Prom
     encoding: "utf8",
     mode: 0o600,
   });
+  // Set permissions on our unique file before another writer can replace it.
+  // chmod of the shared destination races with Windows atomic replacement.
+  await chmod(tmp, 0o600);
   await renameAtomicFile(tmp, path);
-  await chmod(path, 0o600);
 }
 
 async function readJson<T>(path: string): Promise<T> {

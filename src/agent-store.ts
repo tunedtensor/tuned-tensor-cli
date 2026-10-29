@@ -212,7 +212,6 @@ export class LocalAgentStore {
     await writeFile(temporary, serialized, { mode: 0o600, flag: "wx" });
     await chmod(temporary, 0o600);
     await renameAtomicFile(temporary, destination);
-    await chmod(destination, 0o600);
     await this.pruneThreads(`${state.thread.id}.json`);
   }
 
