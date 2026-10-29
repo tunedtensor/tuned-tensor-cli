@@ -1,6 +1,8 @@
 import { constants as osConstants } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import type { EventEmitter } from "node:events";
+import { windowsChildSignals } from "./local-runtime/windows-child-signals.js";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
@@ -34,6 +36,7 @@ export interface LocalCommandOptions {
   stdin?: NodeJS.ReadableStream;
   stdout?: NodeJS.WritableStream;
   stderr?: NodeJS.WritableStream;
+  signals?: Pick<EventEmitter, "on" | "off">;
 }
 
 export interface LocalCommandResult extends LocalOutputPayload {
@@ -356,6 +359,7 @@ async function spawnLocalCli(args: {
   stdin?: NodeJS.ReadableStream;
   stdout?: NodeJS.WritableStream;
   stderr?: NodeJS.WritableStream;
+  signals?: Pick<EventEmitter, "on" | "off">;
   pathReplacements: readonly PathReplacement[];
 }): Promise<{
   exitCode: number;
@@ -380,13 +384,15 @@ async function spawnLocalCli(args: {
     [args.entrypoint, ...args.commandArgs],
     {
       cwd: args.cwd,
-      env: childEnv,
+      env: process.platform === "win32" ? { ...childEnv, TT_PARENT_IPC: "1" } : childEnv,
       stdio: [
         pipeInput ? "pipe" : "inherit",
         args.streamingStdout && !pipeStreamingOutput ? "inherit" : "pipe",
         "pipe",
+        ...(process.platform === "win32" ? ["ipc" as const] : []),
       ],
       detached: process.platform !== "win32",
+      windowsHide: true,
     },
   );
 
@@ -417,10 +423,12 @@ async function spawnLocalCli(args: {
 
   return new Promise((resolveChild) => {
     let spawnError: Error | undefined;
+    const windowsSignals = windowsChildSignals(child);
     const forwardSignal = (signal: NodeJS.Signals) => {
       // SIGHUP has no cleanup handler in the standalone local CLI. Translate
       // it to SIGTERM so its Python/server subtree is stopped deliberately.
       const childSignal = signal === "SIGHUP" ? "SIGTERM" : signal;
+      if (windowsSignals.forward(childSignal)) return;
       if (child.pid && process.platform !== "win32") {
         try {
           process.kill(-child.pid, childSignal);
@@ -434,14 +442,16 @@ async function spawnLocalCli(args: {
     const onSigint = () => forwardSignal("SIGINT");
     const onSigterm = () => forwardSignal("SIGTERM");
     const onSighup = () => forwardSignal("SIGHUP");
+    const signals = args.signals ?? process;
     const cleanup = () => {
-      process.off("SIGINT", onSigint);
-      process.off("SIGTERM", onSigterm);
-      if (process.platform !== "win32") process.off("SIGHUP", onSighup);
+      windowsSignals.dispose();
+      signals.off("SIGINT", onSigint);
+      signals.off("SIGTERM", onSigterm);
+      if (process.platform !== "win32") signals.off("SIGHUP", onSighup);
     };
-    process.on("SIGINT", onSigint);
-    process.on("SIGTERM", onSigterm);
-    if (process.platform !== "win32") process.on("SIGHUP", onSighup);
+    signals.on("SIGINT", onSigint);
+    signals.on("SIGTERM", onSigterm);
+    if (process.platform !== "win32") signals.on("SIGHUP", onSighup);
     child.once("error", (error) => {
       spawnError = error;
     });
@@ -500,6 +510,7 @@ export async function runLocalCommand(
       stdin: options.stdin,
       stdout: options.stdout,
       stderr: options.stderr,
+      signals: options.signals,
       pathReplacements: projected.pathReplacements,
     });
     const parsed = parseJsonOutput(result.stdout);

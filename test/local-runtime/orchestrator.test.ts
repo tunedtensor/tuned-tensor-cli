@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   fineTuneRunRequestSchema,
   localRunnerConfigSchema,
@@ -13,7 +14,7 @@ import {
   runLocalFineTune,
   validateLocalFineTuneInput,
 } from "../../src/local-runtime/orchestrator.js";
-import { defaultArtifactPrefix, resolveRunArtifacts } from "../../src/local-runtime/artifacts.js";
+import { defaultArtifactPrefix, fileUri, resolveRunArtifacts } from "../../src/local-runtime/artifacts.js";
 import { createLocalStore } from "../../src/local-runtime/store.js";
 import { QWEN_3_5_2B_REVISION } from "../../src/local-runtime/model-registry.js";
 import { prepareDatasetSplit, executeDatasetSplit } from "../../src/local-runtime/dataset-split.js";
@@ -111,7 +112,7 @@ test("runs the complete dry SFT workflow with distinct train and holdout data", 
     );
 
     const dataset = await readFile(
-      result.report.artifact_uris.dataset.replace(/^file:\/\//, ""),
+      fileURLToPath(result.report.artifact_uris.dataset),
       "utf8",
     );
     const evaluatedPrompt = result.report.baseline.results[0]?.prompt;
@@ -496,8 +497,8 @@ test("rejects duplicate prompts within a prebuilt evaluation split", async () =>
   }
 });
 
-test("normalizes prebuilt training JSONL and evaluates the validation split", async () => {
-  const root = await mkdtemp(join(tmpdir(), "tt-local-prebuilt-valid-"));
+test("normalizes prebuilt training JSONL from encoded file URIs and evaluates the validation split", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-prebuilt café #100%-"));
   try {
     const training = join(root, "training.jsonl");
     const validation = join(root, "validation.jsonl");
@@ -510,8 +511,8 @@ test("normalizes prebuilt training JSONL and evaluates the validation split", as
     const request = requestFixture({
       runId: "66666666-6666-4666-8666-666666666666",
       datasetPrebuilt: {
-        training: `file://${training}`,
-        validation: `file://${validation}`,
+        training: fileUri(training),
+        validation: fileUri(validation),
         format: "chat_jsonl",
       },
     });
@@ -522,7 +523,7 @@ test("normalizes prebuilt training JSONL and evaluates the validation split", as
     assert.equal(result.report.baseline.results[0]?.prompt, "validation input");
     assert.equal(result.report.run_metadata.training_example_count, 2);
     const persisted = await readFile(
-      result.report.artifact_uris.dataset.replace(/^file:\/\//, ""),
+      fileURLToPath(result.report.artifact_uris.dataset),
       "utf8",
     );
     assert.equal(persisted, `${trainRows.join("\n")}\n`);
@@ -547,7 +548,7 @@ test("uses current spec instructions for reusable system-free data without modif
     request.spec_snapshot.guidelines = ["Use the allowed labels."];
     request.spec_snapshot.constraints = ["Do not add explanations."];
     const result = await runLocalFineTune({ request, config: configFixture(root) });
-    const persisted = JSON.parse((await readFile(result.report.artifact_uris.dataset.replace(/^file:\/\//, ""), "utf8")).trim());
+    const persisted = JSON.parse((await readFile(fileURLToPath(result.report.artifact_uris.dataset), "utf8")).trim());
     assert.equal(persisted.messages[0].role, "system");
     assert.equal(persisted.messages[0].content, "Return labels.\n\nGuidelines:\n- Use the allowed labels.\n\nConstraints:\n- Do not add explanations.");
     assert.equal(result.report.baseline.eval_split, "prebuilt_validation");

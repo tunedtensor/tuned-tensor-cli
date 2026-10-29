@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fineTuneRunRequestSchema, localFoundationSpecFileSchema, localRunnerConfigSchema } from "../../src/local-runtime/contracts.js";
 import { buildDoctorPythonPlans, runDoctor } from "../../src/local-runtime/doctor.js";
 
 test("doctor probes the locked uv runtime with one cache contract and mandatory CUDA", () => {
   const config = localRunnerConfigSchema.parse({
-    paths: { modelCache: "/tmp/tt-hf-home" },
+    paths: { modelCache: resolve("/tmp/tt-hf-home") },
     evaluation: {
       inference: {
         device: "cpu",
@@ -22,9 +22,9 @@ test("doctor probes the locked uv runtime with one cache contract and mandatory 
   for (const plan of plans) {
     assert.equal(plan.command, "uv");
     assert.ok(plan.args.includes("--project"));
-    assert.ok(plan.args.some((value) => value.endsWith("training/adapter")));
-    assert.equal(plan.env.HF_HOME, "/tmp/tt-hf-home");
-    assert.equal(plan.env.HF_HUB_CACHE, "/tmp/tt-hf-home/hub");
+    assert.ok(plan.args.some((value) => value.endsWith(join("training", "adapter"))));
+    assert.equal(plan.env.HF_HOME, resolve("/tmp/tt-hf-home"));
+    assert.equal(plan.env.HF_HUB_CACHE, resolve("/tmp/tt-hf-home", "hub"));
     assert.ok(plan.env.UV_PROJECT_ENVIRONMENT);
     const probe = plan.args.at(-1) ?? "";
     assert.match(probe, /assert torch\.cuda\.is_available\(\)/);
@@ -33,7 +33,7 @@ test("doctor probes the locked uv runtime with one cache contract and mandatory 
   }
 });
 
-test("doctor surfaces a failed CUDA runtime probe", async () => {
+test("doctor surfaces a failed CUDA runtime probe", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-local-doctor-cuda-"));
   const previousPath = process.env.PATH;
   try {
@@ -185,10 +185,8 @@ test("foundation doctor validates streaming, held-out, and checkpoint paths", as
     assert.equal(checks.find((check) => check.name === "pretraining-corpus")?.ok, true);
     assert.equal(checks.find((check) => check.name === "validation-corpus")?.ok, true);
     assert.equal(checks.find((check) => check.name === "checkpoint-backup")?.ok, true);
-    assert.match(
-      JSON.stringify(checks.find((check) => check.name === "effective-plan")?.details),
-      /training\/foundation\/src\/pretrain\.py/,
-    );
+    const details = checks.find((check) => check.name === "effective-plan")?.details as { training_command: string[] };
+    assert.ok(details.training_command.some(part => part.endsWith(join("training", "foundation", "src", "pretrain.py"))));
 
     const overlapping = localFoundationSpecFileSchema.parse({
       ...spec,

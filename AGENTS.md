@@ -31,6 +31,7 @@ All standard dev commands are in `package.json` scripts and documented in `READM
 - `npm run typecheck` — TypeScript type checking
 - `npm test` — CLI, workflow, local runtime, and Python regression tests
 - `npm run test:workflows` — focused conversation and model lifecycle contracts
+- `npm run test:windows` — CLI and portable runtime tests on native Windows
 - `npm run check` — typecheck, all tests, and build
 - `npm run eval:agent -- --help` — opt-in real model evaluation; see `docs/testing.md`
 
@@ -87,6 +88,10 @@ gate before `npm publish`.
   stay on stable while testers opt in with `npm i -g @tuned-tensor/cli@beta`.
 - The workflow refuses to publish if the release tag and `package.json` version
   do not match.
+- Native Windows installation is checked in PowerShell 5.1 and 7 before npm
+  publication. The release also attaches a tested x64 installer, checksum and
+  stable WinGet manifests. See `docs/windows.md` for the catalog submission step;
+  merging a PR does not publish a release or list it in WinGet.
 
 ## Hosted decision models
 

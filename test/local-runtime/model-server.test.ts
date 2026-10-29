@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { localRunnerConfigSchema } from "../../src/local-runtime/contracts.js";
 import { QWEN_3_5_2B_REVISION } from "../../src/local-runtime/model-registry.js";
@@ -21,8 +22,8 @@ const model: LocalModelRecord = {
   name: "Qwen adapter",
   provider: "local-uv",
   base_model: "Qwen/Qwen3.5-2B",
-  artifact_uri: "file:///tmp/model.tar.gz",
-  artifact_dir: "/tmp/run",
+  artifact_uri: pathToFileURL(resolve("/tmp/model.tar.gz")).href,
+  artifact_dir: resolve("/tmp/run"),
   metrics: null,
   created_at: "2026-07-13T00:00:00.000Z",
 };
@@ -30,8 +31,8 @@ const model: LocalModelRecord = {
 test("serving launches the bundled text-only Qwen adapter with safe model settings", () => {
   const config = localRunnerConfigSchema.parse({
     paths: {
-      baseModel: "/tmp/qwen-snapshot",
-      modelCache: "/tmp/huggingface",
+      baseModel: resolve("/tmp/qwen-snapshot"),
+      modelCache: resolve("/tmp/huggingface"),
     },
     evaluation: {
       inference: {
@@ -48,24 +49,24 @@ test("serving launches the bundled text-only Qwen adapter with safe model settin
       systemPrompt: "Be concise.",
       maxTokens: 64,
       maxConcurrentRequests: 2,
-      baseModelArtifactUri: "file:///tmp/qwen-snapshot",
+      baseModelArtifactUri: pathToFileURL(resolve("/tmp/qwen-snapshot")).href,
     },
   });
 
   assert.equal(launch.command, "uv");
   assert.ok(launch.commandArgs.includes("--project"));
   assert.ok(launch.commandArgs.some((value) =>
-    value.endsWith("training/adapter/src/serve.py")
+    value.endsWith(join("training", "adapter", "src", "serve.py"))
   ));
-  assert.equal(launch.env.TT_MODEL_ARTIFACT, "/tmp/model.tar.gz");
+  assert.equal(launch.env.TT_MODEL_ARTIFACT, resolve("/tmp/model.tar.gz"));
   assert.equal(launch.env.TT_BASE_MODEL, "Qwen/Qwen3.5-2B");
-  assert.equal(launch.env.TT_MODEL_SOURCE, "/tmp/qwen-snapshot");
+  assert.equal(launch.env.TT_MODEL_SOURCE, resolve("/tmp/qwen-snapshot"));
   assert.equal(launch.env.TT_BASE_MODEL_REVISION, QWEN_3_5_2B_REVISION);
   assert.equal(launch.env.TT_MODEL_LOADER, "causal_lm");
   assert.equal(launch.env.TT_TRUST_REMOTE_CODE, "false");
   assert.equal(launch.env.TT_CHAT_TEMPLATE_KWARGS, undefined);
-  assert.equal(launch.env.HF_HOME, "/tmp/huggingface");
-  assert.equal(launch.env.HF_HUB_CACHE, "/tmp/huggingface/hub");
+  assert.equal(launch.env.HF_HOME, resolve("/tmp/huggingface"));
+  assert.equal(launch.env.HF_HUB_CACHE, resolve("/tmp/huggingface/hub"));
   assert.equal(launch.env.HF_HUB_OFFLINE, "1");
   assert.equal(launch.env.TRANSFORMERS_OFFLINE, "1");
   assert.ok(launch.env.UV_PROJECT_ENVIRONMENT);
@@ -76,7 +77,7 @@ test("serving launches the bundled text-only Qwen adapter with safe model settin
 
 test("serving uses an isolated locked vLLM environment, not the training environment", () => {
   const launch = buildLocalBaseModelServerLaunch({ baseModel: "Qwen/Qwen3.5-2B", config: localRunnerConfigSchema.parse({}) });
-  assert.ok(launch.commandArgs.some(value => value.endsWith("training/serving")));
+  assert.ok(launch.commandArgs.some(value => value.endsWith(join("training", "serving"))));
   assert.match(launch.env.UV_PROJECT_ENVIRONMENT ?? "", /uv-serving/);
   assert.equal(launch.env.VLLM_NO_USAGE_STATS, "1");
   assert.equal(launch.env.VLLM_ALLOW_RUNTIME_LORA_UPDATING, "0");
@@ -107,15 +108,15 @@ test("protected-base serving omits the adapter while remaining offline", () => {
     baseModel: "Qwen/Qwen3.5-2B",
     config: localRunnerConfigSchema.parse({
       paths: {
-        baseModel: "/tmp/qwen-snapshot",
-        modelCache: "/tmp/huggingface",
+        baseModel: resolve("/tmp/qwen-snapshot"),
+        modelCache: resolve("/tmp/huggingface"),
       },
     }),
   });
   assert.equal(launch.artifactPath, undefined);
   assert.equal(launch.env.TT_MODEL_ARTIFACT, undefined);
   assert.equal(launch.env.TT_BASE_MODEL, "Qwen/Qwen3.5-2B");
-  assert.equal(launch.env.TT_MODEL_SOURCE, "/tmp/qwen-snapshot");
+  assert.equal(launch.env.TT_MODEL_SOURCE, resolve("/tmp/qwen-snapshot"));
   assert.equal(launch.env.TT_BASE_MODEL_REVISION, QWEN_3_5_2B_REVISION);
   assert.equal(launch.env.HF_HUB_OFFLINE, "1");
   assert.equal(launch.env.TRANSFORMERS_OFFLINE, "1");
@@ -123,7 +124,7 @@ test("protected-base serving omits the adapter while remaining offline", () => {
 });
 
 test("local Nemotron serving exports canonical identity separately from its snapshot", () => {
-  const snapshot = "/tmp/nemotron-snapshot";
+  const snapshot = resolve("/tmp/nemotron-snapshot");
   const launch = buildLocalBaseModelServerLaunch({
     baseModel: "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
     config: localRunnerConfigSchema.parse({ paths: { baseModel: snapshot } }),
@@ -144,7 +145,7 @@ test("local Nemotron serving exports canonical identity separately from its snap
 
 test("serving rejects unsafe artifacts, base-model mismatches, and invalid network bounds", () => {
   const config = localRunnerConfigSchema.parse({
-    paths: { baseModel: "/tmp/qwen-snapshot" },
+    paths: { baseModel: resolve("/tmp/qwen-snapshot") },
   });
   assert.throws(
     () => buildLocalModelServerLaunch({
@@ -157,7 +158,7 @@ test("serving rejects unsafe artifacts, base-model mismatches, and invalid netwo
     () => buildLocalModelServerLaunch({
       model,
       config,
-      options: { baseModelArtifactUri: "file:///tmp/different-snapshot" },
+      options: { baseModelArtifactUri: pathToFileURL(resolve("/tmp/different-snapshot")).href },
     }),
     /does not match the base model recorded/,
   );

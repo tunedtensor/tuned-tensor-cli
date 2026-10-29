@@ -187,7 +187,7 @@ test("dataset paths resolve relative to the spec and file URIs stay absolute", (
   );
   assert.equal(resolved.foundation.corpus_path, join(tmpdir(), "project", "data", "pretrain"));
   assert.equal(resolved.foundation.validation_path, join(tmpdir(), "project", "data", "held-out.jsonl"));
-  assert.ok(resolved.foundation.checkpoint_backup_dir.endsWith("/tt-checkpoints"));
+  assert.ok(resolved.foundation.checkpoint_backup_dir.endsWith(join("", "tt-checkpoints")));
 });
 
 test("init and load treat a foundation spec as its own engine", async () => {

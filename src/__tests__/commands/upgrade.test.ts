@@ -22,7 +22,7 @@ async function run(args: string[], deps: Partial<UpgradeCommandDeps> = {}) {
     version: "0.21.0",
     entrypoint,
     env: { TUNED_TENSOR_HOME: join(root, "home") },
-    platform: "linux",
+    platform: process.platform,
     ...deps,
   });
   await program.parseAsync(["node", "tt", "upgrade", ...args]);
@@ -31,7 +31,7 @@ async function run(args: string[], deps: Partial<UpgradeCommandDeps> = {}) {
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "tt-upgrade-"));
   prefix = join(root, "prefix");
-  packageDir = join(prefix, "lib", "node_modules", "@tuned-tensor", "cli");
+  packageDir = join(prefix, ...(process.platform === "win32" ? [] : ["lib"]), "node_modules", "@tuned-tensor", "cli");
   mkdirSync(join(packageDir, "dist"), { recursive: true });
   entrypoint = join(packageDir, "dist", "index.js");
   writeFileSync(entrypoint, "");
@@ -100,9 +100,28 @@ describe("tt upgrade", () => {
     expect(runNpm).not.toHaveBeenCalled();
   });
 
+  it("keeps installer-managed files out of npm upgrades", async () => {
+    writeFileSync(join(prefix, "tt-install.json"), JSON.stringify({ manager: "windows-installer" }));
+    const runNpm = vi.fn(async () => 0);
+    const fetchImpl = registry("0.22.0");
+    await expect(run([], { runNpm, fetchImpl })).rejects.toThrow("winget upgrade --id TunedTensor.CLI");
+    expect(runNpm).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    await run(["--check"], { runNpm, fetchImpl });
+    expect(fetchImpl).toHaveBeenCalled();
+    expect(runNpm).not.toHaveBeenCalled();
+  });
+
+  it.each(["latest & whoami", "--help", "https://example.com/pkg.tgz", "%PATH%", "beta|echo"])("rejects non-version input %s", async (target) => {
+    const runNpm = vi.fn(async () => 0);
+    await expect(run(["--", target], { runNpm })).rejects.toThrow("exact version or npm dist-tag");
+    expect(runNpm).not.toHaveBeenCalled();
+  });
+
   it("reports npm failures with the command to retry", async () => {
+    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
     await expect(run([], { fetchImpl: registry("0.22.0"), runNpm: async () => 1 }))
-      .rejects.toThrow(`npm install -g --ignore-scripts --prefix ${prefix} @tuned-tensor/cli@latest`);
+      .rejects.toThrow(`${npm} install -g --ignore-scripts --prefix`);
   });
 
   it("fails clearly when the registry is unreachable", async () => {
@@ -113,13 +132,13 @@ describe("tt upgrade", () => {
 
 describe("resolveGlobalInstall", () => {
   it("recognizes global npm layouts and rejects npx caches", () => {
-    expect(resolveGlobalInstall(entrypoint, "linux")).toEqual({ prefix, packageDir });
+    expect(resolveGlobalInstall(entrypoint)).toEqual({ prefix, packageDir });
     expect(resolveGlobalInstall(undefined)).toBeNull();
     expect(resolveGlobalInstall(join(root, "missing.js"))).toBeNull();
 
     const npx = join(root, "_npx", "abc", "lib", "node_modules", "@tuned-tensor", "cli", "dist");
     mkdirSync(npx, { recursive: true });
     writeFileSync(join(npx, "index.js"), "");
-    expect(resolveGlobalInstall(join(npx, "index.js"), "linux")).toBeNull();
+    expect(resolveGlobalInstall(join(npx, "index.js"))).toBeNull();
   });
 });

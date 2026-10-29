@@ -1,6 +1,7 @@
+import { symlinkSync, canCreateFileSymlinks } from "../platform-fixtures.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Command } from "commander";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -370,7 +371,7 @@ describe("label download", () => {
     examples: [],
   };
 
-  it.each(["directory", "file", "created-during-fetch"])("refuses unsafe output paths: %s", async (kind) => {
+  it.each(["directory", ...(canCreateFileSymlinks ? ["file"] : []), "created-during-fetch"])("refuses unsafe output paths: %s", async (kind) => {
     const specPath = join(dir, "tunedtensor.json");
     writeFileSync(specPath, JSON.stringify(spec));
     const outside = mkdtempSync(join(tmpdir(), "tt-label-outside-"));

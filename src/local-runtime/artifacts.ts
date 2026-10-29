@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createGunzip } from "node:zlib";
+import { pathToFileURL } from "node:url";
 
 export interface RunArtifacts {
   root: string;
@@ -38,7 +39,7 @@ export interface ArtifactRunOwner {
 }
 
 export function fileUri(path: string): string {
-  return `file://${resolve(path)}`;
+  return pathToFileURL(resolve(path)).href;
 }
 
 export function defaultArtifactPrefix(input: {

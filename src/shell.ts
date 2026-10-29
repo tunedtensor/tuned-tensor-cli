@@ -90,10 +90,11 @@ function operatorError(operator: string): ShellParseError {
 /**
  * Parse a command line into argv without invoking a system shell.
  *
- * Quoted or backslash-escaped punctuation is treated as literal data. Shell
- * operators outside quotes are rejected rather than interpreted.
+ * Quoted punctuation is literal data. On Windows, backslashes are path
+ * separators; on POSIX they escape the next character. Shell operators outside
+ * quotes are rejected rather than interpreted.
  */
-export function tokenizeShellInput(input: string): string[] {
+export function tokenizeShellInput(input: string, platform: NodeJS.Platform = process.platform): string[] {
   if (input.includes("\0")) {
     throw new ShellParseError("Command input must not contain NUL bytes.");
   }
@@ -133,7 +134,7 @@ export function tokenizeShellInput(input: string): string[] {
         quote = "none";
         continue;
       }
-      if (character === "\\") {
+      if (character === "\\" && platform !== "win32") {
         const escaped = input[index + 1];
         if (escaped === undefined) {
           throw new ShellParseError("Command ends with an unfinished escape.");
@@ -166,7 +167,7 @@ export function tokenizeShellInput(input: string): string[] {
       tokenStarted = true;
       continue;
     }
-    if (character === "\\") {
+    if (character === "\\" && platform !== "win32") {
       const escaped = input[index + 1];
       if (escaped === undefined) {
         throw new ShellParseError("Command ends with an unfinished escape.");

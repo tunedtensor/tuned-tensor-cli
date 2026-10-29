@@ -1,7 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { resolve, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { isAbsolute, resolve, join } from "node:path";
 import type { LocalRunnerConfig } from "./contracts.js";
 import {
   minimalMachineLearningEnvironment,
@@ -9,6 +8,7 @@ import {
 } from "./huggingface-cache.js";
 import {
   defaultBaseModelRevision,
+  localModelArtifactPath,
   resolveModelLoader,
   resolveRequestedBaseModelRevision,
 } from "./model-registry.js";
@@ -47,11 +47,10 @@ export interface LocalModelServerLaunch {
 }
 
 function localArtifactPath(uri: string): string {
-  if (uri.startsWith("file://")) return fileURLToPath(uri);
-  if (/^[a-z][a-z0-9+.-]*:/i.test(uri)) {
+  if (!uri.startsWith("file://") && !isAbsolute(uri) && /^[a-z][a-z0-9+.-]*:/i.test(uri)) {
     throw new Error(`Local TT serving requires a local file artifact, got: ${uri}`);
   }
-  return resolve(uri);
+  return localModelArtifactPath(uri);
 }
 
 function boundedNumber(name: string, value: number, minimum: number, maximum: number, integer = false): number {

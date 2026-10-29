@@ -25,6 +25,7 @@ Swapouts: 999999999.
 
 function usage(gpus: LiveUsage["gpus"]): LiveUsage {
   return {
+    platform: "linux", arch: "x64",
     sampled_at: "2026-01-01T00:00:00.000Z",
     cpu: { model: "CPU", cores: 8, utilization_percent: 10, load_average: [1, 1, 1] },
     memory: { used_bytes: 8 * GIB, total_bytes: 32 * GIB },

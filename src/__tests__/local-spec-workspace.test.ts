@@ -1,14 +1,6 @@
+import { symlinkSync } from "./platform-fixtures.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  existsSync,
-  lstatSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -138,7 +130,7 @@ describe("local spec workspace", () => {
     });
 
     expect(JSON.parse(readFileSync(specPath(), "utf8"))).toEqual({ id: expect.stringMatching(/^[0-9a-f-]{36}$/), ...spec });
-    expect(lstatSync(specPath()).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(lstatSync(specPath()).mode & 0o777).toBe(0o600);
     await expect(createLocalSpecProject(workspace, spec, prepared.workspaceFingerprint)).rejects.toThrow(
       /refusing to overwrite/i,
     );
@@ -157,7 +149,7 @@ describe("local spec workspace", () => {
     expect(readFileSync(specPath(), "utf8")).toBe("external content");
   });
 
-  it.each(["symlink", "directory", "missing"])("reports an unknown outcome when the workspace becomes %s during writing", async (replacement) => {
+  it.runIf(process.platform !== "win32").each(["symlink", "directory", "missing"])("reports an unknown outcome when the workspace becomes %s during writing", async (replacement) => {
     const prepared = await prepareLocalSpecProject(workspace, spec);
     const movedWorkspace = `${workspace}-moved`;
     const outside = mkdtempSync(join(tmpdir(), "tt-local-spec-root-outside-"));
@@ -192,5 +184,16 @@ describe("local spec workspace", () => {
     })).rejects.toMatchObject({ outcome: "unknown" });
 
     expect(JSON.parse(readFileSync(specPath(), "utf8"))).toEqual({ id: expect.any(String), ...spec });
+  });
+
+  it.runIf(process.platform === "win32")("prevents workspace replacement during an approved Windows create", async () => {
+    const prepared = await prepareLocalSpecProject(workspace, spec);
+    await createLocalSpecProject(workspace, spec, prepared.workspaceFingerprint, {
+      writeFile: async (path, data, options) => {
+        await expect(rename(workspace, workspace + "-moved")).rejects.toThrow();
+        await writeFile(path, data, options);
+      },
+    });
+    expect(JSON.parse(readFileSync(specPath(), "utf8"))).toMatchObject(spec);
   });
 });

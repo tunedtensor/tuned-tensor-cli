@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, win32 } from "node:path";
 import { Command } from "commander";
 import chalk from "chalk";
 import { isJsonMode, printJson, printSuccess } from "../output.js";
@@ -53,7 +53,8 @@ export function resolveGlobalInstall(
     ? script.match(/^(.*)\\node_modules\\@tuned-tensor\\cli\\dist\\index\.js$/i)
     : script.match(/^(.*)\/lib\/node_modules\/@tuned-tensor\/cli\/dist\/index\.js$/);
   if (!match?.[1]) return null;
-  return { prefix: match[1], packageDir: dirname(dirname(script)) };
+  const pathApi = platform === "win32" ? win32 : { dirname };
+  return { prefix: match[1], packageDir: pathApi.dirname(pathApi.dirname(script)) };
 }
 
 function prefixIsWritable(prefix: string, platform: NodeJS.Platform): boolean {
@@ -75,19 +76,36 @@ function installedVersion(packageDir: string): string | undefined {
   }
 }
 
-function quoteForCmd(arg: string): string {
-  return /[\s"&|<>^]/.test(arg) ? `"${arg.replace(/"/g, '""')}"` : arg;
+/** Locate npm's JS entrypoint without passing user-controlled arguments to cmd.exe. */
+export function resolveWindowsNpmCli(env: NodeJS.ProcessEnv, execPath: string): string {
+  const path = Object.entries(env).find(([key]) => key.toLowerCase() === "path")?.[1] ?? "";
+  const directories = [win32.dirname(execPath), ...path.split(";")];
+  for (const directory of directories) {
+    if (!directory) continue;
+    const candidate = win32.join(directory.replace(/^"|"$/g, ""), "node_modules", "npm", "bin", "npm-cli.js");
+    if (existsSync(candidate)) return candidate;
+  }
+  throw new Error("Could not locate npm-cli.js beside Node.js or on PATH. Reinstall Node.js with npm, then retry.");
 }
 
-function defaultNpmRunner(platform: NodeJS.Platform): NpmRunner {
+/** Keep the bundled runtime and Windows uninstall record in sync with the CLI. */
+export function isWindowsInstaller(prefix: string): boolean {
+  try {
+    return JSON.parse(readFileSync(join(prefix, "tt-install.json"), "utf8")).manager === "windows-installer";
+  } catch {
+    return false;
+  }
+}
+
+function defaultNpmRunner(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): NpmRunner {
   return async (args) => await new Promise<number>((resolve, reject) => {
     const windows = platform === "win32";
-    // npm.cmd can only be spawned through a shell on Windows.
     const child = spawn(
-      windows ? "npm.cmd" : "npm",
-      windows ? args.map(quoteForCmd) : args,
+      windows ? process.execPath : "npm",
+      windows ? [resolveWindowsNpmCli(env, process.execPath), ...args] : args,
       {
-        shell: windows,
+        env,
+        shell: false,
         // Keep stdout clean for --json; npm progress goes to stderr.
         stdio: ["ignore", isJsonMode() ? 2 : "inherit", "inherit"],
       },
@@ -97,7 +115,13 @@ function defaultNpmRunner(platform: NodeJS.Platform): NpmRunner {
   });
 }
 
-function formatCommand(args: string[]): string {
+function formatCommand(args: string[], platform: NodeJS.Platform): string {
+  if (platform === "win32") {
+    // PowerShell does not interpret JSON's doubled backslashes as path separators.
+    return ["npm.cmd", ...args].map((arg) => (
+      /^[a-zA-Z0-9_@./:\\+=-]+$/.test(arg) ? arg : "'" + arg.replaceAll("'", "''") + "'"
+    )).join(" ");
+  }
   return ["npm", ...args].map((arg) => (/\s/.test(arg) ? JSON.stringify(arg) : arg)).join(" ");
 }
 
@@ -125,6 +149,18 @@ Set TT_NO_UPDATE_CHECK=1 to silence update notices.
       const cacheFile = getCliUpdateCacheFile(deps.env);
       const current = deps.version;
       const target = requested?.trim() || "latest";
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9.+-]*$/.test(target)) {
+        throw new Error("Choose an exact version or npm dist-tag, such as 0.27.0, latest, or beta.");
+      }
+      const install = resolveGlobalInstall(deps.entrypoint, platform);
+      if (!options.check && install && isWindowsInstaller(install.prefix)) {
+        throw new Error(
+          "This tt is managed by the Windows installer. Upgrade with:\n"
+          + "  winget upgrade --id TunedTensor.CLI --exact --source winget\n"
+          + "Or download and run the newer Windows setup from https://github.com/tunedtensor/tuned-tensor-cli/releases.\n"
+          + "WinGet requires the release to be available in its catalog; use setup for prereleases.",
+        );
+      }
 
       let latest: string | undefined;
       if (target === "latest") {
@@ -158,7 +194,6 @@ Set TT_NO_UPDATE_CHECK=1 to silence update notices.
         return;
       }
 
-      const install = resolveGlobalInstall(deps.entrypoint, platform);
       const packageSpec = `${CLI_PACKAGE_NAME}@${target}`;
       if (!install) {
         throw new Error(
@@ -169,24 +204,27 @@ Set TT_NO_UPDATE_CHECK=1 to silence update notices.
       const npmArgs = ["install", "-g", "--ignore-scripts", "--prefix", install.prefix, packageSpec];
       if (!prefixIsWritable(install.prefix, platform)) {
         throw new Error(
-          `tt is installed in ${install.prefix}, which this user can't write to. Run:\n  sudo ${formatCommand(npmArgs)}`,
+          `tt is installed in ${install.prefix}, which this user can't write to. `
+          + (platform === "win32"
+            ? `Use an account with access to that directory and run:\n  ${formatCommand(npmArgs, platform)}`
+            : `Run:\n  sudo ${formatCommand(npmArgs, platform)}`),
         );
       }
 
       if (!isJsonMode()) {
         console.log(`Upgrading tt ${current} → ${chalk.bold(latest ?? target)}`);
-        console.log(chalk.dim(`$ ${formatCommand(npmArgs)}`));
+        console.log(chalk.dim(`$ ${formatCommand(npmArgs, platform)}`));
       }
       let code: number;
       try {
-        code = await (deps.runNpm ?? defaultNpmRunner(platform))(npmArgs);
+        code = await (deps.runNpm ?? defaultNpmRunner(platform, deps.env))(npmArgs);
       } catch (error) {
         throw new Error(
-          `Could not run npm (${error instanceof Error ? error.message : String(error)}). Run it yourself:\n  ${formatCommand(npmArgs)}`,
+          `Could not run npm (${error instanceof Error ? error.message : String(error)}). Run it yourself:\n  ${formatCommand(npmArgs, platform)}`,
         );
       }
       if (code !== 0) {
-        throw new Error(`npm exited with code ${code}. Run it yourself to see details:\n  ${formatCommand(npmArgs)}`);
+        throw new Error(`npm exited with code ${code}. Run it yourself to see details:\n  ${formatCommand(npmArgs, platform)}`);
       }
 
       const installed = installedVersion(install.packageDir) ?? latest ?? target;

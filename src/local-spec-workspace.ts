@@ -9,6 +9,7 @@ import { DECISION_MODELS } from "./local-runtime/decision-models.js";
 
 import { parseLocalRunInput } from "./local-runtime/local-project.js";
 import { pipelineForRunInput } from "./pipeline.js";
+import { WindowsWorkspace } from "./windows-workspace.js";
 
 const LocalBaseModel = Type.String({
   minLength: 3,
@@ -159,7 +160,7 @@ export async function createLocalSpecProject(
     const detail = error instanceof Error ? error.message : String(error);
     throw new LocalSpecMutationError(detail, "not_applied", error);
   }
-  if (process.platform !== "linux") {
+  if (process.platform !== "linux" && process.platform !== "win32") {
     throw new LocalSpecMutationError(
       "Secure local spec creation currently requires Linux filesystem handle support.",
       "not_applied",
@@ -167,12 +168,15 @@ export async function createLocalSpecProject(
   }
 
   let workspaceHandle: Awaited<ReturnType<typeof open>> | undefined;
+  let windows: WindowsWorkspace | undefined;
   try {
-    workspaceHandle = await open(
+    if (process.platform === "win32") {
+      windows = await WindowsWorkspace.open(canonicalRoot);
+    } else workspaceHandle = await open(
       canonicalRoot,
       constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
     );
-    if (fingerprintWorkspaceInfo(await workspaceHandle.stat()) !== expectedWorkspaceFingerprint) {
+    if ((windows ? await fingerprintWorkspace(canonicalRoot) : fingerprintWorkspaceInfo(await workspaceHandle!.stat())) !== expectedWorkspaceFingerprint) {
       throw new LocalSpecMutationError(
         "The local workspace changed after this action was prepared; return to the original workspace and prepare it again.",
         "not_applied",
@@ -182,6 +186,7 @@ export async function createLocalSpecProject(
     if (workspaceHandle) {
       try { await workspaceHandle.close(); } catch { /* No mutation has started. */ }
     }
+    await windows?.close();
     if (error instanceof LocalSpecMutationError) throw error;
     const detail = error instanceof Error ? error.message : String(error);
     throw new LocalSpecMutationError(detail, "not_applied", error);
@@ -189,10 +194,12 @@ export async function createLocalSpecProject(
 
   const operations = { ...NODE_FILE_OPERATIONS, ...operationOverrides };
   // Write through the opened workspace handle so a swapped root is never followed.
-  const stableSpecPath = join(`/proc/self/fd/${workspaceHandle.fd}`, SPEC_FILE);
+  const stableSpecPath = windows ? join(canonicalRoot, SPEC_FILE) : join(`/proc/self/fd/${workspaceHandle!.fd}`, SPEC_FILE);
   try {
     // A stable ID keeps run identity and the eval split fixed across later edits.
-    await operations.writeFile(stableSpecPath, `${JSON.stringify({ id: randomUUID(), ...spec as LocalProjectSpec }, null, 2)}\n`, {
+    const source = `${JSON.stringify({ id: randomUUID(), ...spec as LocalProjectSpec }, null, 2)}\n`;
+    if (windows && !operationOverrides.writeFile) await windows.create(canonicalRoot, SPEC_FILE, source);
+    else await operations.writeFile(stableSpecPath, source, {
       encoding: "utf8",
       flag: "wx",
       mode: 0o600,
@@ -206,7 +213,8 @@ export async function createLocalSpecProject(
       throw new Error("The local workspace changed while the spec was being written.");
     }
   } catch (error) {
-    try { await workspaceHandle.close(); } catch { /* The outcome is already decided below. */ }
+    try { await workspaceHandle?.close(); } catch { /* The outcome is already decided below. */ }
+    await windows?.close();
     const detail = error instanceof Error ? error.message : String(error);
     if (errorCode(error) === "EEXIST") {
       throw new LocalSpecMutationError(`Refusing to overwrite existing ${SPEC_DISPLAY_PATH}.`, "not_applied", error);
@@ -218,7 +226,8 @@ export async function createLocalSpecProject(
       error,
     );
   }
-  try { await workspaceHandle.close(); } catch { /* The spec is written. */ }
+  try { await workspaceHandle?.close(); } catch { /* The spec is written. */ }
+  await windows?.close();
 
   return { created: true, path: prepared.specPath };
 }

@@ -12,6 +12,7 @@ from prefetch import check_requested_revision, verify_snapshot
 
 
 class UncertifiedPrefetchTests(unittest.TestCase):
+    @unittest.skipIf(sys.platform == "win32", "POSIX directory/file symlink fixture; native junction checks run in the CLI suite")
     def test_indexed_shards_are_contained_and_inventoried(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -4,12 +4,12 @@ import {
   mkdir,
   readFile,
   readdir,
-  rename,
   stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { renameAtomicFile } from "./local-runtime/atomic-rename.js";
 import { join } from "node:path";
 import type { AgentAction, AgentThread } from "./agent-client.js";
 import type { ConversationSummary } from "./agent-context.js";
@@ -211,8 +211,7 @@ export class LocalAgentStore {
     }
     await writeFile(temporary, serialized, { mode: 0o600, flag: "wx" });
     await chmod(temporary, 0o600);
-    await rename(temporary, destination);
-    await chmod(destination, 0o600);
+    await renameAtomicFile(temporary, destination);
     await this.pruneThreads(`${state.thread.id}.json`);
   }
 

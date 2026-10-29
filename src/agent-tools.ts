@@ -21,6 +21,7 @@ import { readHardwareSnapshot } from "./local-runtime/hardware-snapshot.js";
 import { warningsFromSnapshot } from "./local-runtime/capability.js";
 import { DECISION_MODELS } from "./local-runtime/decision-models.js";
 import { inspectLocalSpec, prepareSpecUpdate } from "./spec-workspace.js";
+import { splitSpecExamples } from "./local-runtime/evaluation.js";
 import { prepareLocalPipelineAction } from "./local-pipeline-action.js";
 import { prepareLocalPrefetch } from "./local-prefetch-action.js";
 import {
@@ -796,11 +797,22 @@ export function createTunedTensorTools(
       }, { additionalProperties: false }),
       async (p) => {
         const current = await inspectLocalSpec(workspaceRoot, p.spec_path);
+        const spec = record(current.document);
+        const inline = current.validation.valid && spec && (spec.engine ?? "adapter") === "adapter"
+          && !spec.dataset_prebuilt && Array.isArray(spec.examples) ? spec.examples : undefined;
+        const split = inline ? splitSpecExamples(inline, 0) : undefined;
         return {
           spec_path: current.displayPath,
           sha256: current.sha256,
           spec: current.document ?? current.source,
           validation: current.validation,
+          ...(split ? { inline_data_split: {
+            method: "deterministic_holdout",
+            training_examples: split.train.length,
+            heldout_examples: split.holdout.length,
+            real_training_minimum_examples: 2,
+            note: "Inline adapter data is split automatically. A small held-out set is not evidence of model quality.",
+          } } : {}),
         };
       },
     ),

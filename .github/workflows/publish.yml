@@ -9,7 +9,11 @@ permissions:
   id-token: write
 
 jobs:
+  windows:
+    uses: ./.github/workflows/windows.yml
+
   publish:
+    needs: windows
     runs-on: ubuntu-latest
 
     steps:
@@ -55,3 +59,27 @@ jobs:
       - run: npm publish --access public --tag "${{ steps.dist-tag.outputs.tag }}" --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  windows-release:
+    needs: [windows, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-package
+          path: windows-dist
+      - name: Attach tested Windows installer and WinGet manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          cd windows-dist
+          if [ -d manifests ]; then
+            zip -r winget-manifests.zip manifests
+            gh release upload "$RELEASE_TAG" winget-manifests.zip
+          fi
+          gh release upload "$RELEASE_TAG" ./*.exe ./*.sha256

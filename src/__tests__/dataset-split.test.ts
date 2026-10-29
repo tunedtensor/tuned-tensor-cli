@@ -1,5 +1,6 @@
+import { symlink, canCreateFileSymlinks } from "./platform-fixtures.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -103,6 +104,7 @@ it("removes an empty reservation after publication fails", async () => {
 });
 it("preserves another writer's file when publishing into the reserved destination fails", async () => {
   vi.mocked(rename).mockImplementationOnce(async (_source, destination) => {
+    if (process.platform === "win32") await mkdir(String(destination));
     await writeFile(join(String(destination), "other-writer.txt"), "keep me");
     throw Object.assign(new Error("Destination is no longer empty"), { code: "ENOTEMPTY" });
   });
@@ -123,8 +125,10 @@ it("rejects invalid ratios, missing strata, malformed rows, traversal, symlinks 
   await expect(split("bad", { stratify_by: "missing" })).rejects.toThrow(/scalar/);
   await expect(split("../escape")).rejects.toThrow(/inside/);
   await expect(split("data.jsonl")).rejects.toThrow(/already exists/);
-  await symlink(join(root,"data.jsonl"),join(root,"link.jsonl"));
-  await expect(inspectDatasetFile(root,"link.jsonl")).rejects.toThrow(/symlinks/);
+  if (canCreateFileSymlinks) {
+    await symlink(join(root,"data.jsonl"),join(root,"link.jsonl"));
+    await expect(inspectDatasetFile(root,"link.jsonl")).rejects.toThrow(/symlinks/);
+  }
   await writeFile(join(root,"data.jsonl"), JSON.stringify(row(0))+"\n{\n");
   await expect(split("bad")).rejects.toThrow(/Row 2: malformed/);
   await save([row(0)]);

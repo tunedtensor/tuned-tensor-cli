@@ -24,6 +24,7 @@ import {
   writePrivateJsonAtomic,
 } from "./store.js";
 import { localRuntimePackageRoot } from "./package-root.js";
+import { localModelArtifactPath } from "./model-registry.js";
 import {
   minimalMachineLearningEnvironment,
   withOfflineHuggingFaceCacheEnvironment,
@@ -251,7 +252,7 @@ function aggregateJsonFieldMetrics(scores: JsonFieldScore[], total: number) {
 
 function fileUriToPath(value?: string): string | undefined {
   if (!value) return undefined;
-  return value.startsWith("file://") ? value.slice("file://".length) : value;
+  return value.startsWith("file://") ? localModelArtifactPath(value) : value;
 }
 
 export const INFERENCE_PROTOCOL_VERSION = 2;

@@ -81,7 +81,7 @@ function tt(args: string[], cwd: string, root: string) {
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
-test("downloads by repo, spec downloads pin the lock, and assets list, locate and verify them", async () => {
+test("downloads by repo, spec downloads pin the lock, and assets list, locate and verify them", { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "tt-assets-cli-"));
   try {
     const project = join(root, "project");

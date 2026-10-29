@@ -1,6 +1,7 @@
+import { canCreateFileSymlinks, linkOrCopySnapshot } from "../../src/__tests__/platform-fixtures.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -35,7 +36,7 @@ async function cacheRepo(hub: string, kind: "datasets" | "models", repo: string,
     const blob = join(repository, "blobs", name.endsWith(".json") ? gitSha1(content) : sha256(content));
     await writeFile(blob, content);
     await mkdir(join(snapshot, name, ".."), { recursive: true });
-    await symlink(blob, join(snapshot, name));
+    await linkOrCopySnapshot(blob, join(snapshot, name));
   }
   return snapshot;
 }
@@ -44,7 +45,7 @@ async function temporary(): Promise<string> {
   return await mkdtemp(join(tmpdir(), "tt-assets-"));
 }
 
-test("snapshot digests hash Hugging Face blobs and plain copies", async () => {
+test("snapshot digests hash Hugging Face blobs and plain copies", { skip: !canCreateFileSymlinks }, async () => {
   const root = await temporary();
   try {
     const snapshot = await cacheRepo(join(root, "hub"), "models", "org/m", { "config.json": "{}", "model.safetensors": "weights" });
@@ -86,10 +87,10 @@ test("manifests make downloads findable and detect changed bytes", async () => {
 });
 
 test("each spec has its own lock, shared by temporary copies beside it", () => {
-  assert.equal(specLockPath("/p/tunedtensor.json"), "/p/tunedtensor.lock.json");
-  assert.equal(specLockPath("/p/support.json"), "/p/support.lock.json");
-  assert.equal(specLockPath("/p/.tunedtensor.json.tt-local-12-ab.json"), "/p/tunedtensor.lock.json");
-  assert.equal(specLockPath("/p/.support.json.tt-agent-ab.json"), "/p/support.lock.json");
+  assert.equal(specLockPath("/p/tunedtensor.json"), join("/p", "tunedtensor.lock.json"));
+  assert.equal(specLockPath("/p/support.json"), join("/p", "support.lock.json"));
+  assert.equal(specLockPath("/p/.tunedtensor.json.tt-local-12-ab.json"), join("/p", "tunedtensor.lock.json"));
+  assert.equal(specLockPath("/p/.support.json.tt-agent-ab.json"), join("/p", "support.lock.json"));
 });
 
 test("the lock records a missing entry, then refuses a different revision or file", async () => {
@@ -160,15 +161,16 @@ test("runs check the resolved dataset and cached base model against the lock", a
     await enforceSpecLock({ specPath: spec, request, config });
     // Editing the blob in place must fail even when its content-addressed name is unchanged.
     await writeFile(join(modelSnapshot, "model.safetensors"), "corrupt");
-    await assert.rejects(enforceSpecLock({ specPath: spec, request, config }), /model\.safetensors failed its checksum/);
+    await assert.rejects(enforceSpecLock({ specPath: spec, request, config }),
+      canCreateFileSymlinks ? /model\.safetensors failed its checksum/ : /model\.safetensors is sha256:/);
     await writeFile(join(modelSnapshot, "model.safetensors"), "w");
     await rm(join(modelSnapshot, "config.json"));
     await assert.rejects(enforceSpecLock({ specPath: spec, request, config }), /config\.json is missing/);
-    await symlink(join(hf, "hub", "models--org--model", "blobs", gitSha1("{}")), join(modelSnapshot, "config.json"));
+    await linkOrCopySnapshot(join(hf, "hub", "models--org--model", "blobs", gitSha1("{}")), join(modelSnapshot, "config.json"));
     const swapped = join(hf, "hub", "models--org--model", "blobs", sha256("other"));
     await writeFile(swapped, "other");
     await rm(join(modelSnapshot, "model.safetensors"));
-    await symlink(swapped, join(modelSnapshot, "model.safetensors"));
+    await linkOrCopySnapshot(swapped, join(modelSnapshot, "model.safetensors"));
     await assert.rejects(enforceSpecLock({ specPath: spec, request, config }), /model\.safetensors is sha256:/);
 
     // A locked base model that is not downloaded asks for a prefetch.

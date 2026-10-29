@@ -1,5 +1,6 @@
+import { symlink, canCreateFileSymlinks } from "./platform-fixtures.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,7 +48,7 @@ describe("agent access to downloaded datasets", () => {
     await expect(prepareDatasetSplit(workspace, { file: source.replace("train.jsonl", "unknown.jsonl"), output: "unknown" })).rejects.toThrow(/recorded file/);
   });
 
-  it("splits verified git-blob symlinks and refuses a link escaping the cache", async () => {
+  it.skipIf(!canCreateFileSymlinks)("splits verified git-blob symlinks and refuses a link escaping the cache", async () => {
     const data = Array.from({ length: 10 }, (_, i) => JSON.stringify({ messages: [
       { role: "user", content: `Request ${i}` }, { role: "assistant", content: "label" },
     ] })).join("\n") + "\n";
@@ -98,7 +99,7 @@ describe("agent access to downloaded datasets", () => {
     expect(await readFile(join(snapshot, "data/train.jsonl"), "utf8")).toBe(data);
   });
 
-  it("reports missing files and rejects unrecorded paths, traversal, and escaping cache symlinks", async () => {
+  it.skipIf(!canCreateFileSymlinks)("reports missing files and rejects unrecorded paths, traversal, and escaping cache symlinks", async () => {
     await cache({ "data/train.jsonl": '{"input":"a","output":"b"}\n' });
     await expect(inspectLocalDataset(repo, revision, "../train.jsonl")).rejects.toThrow(/exact recorded file/);
     await expect(inspectLocalDataset(repo, revision, "data/unknown.jsonl")).rejects.toThrow(/exact recorded file/);
@@ -110,7 +111,7 @@ describe("agent access to downloaded datasets", () => {
     await expect(inspectLocalDataset(repo, revision, "data/train.jsonl")).rejects.toThrow(/outside its cache/);
   });
 
-  it("supports normal Hugging Face blob symlinks and refuses oversized JSONL records", async () => {
+  it.skipIf(!canCreateFileSymlinks)("supports normal Hugging Face blob symlinks and refuses oversized JSONL records", async () => {
     await cache({ "data/train.jsonl": '{"input":"a","output":"b"}\n' });
     const blobs = join(root, "hub", "datasets--org--coding", "blobs");
     await mkdir(blobs);

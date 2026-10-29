@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { approvePreparedAction } from "../agent-approval.js";
 import type { AgentAction } from "../agent-client.js";
 import { createTunedTensorTools, type AgentToolApi } from "../agent-tools.js";
@@ -22,7 +22,7 @@ const spec = {
 };
 
 function workspace(document: unknown = spec): string {
-  const root = mkdtempSync(join(tmpdir(), "tt-agent-download-"));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "tt-agent-download-")));
   writeFileSync(join(root, "tunedtensor.json"), JSON.stringify(document));
   return root;
 }
@@ -262,7 +262,7 @@ describe("agent downloads", () => {
       const runner = vi.fn(async (args: string[]) => {
         writeFileSync(join(root, "tunedtensor.json"), JSON.stringify({ ...spec, base_model: "changed/model" }));
         executedPath = args[2]!;
-        const executed = JSON.parse(readFileSync(executedPath.startsWith("/") ? executedPath : join(root, executedPath), "utf8"));
+        const executed = JSON.parse(readFileSync(resolve(root, executedPath), "utf8"));
         expect(executed.base_model).toBe(spec.base_model);
         expect(executed.runtime.paths.modelCache).toBe(join(root, "cache"));
         return { exitCode: 0, signal: null };

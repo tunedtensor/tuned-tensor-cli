@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { stripVTControlCharacters } from "node:util";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import chalk from "chalk";
 import {
   ShellParseError,
@@ -31,7 +31,7 @@ describe("tokenizeShellInput", () => {
   it("parses whitespace, quotes, escapes, empty values, and joined fragments", () => {
     expect(
       tokenizeShellInput(
-        String.raw`runs report "run one" --label='hello world' escaped\ value "" pre"mid"post`,
+        String.raw`runs report "run one" --label='hello world' escaped\ value "" pre"mid"post`, "linux",
       ),
     ).toEqual([
       "runs",
@@ -46,7 +46,7 @@ describe("tokenizeShellInput", () => {
 
   it("treats quoted and escaped punctuation as literal argv", () => {
     expect(
-      tokenizeShellInput(String.raw`label edit "a | b; c" escaped\>value '$HOME $(literal)'`),
+      tokenizeShellInput(String.raw`label edit "a | b; c" escaped\>value '$HOME $(literal)'`, "linux"),
     ).toEqual([
       "label",
       "edit",
@@ -78,7 +78,7 @@ describe("tokenizeShellInput", () => {
     ["runs\0list", /NUL/],
     ["runs\nlist", /one command at a time/],
   ])("reports malformed input clearly", (input, message) => {
-    expect(() => tokenizeShellInput(input)).toThrow(message);
+    expect(() => tokenizeShellInput(input, "linux")).toThrow(message);
   });
 });
 
@@ -288,8 +288,8 @@ describe("renderShellBanner", () => {
     const banner = renderShellBanner({
       mode: "local",
       modeSource: "default-local",
-      cwd: "/tmp/local-project",
-      context: fakeContext("/tmp/local-project"),
+      cwd: resolve("/tmp/local-project"),
+      context: fakeContext(resolve("/tmp/local-project")),
       version: "0.6.0",
     });
     const rows = banner.trimEnd().split("\n");
@@ -309,8 +309,8 @@ describe("renderShellBanner", () => {
     const banner = renderShellBanner({
       mode: "local",
       modeSource: "default-local",
-      cwd: "/tmp/local-project",
-      context: specContext("/tmp/local-project", {
+      cwd: resolve("/tmp/local-project"),
+      context: specContext(resolve("/tmp/local-project"), {
         path: "/tmp/local-project/tunedtensor.json",
         name: "Support triage",
         baseModel: "Qwen/Qwen3.5-2B",
@@ -351,7 +351,7 @@ describe("renderShellBanner", () => {
         exampleCount: 40,
         parseError: false,
       }),
-      usage: liveUsage,
+      usage: { ...liveUsage, platform: "linux", arch: "x64" },
     }, 100);
     expect(banner).toContain("MACHINE");
     expect(banner).toMatch(/GPU\s+GeForce RTX 4090/);
@@ -367,8 +367,8 @@ describe("renderShellBanner", () => {
     const banner = renderShellBanner({
       mode: "local",
       modeSource: "default-local",
-      cwd: "/tmp/local-project",
-      context: fakeContext("/tmp/local-project"),
+      cwd: resolve("/tmp/local-project"),
+      context: fakeContext(resolve("/tmp/local-project")),
     });
     expect(banner).toContain("tt");
     expect(banner).not.toContain("v0");
@@ -507,7 +507,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       clear: vi.fn(),
     };
     const session = await createShellSession({
-      cwd: "/tmp/local-project",
+      cwd: resolve("/tmp/local-project"),
       env: {},
       io,
       runner: async (request) => {
@@ -524,8 +524,8 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     await session.handleLine("runs list | cat");
 
     expect(requests).toEqual([
-      { args: ["runs", "list"], cwd: "/tmp/local-project" },
-      { args: ["runs", "list"], cwd: "/tmp/local-project" },
+      { args: ["runs", "list"], cwd: resolve("/tmp/local-project") },
+      { args: ["runs", "list"], cwd: resolve("/tmp/local-project") },
     ]);
     expect(stderr.join("")).toMatch(/Unknown session command/);
     expect(stderr.join("")).toMatch(/Shell operator/);
@@ -535,7 +535,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     const requests: ShellCommandRequest[] = [];
     const stderr: string[] = [];
     const session = await createShellSession({
-      cwd: "/tmp/local-project",
+      cwd: resolve("/tmp/local-project"),
       env: {},
       io: { write: () => {}, writeError: (text) => stderr.push(text), clear: vi.fn() },
       runner: async (request) => {
@@ -548,7 +548,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     await session.handleLine("/usage");
     await session.handleLine("/usage now");
 
-    expect(requests).toEqual([{ args: ["usage"], cwd: "/tmp/local-project" }]);
+    expect(requests).toEqual([{ args: ["usage"], cwd: resolve("/tmp/local-project") }]);
     expect(stderr.join("")).toMatch(/\/usage does not accept arguments/);
   });
 
@@ -556,7 +556,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     const stdout: string[] = [];
     const stderr: string[] = [];
     const session = await createShellSession({
-      cwd: "/tmp/cloud-project",
+      cwd: resolve("/tmp/cloud-project"),
       env: {},
       io: {
         write: (text) => stdout.push(text),
@@ -592,7 +592,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     };
     const writeError = vi.fn();
     const session = await createShellSession({
-      cwd: "/tmp/cloud-project",
+      cwd: resolve("/tmp/cloud-project"),
       env: {},
       io: {
         write: vi.fn(),
@@ -624,25 +624,25 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       "cloud not-a-command",
     ]);
     expect(agent.handleLine.mock.calls.map((call) => call[1])).toEqual([
-      { mode: "local", workspaceRoot: "/tmp/cloud-project" },
-      { mode: "local", workspaceRoot: "/tmp/cloud-project" },
-      { mode: "local", workspaceRoot: "/tmp/cloud-project" },
-      { mode: "local", workspaceRoot: "/tmp/cloud-project" },
-      { mode: "local", workspaceRoot: "/tmp/cloud-project" },
-      { mode: "local", workspaceRoot: "/tmp/cloud-project" },
+      { mode: "local", workspaceRoot: resolve("/tmp/cloud-project") },
+      { mode: "local", workspaceRoot: resolve("/tmp/cloud-project") },
+      { mode: "local", workspaceRoot: resolve("/tmp/cloud-project") },
+      { mode: "local", workspaceRoot: resolve("/tmp/cloud-project") },
+      { mode: "local", workspaceRoot: resolve("/tmp/cloud-project") },
+      { mode: "local", workspaceRoot: resolve("/tmp/cloud-project") },
     ]);
     expect(run.mock.calls.map((call) => call[0])).toEqual([
       {
         args: ["runs", "list"],
-        cwd: "/tmp/cloud-project",
+        cwd: resolve("/tmp/cloud-project"),
       },
       {
         args: ["runs", "list"],
-        cwd: "/tmp/cloud-project",
+        cwd: resolve("/tmp/cloud-project"),
       },
       {
         args: ["doctor"],
-        cwd: "/tmp/cloud-project",
+        cwd: resolve("/tmp/cloud-project"),
       },
     ]);
     expect(writeError).toHaveBeenCalledWith(expect.stringMatching(/Shell operator/));
@@ -657,7 +657,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     };
     const writeError = vi.fn();
     const session = await createShellSession({
-      cwd: "/tmp/local-project",
+      cwd: resolve("/tmp/local-project"),
       env: {},
       io: { write: vi.fn(), writeError, clear: vi.fn() },
       runner: run,
@@ -684,7 +684,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     const clear = vi.fn();
     const stdout: string[] = [];
     const session = await createShellSession({
-      cwd: "/tmp/cloud-project",
+      cwd: resolve("/tmp/cloud-project"),
       env: {},
       io: {
         write: (text) => stdout.push(text),
@@ -742,7 +742,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       hasConfiguredAuth: (provider: string) => provider === "anthropic",
     };
     const session = await createShellSession({
-      cwd: "/tmp/local-project",
+      cwd: resolve("/tmp/local-project"),
       env: { HOME: "/tmp/home" },
       io: {
         write: (text) => stdout.push(text),
@@ -820,7 +820,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       reasoning: true,
     }));
     const session = await createShellSession({
-      cwd: "/tmp/local-project",
+      cwd: resolve("/tmp/local-project"),
       env: { HOME: "/tmp/home" },
       io: {
         write: (text) => stdout.push(text),
@@ -867,7 +867,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     ];
     const prompts: string[] = [];
     const session = await createShellSession({
-      cwd: "/tmp/local-project",
+      cwd: resolve("/tmp/local-project"),
       env: { HOME: "/tmp/home" },
       io: {
         write: (text) => stdout.push(text),
@@ -961,7 +961,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     const stdout: string[] = [];
     const stderr: string[] = [];
     const session = await createShellSession({
-      cwd: "/tmp/local-project",
+      cwd: resolve("/tmp/local-project"),
       env: {},
       io: {
         write: (text) => stdout.push(text),
@@ -1040,7 +1040,7 @@ describe("spec and machine views in the shell", () => {
 
   it("samples live usage for the banner and on /system", async () => {
     const probe = vi.fn(async () => liveUsage);
-    const { created, stdout, stderr } = session("/tmp/local-project", probe);
+    const { created, stdout, stderr } = session(resolve("/tmp/local-project"), probe);
     const shell = await created;
     expect(probe).toHaveBeenCalledTimes(1);
     expect(stripVTControlCharacters(shell.banner())).toContain("MACHINE");
@@ -1054,7 +1054,7 @@ describe("spec and machine views in the shell", () => {
   });
 
   it("keeps working when the probe fails or is absent", async () => {
-    const failing = session("/tmp/local-project", async () => { throw new Error("boom"); });
+    const failing = session(resolve("/tmp/local-project"), async () => { throw new Error("boom"); });
     const shell = await failing.created;
     expect(stripVTControlCharacters(shell.banner())).not.toContain("MACHINE");
     await shell.handleLine("/system");

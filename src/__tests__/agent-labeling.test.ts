@@ -1,5 +1,6 @@
+import { symlinkSync, canCreateFileSymlinks } from "./platform-fixtures.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { LocalAgentStore } from "../agent-store.js";
@@ -68,7 +69,7 @@ describe("agent labeling tools", () => {
     });
   });
 
-  it("refuses unsafe paths, invalid files and specs without examples", async () => {
+  it.skipIf(!canCreateFileSymlinks)("refuses unsafe paths, invalid files and specs without examples", async () => {
     const prepare = tool(fakeApi(), "prepare_label_job");
     await expect(prepare.execute("p", { file: "../emails.jsonl" })).rejects.toThrow(/inside the current workspace/);
     await expect(prepare.execute("p", { file: "/etc/passwd" })).rejects.toThrow(/inside the current workspace/);
