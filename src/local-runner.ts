@@ -1,6 +1,7 @@
 import { constants as osConstants } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import type { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
@@ -34,6 +35,7 @@ export interface LocalCommandOptions {
   stdin?: NodeJS.ReadableStream;
   stdout?: NodeJS.WritableStream;
   stderr?: NodeJS.WritableStream;
+  signals?: Pick<EventEmitter, "on" | "off">;
 }
 
 export interface LocalCommandResult extends LocalOutputPayload {
@@ -356,6 +358,7 @@ async function spawnLocalCli(args: {
   stdin?: NodeJS.ReadableStream;
   stdout?: NodeJS.WritableStream;
   stderr?: NodeJS.WritableStream;
+  signals?: Pick<EventEmitter, "on" | "off">;
   pathReplacements: readonly PathReplacement[];
 }): Promise<{
   exitCode: number;
@@ -447,15 +450,16 @@ async function spawnLocalCli(args: {
     const onSigint = () => forwardSignal("SIGINT");
     const onSigterm = () => forwardSignal("SIGTERM");
     const onSighup = () => forwardSignal("SIGHUP");
+    const signals = args.signals ?? process;
     const cleanup = () => {
       if (forceKillTimer) clearTimeout(forceKillTimer);
-      process.off("SIGINT", onSigint);
-      process.off("SIGTERM", onSigterm);
-      if (process.platform !== "win32") process.off("SIGHUP", onSighup);
+      signals.off("SIGINT", onSigint);
+      signals.off("SIGTERM", onSigterm);
+      if (process.platform !== "win32") signals.off("SIGHUP", onSighup);
     };
-    process.on("SIGINT", onSigint);
-    process.on("SIGTERM", onSigterm);
-    if (process.platform !== "win32") process.on("SIGHUP", onSighup);
+    signals.on("SIGINT", onSigint);
+    signals.on("SIGTERM", onSigterm);
+    if (process.platform !== "win32") signals.on("SIGHUP", onSighup);
     child.once("error", (error) => {
       spawnError = error;
     });
@@ -514,6 +518,7 @@ export async function runLocalCommand(
       stdin: options.stdin,
       stdout: options.stdout,
       stderr: options.stderr,
+      signals: options.signals,
       pathReplacements: projected.pathReplacements,
     });
     const parsed = parseJsonOutput(result.stdout);

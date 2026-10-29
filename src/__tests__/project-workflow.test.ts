@@ -1,6 +1,6 @@
 import { symlink, canCreateFileSymlinks } from "./platform-fixtures.js";
 import { discoverShellContext } from "../shell-context.js";
-import { mkdtemp, readFile, writeFile, rm, access } from "node:fs/promises";
+import { mkdtemp, realpath, readFile, writeFile, rm, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,7 +24,7 @@ const spec = { name: "Sentiment", base_model: "Qwen/Qwen3.5-2B", system_prompt: 
 let root: string;
 let file: string;
 const json = async (path: string) => JSON.parse(await readFile(path, "utf8"));
-beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "tt-single-spec-")); file = join(root, "tunedtensor.json"); await writeFile(file, JSON.stringify(spec)); });
+beforeEach(async () => { root = await realpath(await mkdtemp(join(tmpdir(), "tt-single-spec-"))); file = join(root, "tunedtensor.json"); await writeFile(file, JSON.stringify(spec)); });
 afterEach(async () => { setJsonMode(false); vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }); });
 
 describe("single spec workflows", () => {

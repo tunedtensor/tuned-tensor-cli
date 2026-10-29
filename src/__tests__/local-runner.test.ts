@@ -15,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, dirname, basename } from "node:path";
 import { PassThrough } from "node:stream";
+import { EventEmitter } from "node:events";
 import {
   localCommandStreamsStdout,
   runLocalCommand,
@@ -125,7 +126,7 @@ afterEach(async () => {
 });
 
 async function testRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "tt-local-adapter-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tt-local-adapter-")));
   roots.push(root);
   return root;
 }
@@ -388,68 +389,74 @@ describe("runLocalCommand", () => {
   });
 
   it("forwards SIGINT once and waits for the local child to clean up", async () => {
+    const signals = new EventEmitter();
     const root = await testRoot();
     const entrypoint = await fakeEntrypoint(root);
-    const listenersBefore = process.listenerCount("SIGINT");
+    const listenersBefore = signals.listenerCount("SIGINT");
     const errors = capturedStream();
     const running = runLocalCommand(["wait-signal"], {
+      signals,
       entrypoint,
       cwd: root,
       stderr: errors.stream,
     });
     await errors.waitFor("signal handlers ready");
-    process.emit("SIGINT");
+    signals.emit("SIGINT");
 
     const result = await running;
     expect(result.exitCode).toBe(0);
     expect(result.json).toEqual({ cancelled: "SIGINT" });
-    expect(process.listenerCount("SIGINT")).toBe(listenersBefore);
+    expect(signals.listenerCount("SIGINT")).toBe(listenersBefore);
   });
 
   it.runIf(process.platform !== "win32")(
     "translates SIGHUP into a cleanup-capable SIGTERM",
     async () => {
+      const signals = new EventEmitter();
       const root = await testRoot();
       const entrypoint = await fakeEntrypoint(root);
-      const listenersBefore = process.listenerCount("SIGHUP");
+      const listenersBefore = signals.listenerCount("SIGHUP");
       const errors = capturedStream();
       const running = runLocalCommand(["wait-signal"], {
+        signals,
         entrypoint,
         cwd: root,
         stderr: errors.stream,
       });
       await errors.waitFor("signal handlers ready");
-      process.emit("SIGHUP");
+      signals.emit("SIGHUP");
 
       const result = await running;
       expect(result.exitCode).toBe(0);
       expect(result.json).toEqual({ cancelled: "SIGTERM" });
-      expect(process.listenerCount("SIGHUP")).toBe(listenersBefore);
+      expect(signals.listenerCount("SIGHUP")).toBe(listenersBefore);
     },
   );
 
   it("forwards a later termination signal while cleanup is pending", async () => {
+    const signalSource = new EventEmitter();
     const root = await testRoot();
     const entrypoint = await fakeEntrypoint(root);
-    const sigintListeners = process.listenerCount("SIGINT");
-    const sigtermListeners = process.listenerCount("SIGTERM");
+    const sigintListeners = signalSource.listenerCount("SIGINT");
+    const sigtermListeners = signalSource.listenerCount("SIGTERM");
     const errors = capturedStream();
     const running = runLocalCommand(["wait-two-signals"], {
+      signals: signalSource,
       entrypoint,
       cwd: root,
       stderr: errors.stream,
     });
     await errors.waitFor("signal handlers ready");
-    process.emit("SIGINT");
-    process.emit("SIGTERM");
+    signalSource.emit("SIGINT");
+    signalSource.emit("SIGTERM");
 
     const result = await running;
     expect(result.exitCode).toBe(0);
     const signals = (result.json as { signals: string[] }).signals;
     expect(signals).toHaveLength(2);
     expect(signals).toEqual(expect.arrayContaining(["SIGINT", "SIGTERM"]));
-    expect(process.listenerCount("SIGINT")).toBe(sigintListeners);
-    expect(process.listenerCount("SIGTERM")).toBe(sigtermListeners);
+    expect(signalSource.listenerCount("SIGINT")).toBe(sigintListeners);
+    expect(signalSource.listenerCount("SIGTERM")).toBe(sigtermListeners);
   });
 });
 

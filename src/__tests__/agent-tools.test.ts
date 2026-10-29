@@ -237,7 +237,8 @@ exit 0
       expect(output.details).toMatchObject({
         quick: true,
         capabilities: {
-          cuda_available: true,
+          // The POSIX executable fixture is not used by native Windows.
+          cuda_available: process.platform === "win32" ? expect.any(Boolean) : true,
         },
       });
       expect(existsSync(join(root, "home", "hardware.json"))).toBe(true);
@@ -250,7 +251,7 @@ exit 0
     }
   });
 
-  it("examine_hardware defaults to a full probe like tt hardware", async () => {
+  it.skipIf(process.platform === "win32")("examine_hardware defaults to a full probe like tt hardware", async () => {
     const root = mkdtempSync(join(tmpdir(), "tt-examine-hardware-full-"));
     const bin = join(root, "bin");
     mkdirSync(bin);

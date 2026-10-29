@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -36,7 +36,7 @@ const spec = {
 
 let root: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "tt-conversation-workflow-"));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "tt-conversation-workflow-")));
   vi.stubEnv("TUNED_TENSOR_HOME", join(root, "home"));
 });
 afterEach(() => {
