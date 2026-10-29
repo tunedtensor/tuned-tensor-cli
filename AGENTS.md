@@ -92,6 +92,6 @@ gate before `npm publish`.
 
 Use `tt cloud endpoints` for paid serverless CPU inference. Read
 `docs/local-runtime/hosting.md`: only complete English Laya checkpoints are
-supported, using a pinned serving runtime and fixed question. Create uploads
+supported, using a pinned serving runtime. Each invocation sends the complete model JSON payload. Create uploads
 weights directly with no user AWS profile. Preserve request IDs across transport
 retries and never retry a failed/refunded invocation under the same ID.

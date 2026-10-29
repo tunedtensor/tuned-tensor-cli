@@ -9,15 +9,6 @@ import { get, post, del, type ClientOpts } from "../client.js";
 import { getBaseUrl } from "../config.js";
 import { isJsonMode, printJson, printDetail } from "../output.js";
 
-const description = z.string().min(1).max(300);
-const questionSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("choice"), instructions: z.string().max(2000),
-    criteria: z.record(z.string().min(1).max(100), description).refine(v => Object.keys(v).length >= 2 && Object.keys(v).length <= 32) }).strict(),
-  z.object({ type: z.literal("score"), instructions: z.string().max(2000), criteria: z.array(description).min(2).max(10) }).strict(),
-  z.object({ type: z.literal("noul"), instructions: z.string().max(2000),
-    criteria: z.object({ true: description, false: description }).strict().optional() }).strict(),
-]);
-
 interface Endpoint {
   id: string; name: string; status: string; price_cents: number; invocation_path: string;
   inference_key?: string;
@@ -56,10 +47,11 @@ export async function inspectCheckpoint(modelPath: string) {
   return { file, weights_bytes: size, weights_sha256: hash.digest("hex"), checkpoint_kind: kind as "base" | "tuned" };
 }
 
-export function readQuestion(file: string) {
-  const data = JSON.parse(readFileSync(resolve(file), "utf8"));
-  // A decision run's resolved-workflow.json records the exact training question.
-  return questionSchema.parse(data.question ?? data);
+export function readInferencePayload(file: string) {
+  const path = resolve(file);
+  if (statSync(path).size > 131_072) throw new Error("Inference JSON must be at most 128 KiB.");
+  const data = JSON.parse(readFileSync(path, "utf8"));
+  return z.record(z.string(), z.json()).refine(value => Object.keys(value).length > 0).parse(data);
 }
 
 export async function uploadWeights(endpoint: UploadEndpoint, file: string) {
@@ -92,13 +84,11 @@ export function registerEndpointCommands(parent: Command) {
   const endpoints = parent.command("endpoints").description("Host small CPU decision models using prepaid TT credits");
   endpoints.command("create").description("Upload Laya weights and deploy a serverless endpoint")
     .requiredOption("--model <directory>", "Local Laya checkpoint (e.g. a decision run's train/model)")
-    .requiredOption("--question <file>", "Question JSON or the run's resolved-workflow.json")
     .requiredOption("--name <name>", "Endpoint display name")
-    .action(async (options: { model: string; question: string; name: string }) => {
+    .action(async (options: { model: string; name: string }) => {
       const opts = parent.optsWithGlobals() as ClientOpts;
-      const question = readQuestion(options.question);
       const { file, ...artifact } = await inspectCheckpoint(options.model);
-      const { data } = await post<UploadEndpoint>("/endpoints", { name: options.name, format: "laya-safetensors-v1", question, ...artifact }, opts);
+      const { data } = await post<UploadEndpoint>("/endpoints", { name: options.name, format: "laya-safetensors-v1", ...artifact }, opts);
       if (!isJsonMode()) console.error(`Endpoint ${data.id} created. Uploading ${(artifact.weights_bytes / 1_000_000_000).toFixed(2)} GB of weights...`);
       try {
         await uploadWeights(data, file);
@@ -129,15 +119,16 @@ export function registerEndpointCommands(parent: Command) {
     if (isJsonMode()) return printJson(data);
     printDetail([["Inference key (save securely)", data.inference_key]]);
   });
-  endpoints.command("invoke <id>").requiredOption("--input <text>", "Decision input (up to 8192 characters)")
+  endpoints.command("invoke <id>").requiredOption("--payload <file>", "Complete model request as a JSON object (up to 128 KiB)")
     .option("--request-id <uuid>", "Reuse this ID to retry without a second charge")
-    .action(async (id: string, options: { input: string; requestId?: string }) => {
+    .action(async (id: string, options: { payload: string; requestId?: string }) => {
       z.uuid().parse(id);
       const requestId = options.requestId ?? randomUUID();
       z.uuid().parse(requestId);
+      const payload = readInferencePayload(options.payload);
       if (!isJsonMode()) console.error(`Request ID: ${requestId} (reuse with --request-id when retrying)`);
       try {
-        const { data } = await post(`/endpoints/${id}/invoke`, { input: options.input }, parent.optsWithGlobals() as ClientOpts, { "Idempotency-Key": requestId });
+        const { data } = await post(`/endpoints/${id}/invoke`, payload, parent.optsWithGlobals() as ClientOpts, { "Idempotency-Key": requestId });
         printJson({ request_id: requestId, data });
       } catch (error) {
         throw new Error(`Request ${requestId}: ${error instanceof Error ? error.message : "inference failed"}. Retry with --request-id ${requestId}.`, { cause: error });

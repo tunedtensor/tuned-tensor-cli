@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command } from "commander";
-import { inspectCheckpoint, readQuestion, registerEndpointCommands, uploadWeights } from "../../commands/endpoints.js";
+import { inspectCheckpoint, readInferencePayload, registerEndpointCommands, uploadWeights } from "../../commands/endpoints.js";
 import { setJsonMode } from "../../output.js";
 import * as client from "../../client.js";
 vi.mock("../../client.js", () => ({ get: vi.fn(), post: vi.fn(), del: vi.fn() }));
@@ -44,17 +44,23 @@ describe("checkpoint hosting", () => {
     await expect(inspectCheckpoint(dir)).rejects.toThrow("only the pinned English Laya");
     expect(client.post).not.toHaveBeenCalled();
   });
-  it("takes the exact recorded question and rejects arbitrary runtime fields", () => {
-    const file = join(dir, "resolved-workflow.json");
-    writeFileSync(file, JSON.stringify({ question })); expect(readQuestion(file)).toEqual(question);
-    writeFileSync(file, JSON.stringify({ ...question, code: "do not execute" })); expect(() => readQuestion(file)).toThrow();
+  it("reads a complete model payload without a hosting-specific question schema", () => {
+    const file = join(dir, "request.json");
+    const payload = { input: "hello", question, options: { temperature: 0 } };
+    writeFileSync(file, JSON.stringify(payload)); expect(readInferencePayload(file)).toEqual(payload);
+    for (const invalid of [[], null, "text", {}]) {
+      writeFileSync(file, JSON.stringify(invalid)); expect(() => readInferencePayload(file)).toThrow();
+    }
+    writeFileSync(file, JSON.stringify({ input: "x".repeat(131072) }));
+    expect(() => readInferencePayload(file)).toThrow("128 KiB");
   });
   it("uploads without forwarding the account token and then starts deployment", async () => {
-    model(); const file = join(dir, "question.json"); writeFileSync(file, JSON.stringify(question));
+    model();
     const upload = { url: "https://test.s3.eu-west-1.amazonaws.com/weights", headers: { "content-type": "application/octet-stream" }, expires_in: 900 };
     vi.mocked(client.post).mockResolvedValueOnce({ data: { ...endpoint, inference_key: "tte_secret", upload } }).mockResolvedValueOnce({ data: endpoint });
     const fetch = vi.fn(async () => new Response(null, { status: 200 })); vi.stubGlobal("fetch", fetch);
-    await program().parseAsync(["node", "tt", "--api-key", "tt_secret", "endpoints", "create", "--model", dir, "--question", file, "--name", "test"]);
+    await program().parseAsync(["node", "tt", "--api-key", "tt_secret", "endpoints", "create", "--model", dir, "--name", "test"]);
+    expect(vi.mocked(client.post).mock.calls[0][1]).not.toHaveProperty("question");
     expect(fetch).toHaveBeenCalledWith(expect.any(URL), expect.objectContaining({ method: "PUT", headers: upload.headers, redirect: "error" }));
     expect(client.post).toHaveBeenLastCalledWith(`/endpoints/${id}/deploy`, {}, expect.objectContaining({ apiKey: "tt_secret" }));
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining("tte_secret"));
@@ -63,8 +69,10 @@ describe("checkpoint hosting", () => {
     await expect(uploadWeights({ ...endpoint, upload: { url: "http://evil.invalid", headers: {}, expires_in: 900 } }, "unused")).rejects.toThrow("invalid model upload URL");
   });
   it("preserves a user-provided request ID and reports it after transport failure", async () => {
+    const file = join(dir, "request.json"); const payload = { input: "hello", question };
+    writeFileSync(file, JSON.stringify(payload));
     vi.mocked(client.post).mockRejectedValue(new Error("connection lost"));
-    await expect(program().parseAsync(["node", "tt", "endpoints", "invoke", id, "--input", "hello", "--request-id", requestId])).rejects.toThrow(`--request-id ${requestId}`);
-    expect(client.post).toHaveBeenCalledWith(`/endpoints/${id}/invoke`, { input: "hello" }, expect.anything(), { "Idempotency-Key": requestId });
+    await expect(program().parseAsync(["node", "tt", "endpoints", "invoke", id, "--payload", file, "--request-id", requestId])).rejects.toThrow(`--request-id ${requestId}`);
+    expect(client.post).toHaveBeenCalledWith(`/endpoints/${id}/invoke`, payload, expect.anything(), { "Idempotency-Key": requestId });
   });
 });
