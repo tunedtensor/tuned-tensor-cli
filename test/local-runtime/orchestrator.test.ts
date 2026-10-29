@@ -14,7 +14,7 @@ import {
   runLocalFineTune,
   validateLocalFineTuneInput,
 } from "../../src/local-runtime/orchestrator.js";
-import { defaultArtifactPrefix, resolveRunArtifacts } from "../../src/local-runtime/artifacts.js";
+import { defaultArtifactPrefix, fileUri, resolveRunArtifacts } from "../../src/local-runtime/artifacts.js";
 import { createLocalStore } from "../../src/local-runtime/store.js";
 import { QWEN_3_5_2B_REVISION } from "../../src/local-runtime/model-registry.js";
 import { prepareDatasetSplit, executeDatasetSplit } from "../../src/local-runtime/dataset-split.js";
@@ -497,8 +497,8 @@ test("rejects duplicate prompts within a prebuilt evaluation split", async () =>
   }
 });
 
-test("normalizes prebuilt training JSONL and evaluates the validation split", async () => {
-  const root = await mkdtemp(join(tmpdir(), "tt-local-prebuilt-valid-"));
+test("normalizes prebuilt training JSONL from encoded file URIs and evaluates the validation split", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-local-prebuilt café #100%-"));
   try {
     const training = join(root, "training.jsonl");
     const validation = join(root, "validation.jsonl");
@@ -511,8 +511,8 @@ test("normalizes prebuilt training JSONL and evaluates the validation split", as
     const request = requestFixture({
       runId: "66666666-6666-4666-8666-666666666666",
       datasetPrebuilt: {
-        training: `file://${training}`,
-        validation: `file://${validation}`,
+        training: fileUri(training),
+        validation: fileUri(validation),
         format: "chat_jsonl",
       },
     });

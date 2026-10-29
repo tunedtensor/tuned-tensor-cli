@@ -294,7 +294,7 @@ function elapsed(started: number): { ms: number; seconds: number } {
 }
 
 function stripFileUri(path: string): string {
-  return path.replace(/^file:\/\//, "");
+  return path.startsWith("file://") ? localModelArtifactPath(path) : path;
 }
 
 async function pathExists(path: string): Promise<boolean> {
