@@ -87,3 +87,11 @@ gate before `npm publish`.
   stay on stable while testers opt in with `npm i -g @tuned-tensor/cli@beta`.
 - The workflow refuses to publish if the release tag and `package.json` version
   do not match.
+
+## Hosted decision models
+
+Use `tt cloud endpoints` for paid serverless CPU inference. Read
+`docs/local-runtime/hosting.md`: only complete English Laya checkpoints are
+supported, using a pinned serving runtime and fixed question. Create uploads
+weights directly with no user AWS profile. Preserve request IDs across transport
+retries and never retry a failed/refunded invocation under the same ID.

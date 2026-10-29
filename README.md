@@ -861,3 +861,11 @@ the remaining steps toward the full conversational product promise.
 ## License
 
 Apache-2.0
+
+## Serverless decision inference
+
+`tt cloud endpoints` uploads complete local Laya decision checkpoints to an
+authenticated CPU endpoint, with per-request prepaid billing. See the
+[hosting guide](docs/local-runtime/hosting.md) for creation, inference keys,
+retry-safe requests, costs and deletion. Hosting requires the new server API;
+GPU and adapter checkpoints remain outside this serverless flow.

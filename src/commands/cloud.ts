@@ -5,6 +5,7 @@ import { registerSpecsCommands } from "./specs.js";
 import { registerDatasetsCommands } from "./datasets.js";
 import { registerLabelCommands } from "./label.js";
 import { registerRunsCommands } from "./runs.js";
+import { registerEndpointCommands } from "./endpoints.js";
 import { registerModelsCommands } from "./models.js";
 import { registerPushCommand } from "./push.js";
 
@@ -17,6 +18,7 @@ export function registerCloudCommands(parent: Command): void {
   registerLabelCommands(cloud);
   registerRunsCommands(cloud);
   registerModelsCommands(cloud);
+  registerEndpointCommands(cloud);
 }
 
 export interface ManagedAgentUsage {
