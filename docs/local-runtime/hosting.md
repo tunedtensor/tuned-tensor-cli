@@ -57,7 +57,10 @@ Replays return the recorded answer without a second charge. Reusing the ID with
 different input is rejected. A failed/refunded request remains failed; use a new
 ID for a fresh attempt. Interrupted requests are refunded by periodic recovery
 within roughly 15 minutes. Input is limited to 8192 characters; one request
-answers the question pinned at endpoint creation.
+answers the question pinned at endpoint creation. After three failures in five
+minutes, wait five minutes before a new attempt. After 100 failures across the
+account in 24 hours, new requests pause until earlier failures age out; cached
+replays remain available.
 
 For another application, call the URL from its backend:
 
@@ -81,8 +84,9 @@ tt cloud endpoints get <endpoint-id>
 ```
 
 Deletion immediately blocks new requests. Cleanup removes the model, weights
-and SageMaker resources asynchronously; a newly created endpoint may stay
-`deleting` for up to 16 minutes while its upload URL expires. Poll until
+and SageMaker resources asynchronously; an endpoint still provisioning must finish
+that transition before AWS permits deletion. Late uploads go to temporary storage
+with automatic expiry and cannot recreate the serving artifact. Poll until
 `deleted`. Uploads abandoned for an hour, deployments that cannot become ready
 within an hour, and failed endpoints older than a day are cleaned automatically.
 Account deletion requires endpoint cleanup and accepted requests to finish.

@@ -75,7 +75,7 @@ export async function uploadWeights(endpoint: UploadEndpoint, file: string) {
   try {
     const response = await fetch(url, { method: "PUT", headers: endpoint.upload.headers,
       body: stream, duplex: "half", redirect: "error",
-      signal: AbortSignal.timeout(15 * 60_000) } as unknown as Parameters<typeof fetch>[1]);
+      signal: AbortSignal.timeout(60 * 60_000) } as unknown as Parameters<typeof fetch>[1]);
     if (!response.ok) throw new Error(`Model upload failed (${response.status}). Delete endpoint ${endpoint.id} and retry.`);
   } finally { stream.destroy(); await completion.catch(() => {}); }
 }
