@@ -99,6 +99,7 @@ export function registerEndpointCommands(parent: Command) {
       const question = readQuestion(options.question);
       const { file, ...artifact } = await inspectCheckpoint(options.model);
       const { data } = await post<UploadEndpoint>("/endpoints", { name: options.name, format: "laya-safetensors-v1", question, ...artifact }, opts);
+      if (!isJsonMode()) console.error(`Endpoint ${data.id} created. Uploading ${(artifact.weights_bytes / 1_000_000_000).toFixed(2)} GB of weights...`);
       try {
         await uploadWeights(data, file);
         const { data: deployed } = await post<Endpoint>(`/endpoints/${data.id}/deploy`, {}, opts);
