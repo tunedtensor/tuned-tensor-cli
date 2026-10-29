@@ -46,7 +46,14 @@ function newRun(overrides: Partial<NewBackgroundRun> = {}): NewBackgroundRun {
 /** A stand-in `tt` entrypoint: records its argv, prints progress on stderr and a JSON result on stdout. */
 function fakeEntrypoint(body: string): string {
   const path = join(root, `fake-tt-${Math.random().toString(16).slice(2)}.mjs`);
-  writeFileSync(path, `import { readFileSync, writeFileSync } from "node:fs";\n${body}\n`);
+  writeFileSync(path, `import { readFileSync, writeFileSync } from "node:fs";
+if (process.channel) {
+  process.on("message", message => {
+    if (message?.ttSignal === "SIGTERM") process.emit("SIGTERM");
+  });
+  process.channel.unref();
+}
+${body}\n`);
   return path;
 }
 
@@ -280,7 +287,7 @@ describe("background supervisor", () => {
     expect((await store.events(run.id)).events.map((event) => event.type)).toEqual(["requested", "finished"]);
   });
 
-  it("stops the pipeline process group when cancellation is requested", async () => {
+  it("stops the pipeline and records cleanup when cancellation is requested", async () => {
     writeFileSync(join(root, "tunedtensor.json"), "{}");
     const run = await store.create(newRun());
     const entrypoint = fakeEntrypoint(`
@@ -297,6 +304,25 @@ describe("background supervisor", () => {
     const finished = await supervising;
     expect(finished).toMatchObject({ status: "cancelled", cancel: { reason: "Wrong base model" } });
     expect(await store.logTail(run.id)).toContain("stopping cleanly");
+    expect(existsSync(workspaceSnapshotPath(run))).toBe(false);
+  });
+
+  it.runIf(process.platform === "win32")("stops an unresponsive Windows pipeline after the cleanup grace period", async () => {
+    writeFileSync(join(root, "tunedtensor.json"), "{}");
+    const run = await store.create(newRun());
+    const entrypoint = fakeEntrypoint(`
+      process.stderr.write("started\\n");
+      process.on("SIGTERM", () => {});
+      setInterval(() => {}, 1000);
+    `);
+    const supervising = superviseBackgroundRun({ store, id: run.id, entrypoint });
+    for (let attempt = 0; attempt < 250 && !(await store.logTail(run.id)).includes("started"); attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    const childPid = (await store.get(run.id)).process!.pid!;
+    await store.requestCancel(run.id, { reason: "Pipeline did not respond", requested_by: currentRequester("cli") });
+    expect(await supervising).toMatchObject({ status: "cancelled" });
+    expect(() => process.kill(childPid, 0)).toThrow();
     expect(existsSync(workspaceSnapshotPath(run))).toBe(false);
   });
 });

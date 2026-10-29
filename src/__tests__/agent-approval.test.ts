@@ -18,7 +18,7 @@ const ACTION_ID = "ed8e4bca-ab1c-4c9f-8b65-9f7997f76670";
 const CAPABILITY = "local_agent_spec_mutation_guards_v1";
 
 // Windows CI may expose TEMP through an 8.3 path alias.
-const mkdtempSync = (prefix: string) => realpathSync(createTemporaryDirectory(prefix));
+const mkdtempSync = (prefix: string) => realpathSync.native(createTemporaryDirectory(prefix));
 
 function api(): AgentMutationApi {
   return {

@@ -22,7 +22,7 @@ const spec = {
 };
 
 function workspace(document: unknown = spec): string {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "tt-agent-download-")));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "tt-agent-download-")));
   writeFileSync(join(root, "tunedtensor.json"), JSON.stringify(document));
   return root;
 }

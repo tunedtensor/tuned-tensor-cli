@@ -2,6 +2,7 @@ import { constants as osConstants } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import type { EventEmitter } from "node:events";
+import { windowsChildSignals } from "./local-runtime/windows-child-signals.js";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
@@ -422,21 +423,12 @@ async function spawnLocalCli(args: {
 
   return new Promise((resolveChild) => {
     let spawnError: Error | undefined;
-    let forceKillTimer: NodeJS.Timeout | undefined;
+    const windowsSignals = windowsChildSignals(child);
     const forwardSignal = (signal: NodeJS.Signals) => {
       // SIGHUP has no cleanup handler in the standalone local CLI. Translate
       // it to SIGTERM so its Python/server subtree is stopped deliberately.
       const childSignal = signal === "SIGHUP" ? "SIGTERM" : signal;
-      if (process.platform === "win32" && child.connected) {
-        child.send({ ttSignal: childSignal }, () => {});
-        if (!forceKillTimer) forceKillTimer = setTimeout(() => {
-          if (child.pid) {
-            spawn(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"),
-              ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }).on("error", () => child.kill());
-          }
-        }, 5_000);
-        return;
-      }
+      if (windowsSignals.forward(childSignal)) return;
       if (child.pid && process.platform !== "win32") {
         try {
           process.kill(-child.pid, childSignal);
@@ -452,7 +444,7 @@ async function spawnLocalCli(args: {
     const onSighup = () => forwardSignal("SIGHUP");
     const signals = args.signals ?? process;
     const cleanup = () => {
-      if (forceKillTimer) clearTimeout(forceKillTimer);
+      windowsSignals.dispose();
       signals.off("SIGINT", onSigint);
       signals.off("SIGTERM", onSigterm);
       if (process.platform !== "win32") signals.off("SIGHUP", onSighup);

@@ -8,6 +8,7 @@ import { getTunedTensorHome } from "../paths.js";
 import { chainEvent, parseJsonlTolerant, readJsonlTail, verifyEventChain, withAppendLock, type ChainVerification } from "./audit.js";
 import type { LiveUsage } from "./live-usage.js";
 import { writePrivateJsonAtomic } from "./store.js";
+import { windowsChildSignals } from "./windows-child-signals.js";
 
 /**
  * Real pipeline runs started in the background, by the agent after approval or
@@ -420,7 +421,9 @@ export function createBackgroundRunStore(root = backgroundRunsRoot()): Backgroun
       // Only a running supervisor has its handlers installed; while starting it
       // checks for this request itself before and after spawning the pipeline.
       const pid = record.process?.supervisor_pid;
-      if (wasRunning && pid !== undefined && record.process?.host === hostname()) {
+      // Windows SIGTERM terminates the supervisor without running its handlers.
+      // Its supervisor polls this durable request instead.
+      if (process.platform !== "win32" && wasRunning && pid !== undefined && record.process?.host === hostname()) {
         try { process.kill(pid, "SIGTERM"); } catch { /* Already exited; its outcome is recorded. */ }
       }
       return record;
@@ -671,6 +674,8 @@ export async function superviseBackgroundRun(options: SuperviseOptions): Promise
     return await finishEarly("failed", `Could not prepare the run: ${(error as Error).message}`);
   }
   let child: ChildProcess | undefined;
+  let windowsSignals: ReturnType<typeof windowsChildSignals> | undefined;
+  let cancellationPoll: NodeJS.Timeout | undefined;
   // Mutated from event callbacks; an object keeps TypeScript from narrowing them away.
   const state: {
     stopSignal?: NodeJS.Signals;
@@ -683,21 +688,25 @@ export async function superviseBackgroundRun(options: SuperviseOptions): Promise
     if (!child?.pid) return;
     try {
       if (process.platform !== "win32") process.kill(-child.pid, "SIGTERM");
-      else child.kill("SIGTERM");
+      else if (!windowsSignals?.forward("SIGTERM")) child.kill("SIGTERM");
     } catch { /* Already exited. */ }
   };
-  const onSignal = (signal: NodeJS.Signals) => stop(signal);
-  process.on("SIGTERM", onSignal);
-  process.on("SIGINT", onSignal);
-  if (process.platform !== "win32") process.on("SIGHUP", onSignal);
+  const onSigterm = () => stop("SIGTERM");
+  const onSigint = () => stop("SIGINT");
+  const onSighup = () => stop("SIGHUP");
+  process.on("SIGTERM", onSigterm);
+  process.on("SIGINT", onSigint);
+  if (process.platform !== "win32") process.on("SIGHUP", onSighup);
   try {
     const spawnImpl = options.spawn ?? (nodeSpawn as SpawnLike);
     child = spawnImpl(options.execPath ?? process.execPath, [options.entrypoint, "--json", "pipeline", "run", "--spec", snapshot], {
       cwd: run.choices.workspace_root,
-      env: options.env ?? process.env,
+      env: process.platform === "win32" ? { ...(options.env ?? process.env), TT_PARENT_IPC: "1" } : options.env ?? process.env,
       detached: process.platform !== "win32",
-      stdio: ["ignore", resultFd, logFd],
+      stdio: ["ignore", resultFd, logFd, ...(process.platform === "win32" ? ["ipc" as const] : [])],
+      windowsHide: true,
     });
+    windowsSignals = windowsChildSignals(child);
     const closed = new Promise<void>((resolve) => {
       child!.once("error", (error) => { state.spawnError = error; resolve(); });
       child!.once("close", (code, signal) => { state.exitCode = code; state.exitSignal = signal; resolve(); });
@@ -710,12 +719,24 @@ export async function superviseBackgroundRun(options: SuperviseOptions): Promise
       }, { type: "started", message: `Pipeline process ${child.pid} started.` });
       // A cancellation that arrived while starting has no PID to signal yet.
       if ((await store.get(run.id)).status === "cancel_requested") stop("SIGTERM");
+      if (process.platform === "win32") {
+        let polling = false;
+        cancellationPoll = setInterval(() => {
+          if (polling || state.stopSignal) return;
+          polling = true;
+          void store.get(run.id).then(current => {
+            if (current.status === "cancel_requested") stop("SIGTERM");
+          }).catch(() => { /* Retry a temporarily unreadable run record. */ }).finally(() => { polling = false; });
+        }, 250);
+      }
     }
     await closed;
   } finally {
-    process.off("SIGTERM", onSignal);
-    process.off("SIGINT", onSignal);
-    if (process.platform !== "win32") process.off("SIGHUP", onSignal);
+    if (cancellationPoll) clearInterval(cancellationPoll);
+    windowsSignals?.dispose();
+    process.off("SIGTERM", onSigterm);
+    process.off("SIGINT", onSigint);
+    if (process.platform !== "win32") process.off("SIGHUP", onSighup);
     closeSync(logFd);
     closeSync(resultFd);
     await rm(snapshot, { force: true });
