@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-30
+
+### Added
+
+- Native Windows support in Windows PowerShell 5.1 and PowerShell 7, on x64
+  and ARM64. Account commands, the conversational terminal, hardware discovery,
+  spec inspection, data commands and pipeline previews run from PowerShell.
+  Agent-approved spec creation, edits and revision history work on Windows.
+  Backslashes stay literal in the TT shell, so `/cd "C:\work files"` works.
+  See [docs/windows.md](docs/windows.md).
+- Windows x64 setup (`tuned-tensor-cli-<version>-windows-x64.exe`) with a private
+  Node.js runtime is attached to each release. It installs per user without
+  administrator access and adds `tt` to the user PATH. An inspectable
+  `scripts/install.ps1` verifies the release checksum before running setup.
+  Stable releases also attach WinGet manifests (`TunedTensor.CLI`).
+- `tt upgrade` works for npm installs on Windows. For setup-managed installs it
+  shows how to upgrade with WinGet or a newer setup instead.
+
+### Notes
+
+- On Windows, LLM adapter training and serving still need Linux with NVIDIA
+  CUDA (WSL2 or your own AWS GPU). AWS GPU transport needs WSL2/Linux.
+
+## [0.27.0] - 2026-10-29
+
+### Added
+
+- `tt cloud endpoints` hosts complete local decision checkpoints on an
+  authenticated serverless CPU endpoint with prepaid per-request billing. See
+  [docs/local-runtime/hosting.md](docs/local-runtime/hosting.md).
+
+## [0.26.2] - 2026-10-26
+
+### Security
+
+- Hardened model and dataset downloads and local serving, rejected Windows
+  special filenames, and updated vulnerable dependencies.
+
 ## [0.26.1] - 2026-10-17
 
 ### Fixed
