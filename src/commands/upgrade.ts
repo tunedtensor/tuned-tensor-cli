@@ -122,7 +122,10 @@ function formatCommand(args: string[], platform: NodeJS.Platform): string {
       /^[a-zA-Z0-9_@./:\\+=-]+$/.test(arg) ? arg : "'" + arg.replaceAll("'", "''") + "'"
     )).join(" ");
   }
-  return ["npm", ...args].map((arg) => (/\s/.test(arg) ? JSON.stringify(arg) : arg)).join(" ");
+  // Printed recovery commands must preserve literal paths when pasted into a POSIX shell.
+  return ["npm", ...args].map((arg) => (
+    /^[a-zA-Z0-9_@./:+=-]+$/.test(arg) ? arg : "'" + arg.replaceAll("'", "'\\''") + "'"
+  )).join(" ");
 }
 
 export function registerUpgradeCommand(program: Command, deps: UpgradeCommandDeps): void {

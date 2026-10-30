@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { registerUpgradeCommand, resolveGlobalInstall, type UpgradeCommandDeps } from "../../commands/upgrade.js";
 import { setJsonMode } from "../../output.js";
 
@@ -122,6 +123,38 @@ describe("tt upgrade", () => {
     const npm = process.platform === "win32" ? "npm.cmd" : "npm";
     await expect(run([], { fetchImpl: registry("0.22.0"), runNpm: async () => 1 }))
       .rejects.toThrow(`${npm} install -g --ignore-scripts --prefix`);
+  });
+
+  it.skipIf(process.platform === "win32").each([
+    { directory: "plain", escaped: "plain", quoted: false },
+    { directory: "Team Tools", escaped: "Team Tools", quoted: true },
+    { directory: "O'Brien", escaped: "O'\\''Brien", quoted: true },
+  ])("preserves the POSIX retry command prefix for $directory", async ({ directory, escaped, quoted }) => {
+    prefix = join(root, directory);
+    packageDir = join(prefix, "lib", "node_modules", "@tuned-tensor", "cli");
+    mkdirSync(join(packageDir, "dist"), { recursive: true });
+    entrypoint = join(packageDir, "dist", "index.js");
+    writeFileSync(entrypoint, "");
+    const runNpm = vi.fn(async () => 1);
+    let failure: unknown;
+    try {
+      await run(["beta"], { platform: "linux", runNpm });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    const retryCommand = (failure as Error).message.split("\n  ")[1]!;
+    const renderedPrefix = quoted ? `'${join(root, escaped)}'` : prefix;
+    expect(retryCommand).toBe(
+      `npm install -g --ignore-scripts --prefix ${renderedPrefix} @tuned-tensor/cli@beta`,
+    );
+    const expectedArgs = ["install", "-g", "--ignore-scripts", "--prefix", prefix, "@tuned-tensor/cli@beta"];
+    expect(runNpm).toHaveBeenCalledWith(expectedArgs);
+    // Parse ordinary path fixtures with a real shell; never invoke npm or sudo.
+    const parsedArgs = execFileSync("sh", ["-c", `set -- ${retryCommand}; printf '%s\\n' "$@"`], {
+      encoding: "utf8",
+    }).trimEnd().split("\n");
+    expect(parsedArgs).toEqual(["npm", ...expectedArgs]);
   });
 
   it("fails clearly when the registry is unreachable", async () => {
