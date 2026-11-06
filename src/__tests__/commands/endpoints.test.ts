@@ -68,6 +68,22 @@ describe("checkpoint hosting", () => {
   it("rejects insecure upload locations before sending weights", async () => {
     await expect(uploadWeights({ ...endpoint, upload: { url: "http://evil.invalid", headers: {}, expires_in: 900 } }, "unused")).rejects.toThrow("invalid model upload URL");
   });
+  it.each(["connection lost", "Request still running", "Inference failed; credits refunded"])("qualifies retry guidance after %s", async (message) => {
+    setJsonMode(false);
+    const file = join(dir, "request.json"); const payload = { input: "hello", question };
+    writeFileSync(file, JSON.stringify(payload));
+    vi.mocked(client.post).mockRejectedValue(new Error(message));
+    const result = program().parseAsync(["node", "tt", "endpoints", "invoke", id, "--payload", file, "--request-id", requestId]);
+    await expect(result).rejects.toThrow(`For connection loss or a request still running, retry the same payload with --request-id ${requestId}. A failed/refunded request needs a new request ID.`);
+    expect(console.error).toHaveBeenCalledWith(`Request ID: ${requestId} (reuse for the same payload after connection loss or while still running; use a new ID for a failed/refunded request)`);
+    expect(client.post).toHaveBeenCalledTimes(1);
+    expect(client.post).toHaveBeenCalledWith(`/endpoints/${id}/invoke`, payload, expect.anything(), { "Idempotency-Key": requestId });
+  });
+  it("qualifies request-ID reuse in invoke help", () => {
+    const invoke = program().commands.find(command => command.name() === "endpoints")!.commands.find(command => command.name() === "invoke")!;
+    expect(invoke.helpInformation().replace(/\s+/g, " ")).toContain("new ID after failure/refund");
+    expect(client.post).not.toHaveBeenCalled();
+  });
   it("preserves a user-provided request ID and reports it after transport failure", async () => {
     const file = join(dir, "request.json"); const payload = { input: "hello", question };
     writeFileSync(file, JSON.stringify(payload));
