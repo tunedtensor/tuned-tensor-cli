@@ -120,18 +120,18 @@ export function registerEndpointCommands(parent: Command) {
     printDetail([["Inference key (save securely)", data.inference_key]]);
   });
   endpoints.command("invoke <id>").requiredOption("--payload <file>", "Complete model request as a JSON object (up to 128 KiB)")
-    .option("--request-id <uuid>", "Reuse this ID to retry without a second charge")
+    .option("--request-id <uuid>", "Same-payload transport/in-progress retry ID (new ID after failure/refund)")
     .action(async (id: string, options: { payload: string; requestId?: string }) => {
       z.uuid().parse(id);
       const requestId = options.requestId ?? randomUUID();
       z.uuid().parse(requestId);
       const payload = readInferencePayload(options.payload);
-      if (!isJsonMode()) console.error(`Request ID: ${requestId} (reuse with --request-id when retrying)`);
+      if (!isJsonMode()) console.error(`Request ID: ${requestId} (reuse for the same payload after connection loss or while still running; use a new ID for a failed/refunded request)`);
       try {
         const { data } = await post(`/endpoints/${id}/invoke`, payload, parent.optsWithGlobals() as ClientOpts, { "Idempotency-Key": requestId });
         printJson({ request_id: requestId, data });
       } catch (error) {
-        throw new Error(`Request ${requestId}: ${error instanceof Error ? error.message : "inference failed"}. Retry with --request-id ${requestId}.`, { cause: error });
+        throw new Error(`Request ${requestId}: ${error instanceof Error ? error.message : "inference failed"}. For connection loss or a request still running, retry the same payload with --request-id ${requestId}. A failed/refunded request needs a new request ID.`, { cause: error });
       }
     });
 }
