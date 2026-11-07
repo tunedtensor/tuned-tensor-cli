@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-07
+
+### Security
+
+- Model downloads stage data in a private temporary file before publishing it.
+  Downloads refuse existing destinations, including dangling symlinks and files
+  created during a transfer; `--force` replaces the destination without following
+  symlinks and preserves the previous file if the transfer fails. Serving and
+  export cache refreshes use the same protection, with a fallback for filesystems
+  that do not support hard links. (#180)
+- POSIX upgrade recovery commands quote installation paths literally, including
+  shell metacharacters, so copying the suggested command does not execute parts
+  of a path. (#178)
+
+### Fixed
+
+- Endpoint invocation guidance now distinguishes same-payload retries after
+  connection loss or while a request is running from failed/refunded requests,
+  which require a new request ID. (#179)
+
 ## [0.28.0] - 2026-10-30
 
 ### Added
