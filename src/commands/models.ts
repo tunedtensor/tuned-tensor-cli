@@ -4,9 +4,13 @@ import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
+  linkSync,
+  renameSync,
+  copyFileSync,
+  constants,
   statSync,
   createWriteStream,
-  unlinkSync,
   readFileSync,
   writeFileSync,
   readdirSync,
@@ -671,7 +675,7 @@ function createDownloadProgress(totalBytes: number | null, enabled: boolean) {
   return { render, stop };
 }
 
-async function downloadUrlToFile(url: string, outputPath: string): Promise<number | null> {
+async function downloadUrlToFile(url: string, outputPath: string, force = false): Promise<number | null> {
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`Download failed: ${res.status} ${res.statusText}`);
@@ -681,7 +685,11 @@ async function downloadUrlToFile(url: string, outputPath: string): Promise<numbe
   }
 
   mkdirSync(dirname(outputPath), { recursive: true });
-  const file = createWriteStream(outputPath);
+  // Stage beside the destination: a failed download must not truncate existing
+  // files, and committing it must not follow a destination symlink.
+  const stagingDir = mkdtempSync(join(dirname(outputPath), ".tt-download-"));
+  const stagedPath = join(stagingDir, "artifact");
+  const file = createWriteStream(stagedPath, { flags: "wx", mode: 0o600 });
   const contentLength = parseContentLength(res.headers.get("content-length"));
   const progress = createDownloadProgress(
     contentLength,
@@ -699,16 +707,31 @@ async function downloadUrlToFile(url: string, outputPath: string): Promise<numbe
   try {
     progress.render(0, true);
     await pipeline(Readable.fromWeb(res.body), progressStream, file);
-    progress.render(downloadedBytes, true);
-    progress.stop();
-  } catch (err) {
-    progress.stop();
-    try {
-      unlinkSync(outputPath);
-    } catch {
-      // Best effort cleanup for partially written downloads.
+    if (force) {
+      renameSync(stagedPath, outputPath);
+    } else {
+      // Atomic no-clobber commit, including dangling symlinks and files created
+      // while the download was in flight.
+      try {
+        try {
+          linkSync(stagedPath, outputPath);
+        } catch (err) {
+          // Removable/network filesystems may not support hard links. Exclusive
+          // copying preserves no-clobber behavior there without following links.
+          if (!["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV", "ENOSYS"].includes((err as NodeJS.ErrnoException).code ?? "")) throw err;
+          copyFileSync(stagedPath, outputPath, constants.COPYFILE_EXCL);
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+          throw new Error(`Output file already exists: ${outputPath}. Use --force to overwrite.`);
+        }
+        throw err;
+      }
     }
-    throw err;
+    progress.render(downloadedBytes, true);
+  } finally {
+    progress.stop();
+    rmSync(stagingDir, { recursive: true, force: true });
   }
 
   return contentLength;
@@ -957,7 +980,7 @@ async function resolveServeTarget(
   const extractDir = join(modelCacheDir, "model");
 
   if (!existsSync(archivePath) || forceDownload) {
-    await downloadUrlToFile(data.url, archivePath);
+    await downloadUrlToFile(data.url, archivePath, forceDownload);
   }
   extractArchive(archivePath, extractDir, forceDownload);
 
@@ -1340,7 +1363,7 @@ export function registerModelsCommands(parent: Command) {
         throw new Error(`Output file already exists: ${outputPath}. Use --force to overwrite.`);
       }
 
-      const bytes = await downloadUrlToFile(data.url, outputPath);
+      const bytes = await downloadUrlToFile(data.url, outputPath, Boolean(cmdOpts.force));
 
       if (isJsonMode()) {
         return printJson({
