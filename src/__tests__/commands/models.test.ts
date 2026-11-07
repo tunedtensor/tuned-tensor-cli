@@ -1,11 +1,24 @@
+import { symlinkSync, canCreateFileSymlinks } from "../platform-fixtures.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Command } from "commander";
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, mkdtempSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { registerModelsCommands, validateArchiveEntryPath } from "../../commands/models.js";
 import * as client from "../../client.js";
 import { setJsonMode } from "../../output.js";
+
+const filesystem = vi.hoisted(() => ({ supportsLinks: true }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    linkSync: (...args: Parameters<typeof actual.linkSync>) => {
+      if (!filesystem.supportsLinks) throw Object.assign(new Error("unsupported"), { code: "ENOTSUP" });
+      return actual.linkSync(...args);
+    },
+  };
+});
 
 vi.mock("../../client.js", async (importOriginal) => {
   const actual = await importOriginal<typeof client>();
@@ -41,6 +54,7 @@ const mockModel = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  filesystem.supportsLinks = true;
   setJsonMode(false);
   process.env.TUNED_TENSOR_API_KEY = FAKE_KEY;
 });
@@ -197,6 +211,62 @@ describe("models commands", () => {
       ])).rejects.toThrow("Invalid model download filename");
       expect(fetchSpy).not.toHaveBeenCalled();
     });
+
+    it.each([...(canCreateFileSymlinks ? ["dangling symlink", "forced symlink"] : []), "destination race", "failed replacement", "forced regular file", "no hard links", "no hard links with race"])(
+      "safely handles %s during download",
+      async (scenario) => {
+        const root = mkdtempSync(join(tmpdir(), "tt-download-security-"));
+        const output = join(root, "model.tar.gz");
+        const target = join(root, "target");
+        try {
+          if (scenario === "dangling symlink" || scenario === "forced symlink") {
+            if (scenario === "forced symlink") writeFileSync(target, "keep target");
+            symlinkSync(target, output);
+          }
+          if (scenario === "failed replacement" || scenario === "forced regular file") writeFileSync(output, "keep existing");
+          vi.mocked(client.get)
+            .mockResolvedValueOnce({ data: [mockModel], meta: { page: 1, per_page: 100, total: 1 } })
+            .mockResolvedValueOnce({ data: { url: "https://signed.example/model.tar.gz", filename: "model.tar.gz" } });
+          vi.spyOn(console, "log").mockImplementation(() => {});
+          vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+            if (scenario === "destination race" || scenario === "no hard links with race") writeFileSync(output, "keep concurrent file");
+            if (scenario === "failed replacement") {
+              let sent = false;
+              return new Response(new ReadableStream({
+                pull(controller) {
+                  if (!sent) { sent = true; controller.enqueue(new TextEncoder().encode("partial")); }
+                  else controller.error(new Error("transfer interrupted"));
+                },
+              }));
+            }
+            return new Response("new artifact");
+          });
+          if (scenario.startsWith("no hard links")) {
+            filesystem.supportsLinks = false;
+          }
+          const args = ["node", "tt", "models", "download", "model-1234", "--output", output];
+          if (scenario.startsWith("forced") || scenario === "failed replacement") args.push("--force");
+          const operation = buildProgram().parseAsync(args);
+          if (scenario === "failed replacement") {
+            await expect(operation).rejects.toThrow("transfer interrupted");
+            expect(readFileSync(output, "utf8")).toBe("keep existing");
+          } else if (scenario === "dangling symlink") {
+            await expect(operation).rejects.toThrow("Output file already exists");
+            expect(lstatSync(output).isSymbolicLink()).toBe(true);
+            expect(existsSync(target)).toBe(false);
+          } else if (scenario === "destination race" || scenario === "no hard links with race") {
+            await expect(operation).rejects.toThrow("Output file already exists");
+            expect(readFileSync(output, "utf8")).toBe("keep concurrent file");
+          } else {
+            await operation;
+            expect(readFileSync(output, "utf8")).toBe("new artifact");
+            expect(lstatSync(output).isSymbolicLink()).toBe(false);
+            if (scenario === "forced symlink") expect(readFileSync(target, "utf8")).toBe("keep target");
+          }
+          expect(readdirSync(root).some(name => name.startsWith(".tt-download-"))).toBe(false);
+        } finally { rmSync(root, { recursive: true, force: true }); }
+      },
+    );
 
     it("downloads a model artifact to the requested path", async () => {
       const outputPath = join(tmpdir(), `tt-model-download-${process.pid}.tar.gz`);
