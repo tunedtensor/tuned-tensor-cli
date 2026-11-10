@@ -65,6 +65,11 @@ Foundation and decision engines retain their existing engine-specific workflows.
 5. “Stop this service” releases its process group. “Roll back the active model”
    restores the previous verified selection, or clears it if none existed.
 
+Activation changes the configured store's active pointer. If projects explicitly
+share a store, undoing this project's activation may restore the exact previous
+model from another project; its identity and evidence are verified again.
+Unrelated projects cannot be selected through the report or activation tools.
+
 Activation changes the active pointer. Starting/stopping a service is a separate
 operation; rollback does not replace a running server. The service binds to
 `127.0.0.1` only, needs Linux/CUDA and uses the pinned serving runtime. Its preview

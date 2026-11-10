@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getActiveModel } from "../../local-runtime/active-model.js";
+import { activateModel, getActiveModel } from "../../local-runtime/active-model.js";
 import { fineTuneRunRequestSchema, localRunnerConfigSchema } from "../../local-runtime/contracts.js";
 import { runLocalFineTune } from "../../local-runtime/orchestrator.js";
 import { runLoggedProcess } from "../../local-runtime/process-runner.js";
@@ -434,6 +434,31 @@ describe("agent result review and task acceptance", () => {
     await expect(prepareProjectModelAction(root, "activate", firstRunId)).rejects.toThrow(/at least 20/);
     expect(cli("models", "activate", `local-${firstRunId}`).status).not.toBe(0);
     expect((await getActiveModel(store)).pointer).toBeNull();
+  });
+
+  it("restores the exact previous project's selection in an explicitly shared store", async () => {
+    const { store, config } = await setupAgent();
+    const previous = request(secondRunId);
+    previous.behavior_spec_id = "55555555-5555-4555-8555-555555555555";
+    await runLocalFineTune({ request: previous, config });
+    await activateModel(store, `local-${secondRunId}`);
+    await expect(inspectProjectReport(root, secondRunId)).rejects.toThrow(/different project/);
+    await expect(prepareProjectModelAction(root, "activate", secondRunId)).rejects.toThrow(/different project/);
+    const select = await prepareProjectModelAction(root, "activate", firstRunId);
+    await executeProjectModelAction(root, select.arguments);
+    const pointerPath = join(store.root, "active-model.json");
+    const pointer = await json(pointerPath);
+    const aliasId = "local-77777777-7777-4777-8777-777777777777";
+    await mkdir(join(store.paths.modelsDir, aliasId));
+    await writeFile(join(store.paths.modelsDir, aliasId, "model.json"), JSON.stringify({ ...(await store.getModel(`local-${secondRunId}`)), id: aliasId }));
+    await writeFile(pointerPath, JSON.stringify({ ...pointer, previous_model_id: aliasId }));
+    await expect(prepareProjectModelAction(root, "rollback")).rejects.toThrow(/Previous model does not match/);
+    await writeFile(pointerPath, JSON.stringify(pointer));
+    const undo = await prepareProjectModelAction(root, "rollback");
+    expect(undo.preview.model_spec_id).toBe(previous.behavior_spec_id);
+    await expect(executeProjectModelAction(root, { ...undo.arguments, run_id: firstRunId })).rejects.toThrow(/changed after review/);
+    expect(await executeProjectModelAction(root, undo.arguments)).toMatchObject({ active_model_id: `local-${secondRunId}`, action: "rollback" });
+    await expect(prepareProjectModelAction(root, "rollback")).rejects.toThrow(/no active model to roll back/);
   });
 
   it("blocks a target-task regression even for legacy runs without an explicit policy", async () => {

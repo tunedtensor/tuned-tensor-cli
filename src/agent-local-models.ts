@@ -28,11 +28,11 @@ export async function listProjectRuns(workspaceRoot: string, specPath?: string) 
       .map(({ id, status, status_message, model_id, created_at, error }) => ({ id, status, status_message, model_id, created_at, error })) };
 }
 
-async function readProjectReport(workspaceRoot: string, runId: string, specPath?: string) {
+async function readProjectReport(workspaceRoot: string, runId: string, specPath?: string, allowPreviousProject = false) {
   z.string().uuid().parse(runId);
   const ctx = await context(workspaceRoot, specPath);
   const run = await ctx.store.getRun(runId);
-  if (run.behavior_spec_id !== ctx.specId) throw new Error("This run belongs to a different project.");
+  if (!allowPreviousProject && run.behavior_spec_id !== ctx.specId) throw new Error("This run belongs to a different project.");
   if (run.status !== "completed") throw new Error(`Run ${run.id} is ${run.status}; a completed report is not available.`);
   const reportPath = join(run.artifact_dir, "run-report.json");
   if ((await stat(reportPath)).size > 32 * 1024 * 1024) throw new Error("Report exceeds the 32 MiB agent review limit; inspect it with tt runs report.");
@@ -43,7 +43,7 @@ async function readProjectReport(workspaceRoot: string, runId: string, specPath?
   const manifest = JSON.parse(await readFile(join(run.artifact_dir, "artifact-manifest.json"), "utf8")) as { files: { path: string; sha256: string }[] };
   if (manifest.files.find(file => file.path === "run-report.json")?.sha256 !== sha(bytes)) throw new Error("Report changed during review.");
   const report = runReportSchema.parse(JSON.parse(bytes.toString("utf8")));
-  if (report.run_id !== run.id || report.behavior_spec_id !== ctx.specId || report.status !== "completed") throw new Error("Run report identity does not match the project run.");
+  if (report.run_id !== run.id || report.behavior_spec_id !== run.behavior_spec_id || report.status !== "completed") throw new Error("Run report identity does not match the project run.");
   return { ...ctx, run, report, reportSha: sha(bytes) };
 }
 
@@ -85,16 +85,22 @@ export async function prepareProjectModelAction(workspaceRoot: string, operation
     targetRun = active.pointer.previous_model_id ? (await ctx.store.getModel(active.pointer.previous_model_id)).run_id : undefined;
   } else if (!targetRun) throw new Error("Choose a completed run returned by list_local_runs.");
   let reportSha: string | null = null, manifestSha: string | null = null, modelId: string | null = null;
+  let modelSpecId: string | null = null;
   if (targetRun) {
-    const { report, run, reportSha: fingerprint } = await readProjectReport(workspaceRoot, targetRun, specPath);
+    // An explicitly shared store can have a previous selection from another
+    // project. Only undo our own active selection, to that exact recorded target.
+    const allowPreviousProject = operation === "rollback" && active.model?.behavior_spec_id === ctx.specId;
+    const { report, run, reportSha: fingerprint } = await readProjectReport(workspaceRoot, targetRun, specPath, allowPreviousProject);
     const task = taskQualityForReport(report);
     if (!task.passed) throw new Error(`Task quality failed: ${task.failures.join(" ")}`);
     if (operation === "activate" && !report.task_quality) throw new Error("Agree evaluation.taskQuality in the spec and run training before agent activation. Existing reports cannot acquire acceptance criteria retroactively.");
     if (operation === "activate" && JSON.stringify(ctx.prepared.resolvedConfig!.evaluation.taskQuality) !== JSON.stringify(report.task_quality?.policy)) throw new Error("Task acceptance policy differs from the evaluated run. Train and evaluate with the agreed policy before activation.");
     if (!report.general_regression?.passed) throw new Error("General-regression evidence is missing or failed; activation is blocked.");
     modelId = run.model_id ?? `local-${run.id}`;
+    if (operation === "rollback" && modelId !== active.pointer?.previous_model_id) throw new Error("Previous model does not match the recorded run selection.");
     const model = await ctx.store.getModel(modelId);
-    if (model.run_id !== run.id || model.behavior_spec_id !== ctx.specId || model.artifact_dir !== run.artifact_dir) throw new Error("Stored model does not match the reviewed run.");
+    if (model.run_id !== run.id || model.behavior_spec_id !== run.behavior_spec_id || model.artifact_dir !== run.artifact_dir) throw new Error("Stored model does not match the reviewed run.");
+    modelSpecId = model.behavior_spec_id;
     await verifyStoredModel(model, ctx.prepared.resolvedConfig!);
     await verifyActivationEvidence(model);
     reportSha = fingerprint;
@@ -104,8 +110,8 @@ export async function prepareProjectModelAction(workspaceRoot: string, operation
     spec_sha256: ctx.prepared.specSha256, workspace_fingerprint: ctx.prepared.workspaceFingerprint,
     config_sha256: ctx.prepared.configSha256 ?? null, report_sha256: reportSha, manifest_sha256: manifestSha,
     pointer_sha256: sha(JSON.stringify(active.pointer)), });
-  return { arguments: args, preview: { operation, model_id: modelId, previous_model_id: active.pointer?.model_id ?? null,
-    note: "Changes the project's active model pointer after approval. It does not start or replace an inference server." } };
+  return { arguments: args, preview: { operation, model_id: modelId, model_spec_id: modelSpecId, previous_model_id: active.pointer?.model_id ?? null,
+    note: "Changes the configured store's active model pointer after approval. It does not start or replace an inference server." } };
 }
 
 export async function validateProjectModelAction(workspaceRoot: string, raw: unknown) {

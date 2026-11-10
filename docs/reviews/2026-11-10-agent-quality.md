@@ -176,3 +176,19 @@ tests, 64 adapter Python tests, 40 foundation tests, four decision tests and the
 build (1,342 passed; 15 explicitly skipped). The full gate ran after GPU
 experiments and serving cleanup. `git diff --check` passed. This result is
 separate from the original tranche's gate and retained failures above.
+
+
+Post-creation PR review found a shared-store rollback edge case: activating this
+project could replace another project's selection, but the project-scoped reader
+then refused to restore that exact previous selection. Rollback now permits only
+that recorded previous target while this project owns the current selection.
+The preview identifies the target spec, its report/model identities and bytes
+are verified, and an alias that disagrees with the run's recorded model is
+rejected. Ordinary foreign-project inspection/activation and attempts to replace
+the sealed rollback run remain blocked. A real-store workflow regression test
+covers these cases; model-process execution is simulated in that test.
+
+After the shared-store fix, the full check passed again: 1,025 CLI + 210 runtime
++ 64 adapter + 40 foundation + four decision tests = **1,343 passed**, with the
+same 15 explicit skips, typechecks and build passing. The earlier final-package
+consumer test passed at commit 36aa896; CI package tests verify the updated PR.
