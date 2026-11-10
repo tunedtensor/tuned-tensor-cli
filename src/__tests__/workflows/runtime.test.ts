@@ -1,8 +1,12 @@
+import { createTunedTensorTools } from "../../agent-tools.js";
+import { approvePreparedAction } from "../../agent-approval.js";
+import type { AgentAction } from "../../agent-client.js";
+import { listProjectRuns, inspectProjectReport, prepareProjectModelAction, executeProjectModelAction } from "../../agent-local-models.js";
 import { createProgram } from "../../cli.js";
 import { setJsonMode } from "../../output.js";
 import { applySpecUpdate, inspectLocalSpec, prepareSpecUpdate } from "../../spec-workspace.js";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,6 +63,7 @@ async function json(path: string) {
 
 let root: string;
 let regressGeneral: boolean;
+let regressTask: boolean;
 let trainedPrompts: string[];
 let trainedModelDir: string | undefined;
 
@@ -66,6 +71,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "tt-workflow-"));
   vi.stubEnv("TUNED_TENSOR_HOME", join(root, "tt-home"));
   regressGeneral = false;
+  regressTask = false;
   trainedPrompts = [];
   trainedModelDir = undefined;
   vi.mocked(runLoggedProcess).mockReset();
@@ -121,7 +127,7 @@ beforeEach(async () => {
       expect(Object.keys(example).sort()).toEqual(["id", "input"]);
       expect(answers.has(example.input)).toBe(true);
       const general = generalExamples.some((entry) => entry.input === example.input);
-      const wrong = general ? regressGeneral && input.kind === "candidate" : input.kind === "baseline";
+      const wrong = general ? regressGeneral && input.kind === "candidate" : regressTask ? input.kind === "candidate" : input.kind === "baseline";
       return { id: example.id, actual: wrong ? "incorrect" : answers.get(example.input), latency_ms: 2 };
     });
     await writeFile(outputPath, JSON.stringify({ results }));
@@ -359,4 +365,98 @@ it("keeps an ID-less spec's run identity and train/eval split stable across an a
     expect(after.specId).toBe(before.specId);
     expect(after.trained).toEqual(before.trained);
   } finally { log.mockRestore(); setJsonMode(false); }
+});
+
+
+describe("agent result review and task acceptance", () => {
+  async function setupAgent(policy = { minScore: .8, minPassRate: .8, minExamples: 1, minScoreDelta: 0 }) {
+    const env = await setup();
+    env.config.evaluation.taskQuality = policy;
+    await writeFile(join(root, "local-runner.json"), JSON.stringify(env.config));
+    const req = request();
+    await writeFile(join(root, "tunedtensor.json"), JSON.stringify({ id: req.behavior_spec_id, ...req.spec_snapshot }));
+    const result = await runLocalFineTune({ request: req, config: env.config });
+    return { ...env, req, result };
+  }
+
+  it("lists an empty project without creating a store", async () => {
+    const env = await setup();
+    const req = request();
+    await writeFile(join(root, "tunedtensor.json"), JSON.stringify({ id: req.behavior_spec_id, ...req.spec_snapshot }));
+    const before = await readdir(root);
+    expect(await listProjectRuns(root)).toMatchObject({ runs: [], active_model_id: null });
+    expect(await readdir(root)).toEqual(before);
+  });
+
+  it("routes actual tool proposals through approval and refuses duplicate dispatch", async () => {
+    const { store } = await setupAgent();
+    const blocked = vi.fn(async () => { throw new Error("Unexpected cloud call"); });
+    const tools = createTunedTensorTools({ get: blocked, postRead: blocked, propose: async action => action }, { workspaceRoot: root });
+    const proposed = await tools.find(tool => tool.name === "prepare_activate_local_model")!.execute("prepare", { run_id: firstRunId });
+    const action = proposed.details as AgentAction;
+    expect(action.operation).toBe("activate_local_model");
+    expect((await getActiveModel(store)).pointer).toBeNull();
+    const persist = vi.fn(async () => {});
+    expect(await approvePreparedAction(action, { get: blocked, post: blocked, put: blocked }, persist, { workspaceRoot: root })).toMatchObject({ active_model_id: `local-${firstRunId}` });
+    expect(action.status).toBe("completed");
+    await expect(approvePreparedAction(action, { get: blocked, post: blocked, put: blocked }, persist, { workspaceRoot: root })).rejects.toThrow(/not proposed/);
+    expect(blocked).not.toHaveBeenCalled();
+  });
+
+  it("does not silently apply a run accepted under different criteria", async () => {
+    await setupAgent();
+    const configPath = join(root, "local-runner.json");
+    const config = await json(configPath);
+    config.evaluation.taskQuality.minExamples = 30;
+    await writeFile(configPath, JSON.stringify(config));
+    await expect(prepareProjectModelAction(root, "activate", firstRunId)).rejects.toThrow(/policy differs/);
+  });
+
+  it("reads real run artifacts, reviews criteria, activates only on approval and rolls back", async () => {
+    const { store, result } = await setupAgent();
+    expect(await listProjectRuns(root)).toMatchObject({ runs: [{ id: firstRunId, status: "completed" }] });
+    expect(await inspectProjectReport(root, firstRunId)).toMatchObject({
+      candidate: { score: 1 }, baseline: { score: 0 }, activation_eligible: true,
+      task_quality: { configured: true, passed: true },
+    });
+    const action = await prepareProjectModelAction(root, "activate", firstRunId);
+    expect((await getActiveModel(store)).pointer).toBeNull();
+    expect(await executeProjectModelAction(root, action.arguments)).toMatchObject({ active_model_id: `local-${firstRunId}`, serving_started: false });
+    const rollback = await prepareProjectModelAction(root, "rollback");
+    expect(await executeProjectModelAction(root, rollback.arguments)).toMatchObject({ active_model_id: null, action: "rollback" });
+    await expect(executeProjectModelAction(root, action.arguments)).rejects.toThrow(/changed after review/);
+    expect(result.report.task_quality?.passed).toBe(true);
+  });
+
+  it("refuses both CLI and agent activation when the agreed sample minimum was not met", async () => {
+    const { cli, store } = await setupAgent({ minScore: .8, minPassRate: .8, minExamples: 20, minScoreDelta: 0 });
+    expect(await inspectProjectReport(root, firstRunId)).toMatchObject({ activation_eligible: false, task_quality: { passed: false } });
+    await expect(prepareProjectModelAction(root, "activate", firstRunId)).rejects.toThrow(/at least 20/);
+    expect(cli("models", "activate", `local-${firstRunId}`).status).not.toBe(0);
+    expect((await getActiveModel(store)).pointer).toBeNull();
+  });
+
+  it("blocks a target-task regression even for legacy runs without an explicit policy", async () => {
+    const { config, cli } = await setup();
+    regressTask = true;
+    const result = await runLocalFineTune({ request: request(), config });
+    expect(result.report.general_regression?.passed).toBe(true);
+    expect(result.report.comparison.avg_score_delta).toBe(-1);
+    const activation = cli("models", "activate", `local-${firstRunId}`);
+    expect(activation.status).not.toBe(0);
+    expect(activation.stderr).toContain("failed task quality");
+  });
+
+  it("rejects stale approval when the spec or evaluation evidence changes", async () => {
+    const { result } = await setupAgent();
+    const action = await prepareProjectModelAction(root, "activate", firstRunId);
+    const specPath = join(root, "tunedtensor.json");
+    const spec = await readFile(specPath, "utf8");
+    await writeFile(specPath, spec + "\n");
+    await expect(executeProjectModelAction(root, action.arguments)).rejects.toThrow(/changed after review/);
+    await writeFile(specPath, spec);
+    await writeFile(result.reportPath, JSON.stringify({ ...result.report, candidate: { ...result.report.candidate, avg_score: .5 } }));
+    await expect(inspectProjectReport(root, firstRunId)).rejects.toThrow();
+    await expect(executeProjectModelAction(root, action.arguments)).rejects.toThrow();
+  });
 });

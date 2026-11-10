@@ -1,3 +1,4 @@
+import { evaluateTaskQuality } from "./task-quality.js";
 import { lstat, mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
@@ -1755,6 +1756,10 @@ async function runReportStage(args: {
     baseline,
     candidate,
     comparison,
+    task_quality: args.config.evaluation.taskQuality ? {
+      policy: args.config.evaluation.taskQuality,
+      ...evaluateTaskQuality(baseline, candidate, args.config.evaluation.taskQuality),
+    } : undefined,
     general_regression: generalRegression,
     training,
     provenance,

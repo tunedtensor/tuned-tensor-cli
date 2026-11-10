@@ -264,6 +264,7 @@ describe("human local rendering", () => {
           avg_score_delta: 0.2,
           pass_rate_delta: 0.1,
         },
+        task_quality: { passed: false, failures: ["Task evaluation needs at least 40 held-out examples."] },
         general_regression: {
           passed: false,
           failures: ["pass-rate drop 0.08 exceeds 0.05"],
@@ -274,6 +275,8 @@ describe("human local rendering", () => {
     const logs = vi.mocked(console.log).mock.calls.flat().join("\n");
     expect(logs).toContain("Local run completed");
     expect(logs).toContain("general regression gate failed");
+    expect(logs).toContain("task quality gate failed");
+    expect(logs).toContain("at least 40 held-out examples");
     expect(logs).toContain("pass-rate drop");
     expect(console.error).not.toHaveBeenCalled();
   });

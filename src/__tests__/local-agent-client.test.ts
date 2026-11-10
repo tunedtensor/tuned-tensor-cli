@@ -137,6 +137,9 @@ describe("local agent conversation client", () => {
             type: "tool_execution_end", toolCallId: "t1", toolName: "validate_pipeline",
             result: { details: {} }, isError: false,
           });
+          if (prompt === "Separated") {
+            for (const listener of listeners) await listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Result after tool" } });
+          }
           state.messages.push({ role: "assistant", content: [{ type: "text", text: "Local answer" }] });
         },
         abort: vi.fn(),
@@ -167,6 +170,7 @@ describe("local agent conversation client", () => {
       "turn_started", "reasoning_delta", "text_delta", "tool_call", "tool_result", "final",
     ]);
     expect(turn.response).toBe("Local answer");
+
     expect((await client.listThreads())[0]?.id).toBe(thread.id);
     expect((await client.getThread(thread.id)).thread.title).toBe("Inspect specs");
     expect(created[0]?.messages).toEqual([]);
@@ -186,7 +190,9 @@ describe("local agent conversation client", () => {
       "prepare_create_local_spec",
       "prepare_pipeline_run",
       "prepare_download",
-    ]);
+            "get_local_service", "prepare_serve_local_model", "prepare_stop_local_service",
+        "list_local_runs", "inspect_local_run", "prepare_activate_local_model", "prepare_rollback_local_model", "assess_local_dataset",
+]);
     expect(created[0]?.systemPrompt).toMatch(/sealed local pipeline dry-run/i);
     expect(created[0]?.systemPrompt).toContain("prepare_pipeline_run");
     expect(created[0]?.systemPrompt).toMatch(/approved dry-runs never train/i);
@@ -223,6 +229,13 @@ describe("local agent conversation client", () => {
     const limited = await client.runTurn(thread.id, "Length", event => lengthEvents.push(event));
     expect(limited.status).toBe("failed");
     expect(lengthEvents).toContainEqual({ type: "error", payload: { message: expect.stringContaining("model reached its response or context limit") } });
+    const separatedText: string[] = [];
+    const separateThread = await client.createThread();
+    const separated = await client.runTurn(separateThread.id, "Separated", event => {
+      if (event.type === "text_delta") separatedText.push(String(event.payload.delta));
+    });
+    expect(separated.response).toBe("Local answer\n\nResult after tool");
+    expect(separatedText.join("")).toBe(separated.response);
   });
 
   it("propagates post-dispatch uncertainty as a non-retryable outcome", async () => {

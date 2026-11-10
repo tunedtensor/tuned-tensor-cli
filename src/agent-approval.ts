@@ -1,3 +1,6 @@
+import { z } from "zod";
+import type { AgentLocalServer } from "./agent-local-server.js";
+import { validateProjectModelAction, executeProjectModelAction, buildProjectModelLaunch } from "./agent-local-models.js";
 import { validateDatasetSplit, executeDatasetSplit } from "./local-runtime/dataset-split.js";
 import { applySpecUpdate, validateSpecUpdate, SpecWorkspaceMismatchError, type SpecUpdate } from "./spec-workspace.js";
 import { createHash } from "node:crypto";
@@ -55,6 +58,7 @@ export function createCloudActionContext(baseUrl: string, token: string): CloudA
 }
 
 export interface AgentApprovalOptions {
+  localServer?: AgentLocalServer;
   workspaceRoot?: string;
   localFileOperations?: Partial<LocalSpecFileOperations>;
   runPipelineCommand?: LocalPipelineCommandRunner;
@@ -180,6 +184,9 @@ async function prepareLocalPipelineApproval(
   };
 }
 
+const serveArguments = z.object({ selection: z.unknown(), port: z.number().int().min(1024).max(65535) }).strict();
+const stopArguments = z.object({ server_id: z.string().uuid() }).strict();
+
 export async function preflightPreparedAction(
   action: AgentAction,
   options: AgentApprovalOptions = {},
@@ -187,7 +194,18 @@ export async function preflightPreparedAction(
   if (action.status !== "proposed") {
     throw new Error(`Action ${action.id} is not proposed and cannot be approved.`);
   }
-  if (action.operation === "update_local_spec") {
+  if (action.operation === "serve_local_model") {
+    if (!options.workspaceRoot || !options.localServer) throw new Error("Local serving is unavailable.");
+    const input = serveArguments.parse(args(action));
+    await buildProjectModelLaunch(options.workspaceRoot, input.selection, input.port);
+  } else if (action.operation === "stop_local_service") {
+    if (!options.localServer || (await options.localServer.status()).server_id !== stopArguments.parse(args(action)).server_id) throw new Error("Server selection changed.");
+  } else if (action.operation === "activate_local_model" || action.operation === "rollback_local_model") {
+    if (!options.workspaceRoot) throw new Error("Model selection needs a local workspace.");
+    const input = args(action);
+    if (input.operation !== (action.operation === "activate_local_model" ? "activate" : "rollback")) throw new Error("Model action operation mismatch.");
+    await validateProjectModelAction(options.workspaceRoot, input);
+  } else if (action.operation === "update_local_spec") {
     if (!options.workspaceRoot) throw new Error("A local workspace is required to edit a spec.");
     try { await validateSpecUpdate(options.workspaceRoot, args(action) as unknown as SpecUpdate); }
     catch (error) {
@@ -272,6 +290,31 @@ export async function approvePreparedAction(
     const input = args(action);
 
     switch (action.operation) {
+      case "serve_local_model": {
+        const { workspaceRoot, localServer } = options;
+        if (!workspaceRoot || !localServer) throw new Error("Local serving is unavailable.");
+        const serving = serveArguments.parse(input);
+        await buildProjectModelLaunch(workspaceRoot, serving.selection, serving.port);
+        execute = async () => {
+          const current = await buildProjectModelLaunch(workspaceRoot, serving.selection, serving.port);
+          return localServer.start(current.launch, current.logPath);
+        };
+        break;
+      }
+      case "stop_local_service": {
+        if (!options.localServer) throw new Error("Local serving is unavailable.");
+        const serverId = stopArguments.parse(input).server_id;
+        execute = () => options.localServer!.stop(serverId);
+        break;
+      }
+      case "activate_local_model":
+      case "rollback_local_model": {
+        if (!options.workspaceRoot) throw new Error("Model selection needs a local workspace.");
+        if (input.operation !== (action.operation === "activate_local_model" ? "activate" : "rollback")) throw new Error("Model action operation mismatch.");
+        await validateProjectModelAction(options.workspaceRoot, input);
+        execute = () => executeProjectModelAction(options.workspaceRoot!, input);
+        break;
+      }
       case "update_local_spec": {
         if (!options.workspaceRoot) throw new Error("A local workspace is required to edit a spec.");
         const update = input as unknown as SpecUpdate;
