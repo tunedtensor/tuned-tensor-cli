@@ -89,4 +89,3 @@ export async function verifyActivationEvidence(model: LocalModelRecord): Promise
     verifyModel: true,
   });
 }
-
