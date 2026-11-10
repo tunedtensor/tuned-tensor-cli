@@ -187,6 +187,7 @@ export const datasetSourceSchema = z.object({
 
 export const fineTuneHyperparametersSchema = z.object({
   n_epochs: z.number().int().min(1).max(20).default(1),
+  seed: z.number().int().min(0).max(4294967295).optional(),
   learning_rate: z.number().positive().optional(),
   batch_size: z.number().int().min(1).optional(),
   lora_rank: z.number().int().min(1).optional(),

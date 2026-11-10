@@ -1,0 +1,505 @@
+{
+  "hardware": "NVIDIA GB10, driver 580.173.02",
+  "measurement": "Fresh processes, same isolated Python environment; no concurrent GPU workload",
+  "fixture": {
+    "upstream_repo": "https://github.com/PolyAI-LDN/task-specific-datasets",
+    "upstream_revision": "57ec275d8078af65b7731c2a98be812d844a6d6b",
+    "original_file": "banking_data/train.csv",
+    "license": "CC-BY-4.0",
+    "training_rows": 192,
+    "validation_rows": 48,
+    "queue_mapping": {
+      "card_arrival": "Q17",
+      "request_refund": "Q28",
+      "cash_withdrawal_charge": "Q41",
+      "wrong_amount_of_cash_received": "Q63"
+    }
+  },
+  "parity": {
+    "identical_token_label_hash": true,
+    "identical_adapter_tensor_names_shapes_dtypes": true,
+    "adapter_tensor_count": 372,
+    "trainable_parameters": 8409600,
+    "adapter_dtype": "float32",
+    "base_dtype": "bfloat16",
+    "backend_initial_weights_identical": false
+  },
+  "runs": [
+    {
+      "backend": "transformers",
+      "python_version": "3.12.3",
+      "hardware": {
+        "device_index": 0,
+        "device_name": "NVIDIA GB10",
+        "compute_capability": "12.1",
+        "bf16_supported": true
+      },
+      "versions": {
+        "torch": "2.13.0+cu130",
+        "transformers": "5.15.0",
+        "peft": "0.20.0",
+        "accelerate": "1.15.0",
+        "unsloth": "2026.11.3",
+        "unsloth_zoo": "2026.11.4",
+        "triton": "3.7.1"
+      },
+      "hyperparameters": {
+        "base_model": "Qwen/Qwen3.5-2B",
+        "model_loader": "causal_lm",
+        "base_model_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+        "n_epochs": "1",
+        "learning_rate": "0.0002",
+        "per_device_train_batch_size": "2",
+        "gradient_accumulation_steps": "4",
+        "lora_rank": "8",
+        "lora_alpha": "16",
+        "lora_dropout": "0.05",
+        "max_seq_length": "256",
+        "lora_target_modules": "all-linear",
+        "gradient_checkpointing": "false",
+        "seed": "42"
+      },
+      "dtype": "torch.bfloat16",
+      "tokenized": {
+        "sha256": "2f8dd9d9c8c3b3587fb71806a0de60343a236b0913523d3b28747b0f13123425",
+        "rows": 192,
+        "input_tokens": 22944,
+        "supervised_tokens": 2688
+      },
+      "initialization": {
+        "trainable_weights_sha256": "a22aa977616066fb5eea59e21a85be620ac61a42137b20a18b3d4a5903dc40b3"
+      },
+      "torch_disable_native_jit": "1",
+      "data_sha256": "5ebc0613d4f1c7bb1bf37b3fa0df86464e991f9b39f8d58000613a914d6979ac",
+      "elapsed_seconds": 52.89101435430348,
+      "metrics": {
+        "train_runtime": 28.5061,
+        "train_samples_per_second": 6.735,
+        "train_steps_per_second": 0.842,
+        "total_flos": 197435877669888.0,
+        "train_loss": 0.01850312997673124,
+        "epoch": 1.0,
+        "seed": 42,
+        "peak_cuda_allocated_bytes": 7742087680,
+        "peak_cuda_reserved_bytes": 10215227392,
+        "trainable_parameters": 8409600
+      },
+      "name": "matched-text-transformers-1",
+      "adapter_sha256": "1fe50f0021d8ba00badb8092f04914adc22d3dcc94cf997dcdefa9a8b1b86cde"
+    },
+    {
+      "backend": "transformers",
+      "python_version": "3.12.3",
+      "hardware": {
+        "device_index": 0,
+        "device_name": "NVIDIA GB10",
+        "compute_capability": "12.1",
+        "bf16_supported": true
+      },
+      "versions": {
+        "torch": "2.13.0+cu130",
+        "transformers": "5.15.0",
+        "peft": "0.20.0",
+        "accelerate": "1.15.0",
+        "unsloth": "2026.11.3",
+        "unsloth_zoo": "2026.11.4",
+        "triton": "3.7.1"
+      },
+      "hyperparameters": {
+        "base_model": "Qwen/Qwen3.5-2B",
+        "model_loader": "causal_lm",
+        "base_model_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+        "n_epochs": "1",
+        "learning_rate": "0.0002",
+        "per_device_train_batch_size": "2",
+        "gradient_accumulation_steps": "4",
+        "lora_rank": "8",
+        "lora_alpha": "16",
+        "lora_dropout": "0.05",
+        "max_seq_length": "256",
+        "lora_target_modules": "all-linear",
+        "gradient_checkpointing": "false",
+        "seed": "42"
+      },
+      "dtype": "torch.bfloat16",
+      "tokenized": {
+        "sha256": "2f8dd9d9c8c3b3587fb71806a0de60343a236b0913523d3b28747b0f13123425",
+        "rows": 192,
+        "input_tokens": 22944,
+        "supervised_tokens": 2688
+      },
+      "initialization": {
+        "trainable_weights_sha256": "a22aa977616066fb5eea59e21a85be620ac61a42137b20a18b3d4a5903dc40b3"
+      },
+      "torch_disable_native_jit": "1",
+      "data_sha256": "5ebc0613d4f1c7bb1bf37b3fa0df86464e991f9b39f8d58000613a914d6979ac",
+      "elapsed_seconds": 58.60576110240072,
+      "metrics": {
+        "train_runtime": 29.5,
+        "train_samples_per_second": 6.508,
+        "train_steps_per_second": 0.814,
+        "total_flos": 197435877669888.0,
+        "train_loss": 0.019531433061577747,
+        "epoch": 1.0,
+        "seed": 42,
+        "peak_cuda_allocated_bytes": 7742087680,
+        "peak_cuda_reserved_bytes": 10215227392,
+        "trainable_parameters": 8409600
+      },
+      "name": "matched-text-transformers-2",
+      "adapter_sha256": "2d36714120fe0b43a0a164d5c252f25ed0a92ef60d898816c80c807b58a32766"
+    },
+    {
+      "backend": "transformers",
+      "python_version": "3.12.3",
+      "hardware": {
+        "device_index": 0,
+        "device_name": "NVIDIA GB10",
+        "compute_capability": "12.1",
+        "bf16_supported": true
+      },
+      "versions": {
+        "torch": "2.13.0+cu130",
+        "transformers": "5.15.0",
+        "peft": "0.20.0",
+        "accelerate": "1.15.0",
+        "unsloth": "2026.11.3",
+        "unsloth_zoo": "2026.11.4",
+        "triton": "3.7.1"
+      },
+      "hyperparameters": {
+        "base_model": "Qwen/Qwen3.5-2B",
+        "model_loader": "causal_lm",
+        "base_model_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+        "n_epochs": "1",
+        "learning_rate": "0.0002",
+        "per_device_train_batch_size": "2",
+        "gradient_accumulation_steps": "4",
+        "lora_rank": "8",
+        "lora_alpha": "16",
+        "lora_dropout": "0.05",
+        "max_seq_length": "256",
+        "lora_target_modules": "all-linear",
+        "gradient_checkpointing": "false",
+        "seed": "42"
+      },
+      "dtype": "torch.bfloat16",
+      "tokenized": {
+        "sha256": "2f8dd9d9c8c3b3587fb71806a0de60343a236b0913523d3b28747b0f13123425",
+        "rows": 192,
+        "input_tokens": 22944,
+        "supervised_tokens": 2688
+      },
+      "initialization": {
+        "trainable_weights_sha256": "a22aa977616066fb5eea59e21a85be620ac61a42137b20a18b3d4a5903dc40b3"
+      },
+      "torch_disable_native_jit": "1",
+      "data_sha256": "5ebc0613d4f1c7bb1bf37b3fa0df86464e991f9b39f8d58000613a914d6979ac",
+      "elapsed_seconds": 55.941598237492144,
+      "metrics": {
+        "train_runtime": 30.1878,
+        "train_samples_per_second": 6.36,
+        "train_steps_per_second": 0.795,
+        "total_flos": 197435877669888.0,
+        "train_loss": 0.017748765312717296,
+        "epoch": 1.0,
+        "seed": 42,
+        "peak_cuda_allocated_bytes": 7742087680,
+        "peak_cuda_reserved_bytes": 10215227392,
+        "trainable_parameters": 8409600
+      },
+      "name": "matched-text-transformers-3",
+      "adapter_sha256": "b590bdd03178e7f457eba4dfba513f12c091f1cee33321173a8dac8f0382a176"
+    },
+    {
+      "backend": "unsloth",
+      "hardware": {
+        "device_index": 0,
+        "device_name": "NVIDIA GB10",
+        "compute_capability": "12.1",
+        "bf16_supported": true
+      },
+      "versions": {
+        "torch": "2.13.0+cu130",
+        "transformers": "5.15.0",
+        "peft": "0.20.0",
+        "accelerate": "1.15.0",
+        "unsloth": "2026.11.3",
+        "unsloth_zoo": "2026.11.4",
+        "triton": "3.7.1"
+      },
+      "hyperparameters": {
+        "base_model": "Qwen/Qwen3.5-2B",
+        "model_loader": "causal_lm",
+        "base_model_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+        "n_epochs": "1",
+        "learning_rate": "0.0002",
+        "per_device_train_batch_size": "2",
+        "gradient_accumulation_steps": "4",
+        "lora_rank": "8",
+        "lora_alpha": "16",
+        "lora_dropout": "0.05",
+        "max_seq_length": "256",
+        "lora_target_modules": "all-linear",
+        "gradient_checkpointing": "false",
+        "seed": "42"
+      },
+      "dtype": "torch.bfloat16",
+      "tokenized": {
+        "sha256": "2f8dd9d9c8c3b3587fb71806a0de60343a236b0913523d3b28747b0f13123425",
+        "rows": 192,
+        "input_tokens": 22944,
+        "supervised_tokens": 2688
+      },
+      "initialization": {
+        "trainable_weights_sha256": "db053780e9c256cf914b5ee529346c9f9ec53b1d31848fa22f2c4fc314294352"
+      },
+      "torch_disable_native_jit": "1",
+      "data_sha256": "5ebc0613d4f1c7bb1bf37b3fa0df86464e991f9b39f8d58000613a914d6979ac",
+      "elapsed_seconds": 109.90578734688461,
+      "metrics": {
+        "train_runtime": 78.5421,
+        "train_samples_per_second": 2.445,
+        "train_steps_per_second": 0.306,
+        "total_flos": 197435877669888.0,
+        "train_loss": 0.018595918677722995,
+        "epoch": 1.0,
+        "seed": 42,
+        "peak_cuda_allocated_bytes": 5016843776,
+        "peak_cuda_reserved_bytes": 5312086016,
+        "trainable_parameters": 8409600
+      },
+      "name": "matched-text-unsloth-1",
+      "python_version": "3.12.3",
+      "adapter_sha256": "1a9c885cb4e84f3b0432b3ba96b2cdce2a7fbf70ea9bce05e1213eeaaa20c52a"
+    },
+    {
+      "backend": "unsloth",
+      "hardware": {
+        "device_index": 0,
+        "device_name": "NVIDIA GB10",
+        "compute_capability": "12.1",
+        "bf16_supported": true
+      },
+      "versions": {
+        "torch": "2.13.0+cu130",
+        "transformers": "5.15.0",
+        "peft": "0.20.0",
+        "accelerate": "1.15.0",
+        "unsloth": "2026.11.3",
+        "unsloth_zoo": "2026.11.4",
+        "triton": "3.7.1"
+      },
+      "hyperparameters": {
+        "base_model": "Qwen/Qwen3.5-2B",
+        "model_loader": "causal_lm",
+        "base_model_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+        "n_epochs": "1",
+        "learning_rate": "0.0002",
+        "per_device_train_batch_size": "2",
+        "gradient_accumulation_steps": "4",
+        "lora_rank": "8",
+        "lora_alpha": "16",
+        "lora_dropout": "0.05",
+        "max_seq_length": "256",
+        "lora_target_modules": "all-linear",
+        "gradient_checkpointing": "false",
+        "seed": "42"
+      },
+      "dtype": "torch.bfloat16",
+      "tokenized": {
+        "sha256": "2f8dd9d9c8c3b3587fb71806a0de60343a236b0913523d3b28747b0f13123425",
+        "rows": 192,
+        "input_tokens": 22944,
+        "supervised_tokens": 2688
+      },
+      "initialization": {
+        "trainable_weights_sha256": "db053780e9c256cf914b5ee529346c9f9ec53b1d31848fa22f2c4fc314294352"
+      },
+      "torch_disable_native_jit": "1",
+      "data_sha256": "5ebc0613d4f1c7bb1bf37b3fa0df86464e991f9b39f8d58000613a914d6979ac",
+      "elapsed_seconds": 95.61835909634829,
+      "metrics": {
+        "train_runtime": 63.8094,
+        "train_samples_per_second": 3.009,
+        "train_steps_per_second": 0.376,
+        "total_flos": 197435877669888.0,
+        "train_loss": 0.018351665480622614,
+        "epoch": 1.0,
+        "seed": 42,
+        "peak_cuda_allocated_bytes": 5016843264,
+        "peak_cuda_reserved_bytes": 5312086016,
+        "trainable_parameters": 8409600
+      },
+      "name": "matched-text-unsloth-2",
+      "python_version": "3.12.3",
+      "adapter_sha256": "53689ce2b1de865f62e529342ac3724b75b6a5e3166d34e1a0812ce7f35675f3"
+    },
+    {
+      "backend": "unsloth",
+      "hardware": {
+        "device_index": 0,
+        "device_name": "NVIDIA GB10",
+        "compute_capability": "12.1",
+        "bf16_supported": true
+      },
+      "versions": {
+        "torch": "2.13.0+cu130",
+        "transformers": "5.15.0",
+        "peft": "0.20.0",
+        "accelerate": "1.15.0",
+        "unsloth": "2026.11.3",
+        "unsloth_zoo": "2026.11.4",
+        "triton": "3.7.1"
+      },
+      "hyperparameters": {
+        "base_model": "Qwen/Qwen3.5-2B",
+        "model_loader": "causal_lm",
+        "base_model_revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+        "n_epochs": "1",
+        "learning_rate": "0.0002",
+        "per_device_train_batch_size": "2",
+        "gradient_accumulation_steps": "4",
+        "lora_rank": "8",
+        "lora_alpha": "16",
+        "lora_dropout": "0.05",
+        "max_seq_length": "256",
+        "lora_target_modules": "all-linear",
+        "gradient_checkpointing": "false",
+        "seed": "42"
+      },
+      "dtype": "torch.bfloat16",
+      "tokenized": {
+        "sha256": "2f8dd9d9c8c3b3587fb71806a0de60343a236b0913523d3b28747b0f13123425",
+        "rows": 192,
+        "input_tokens": 22944,
+        "supervised_tokens": 2688
+      },
+      "initialization": {
+        "trainable_weights_sha256": "db053780e9c256cf914b5ee529346c9f9ec53b1d31848fa22f2c4fc314294352"
+      },
+      "torch_disable_native_jit": "1",
+      "data_sha256": "5ebc0613d4f1c7bb1bf37b3fa0df86464e991f9b39f8d58000613a914d6979ac",
+      "elapsed_seconds": 60.54107867926359,
+      "metrics": {
+        "train_runtime": 25.0275,
+        "train_samples_per_second": 7.672,
+        "train_steps_per_second": 0.959,
+        "total_flos": 197435877669888.0,
+        "train_loss": 0.0193315506782407,
+        "epoch": 1.0,
+        "seed": 42,
+        "peak_cuda_allocated_bytes": 5016843264,
+        "peak_cuda_reserved_bytes": 5312086016,
+        "trainable_parameters": 8409600
+      },
+      "name": "matched-text-unsloth-3",
+      "python_version": "3.12.3",
+      "adapter_sha256": "0c2e5f96f6633c944c05ece05b0c5a028ad60204ea0d8fd54fdbbe495a3c20a3"
+    }
+  ],
+  "evaluation": {
+    "split": "prebuilt_validation",
+    "rows": 48,
+    "scoring": "json_fields",
+    "policy": {
+      "minScore": 0.85,
+      "minPassRate": 0.85,
+      "minExamples": 40,
+      "minScoreDelta": 0
+    },
+    "results": [
+      {
+        "name": "matched-text-unsloth-1",
+        "baseline": {
+          "score": 0.9375,
+          "pass_rate": 0.875
+        },
+        "candidate": {
+          "score": 0.9895833333333334,
+          "pass_rate": 0.9791666666666666
+        },
+        "gate": {
+          "passed": true,
+          "failures": []
+        }
+      },
+      {
+        "name": "matched-text-unsloth-2",
+        "baseline": {
+          "score": 0.9375,
+          "pass_rate": 0.875
+        },
+        "candidate": {
+          "score": 0.9791666666666666,
+          "pass_rate": 0.9583333333333334
+        },
+        "gate": {
+          "passed": true,
+          "failures": []
+        }
+      },
+      {
+        "name": "matched-text-unsloth-3",
+        "baseline": {
+          "score": 0.9375,
+          "pass_rate": 0.875
+        },
+        "candidate": {
+          "score": 0.9895833333333334,
+          "pass_rate": 0.9791666666666666
+        },
+        "gate": {
+          "passed": true,
+          "failures": []
+        }
+      },
+      {
+        "name": "matched-text-transformers-1",
+        "baseline": {
+          "score": 0.9375,
+          "pass_rate": 0.875
+        },
+        "candidate": {
+          "score": 1,
+          "pass_rate": 1
+        },
+        "gate": {
+          "passed": true,
+          "failures": []
+        }
+      },
+      {
+        "name": "matched-text-transformers-2",
+        "baseline": {
+          "score": 0.9375,
+          "pass_rate": 0.875
+        },
+        "candidate": {
+          "score": 1,
+          "pass_rate": 1
+        },
+        "gate": {
+          "passed": true,
+          "failures": []
+        }
+      },
+      {
+        "name": "matched-text-transformers-3",
+        "baseline": {
+          "score": 0.9375,
+          "pass_rate": 0.875
+        },
+        "candidate": {
+          "score": 1,
+          "pass_rate": 1
+        },
+        "gate": {
+          "passed": true,
+          "failures": []
+        }
+      }
+    ],
+    "scope": "Task-only functional comparison; no new general-regression or final-holdout certification of these experimental models."
+  }
+}

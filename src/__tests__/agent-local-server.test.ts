@@ -65,3 +65,14 @@ it.skipIf(process.platform !== "linux")("refuses an occupied port and symlink lo
   await service.start(launch, join(root, "serve.log"));
   await vi.waitFor(async () => expect(await service.status()).toMatchObject({ state: "failed", error: "Server exited (7)." }));
 });
+
+it.skipIf(process.platform !== "linux")("health probes never follow redirects away from the owned endpoint", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tt-agent-server-")); roots.push(root);
+  const port = await freePort();
+  const service = new AgentLocalServer(); servers.push(service);
+  const code = `require('http').createServer((q,r)=>{if(q.url==='/v1/models'){r.writeHead(302,{location:'/redirected'});r.end();}else{require('fs').writeFileSync(${JSON.stringify(join(root, "followed"))},'unsafe');r.end(JSON.stringify({data:[{id:'expected'}]}));}}).listen(${port},'127.0.0.1')`;
+  await service.start({ command: process.execPath, commandArgs: ["-e", code], displayCommand: [], env: process.env, url: `http://127.0.0.1:${port}`, modelName: "expected" }, join(root, "serve.log"));
+  await vi.waitFor(async () => expect((await fetch(`http://127.0.0.1:${port}/v1/models`, { redirect: "manual" })).status).toBe(302));
+  expect((await service.status()).state).toBe("starting");
+  await expect(readFile(join(root, "followed"))).rejects.toMatchObject({ code: "ENOENT" });
+});

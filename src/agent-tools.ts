@@ -669,7 +669,7 @@ export function createTunedTensorTools(
         engine,
         canonical: canonicalPipeline("local"),
         spec_settings_example: {
-          hyperparameters: { n_epochs: 1, learning_rate: 0.0001, batch_size: 4, gradient_accumulation_steps: 4,
+          hyperparameters: { n_epochs: 1, seed: 42, learning_rate: 0.0001, batch_size: 4, gradient_accumulation_steps: 4,
             lora_rank: 16, lora_alpha: 32, max_seq_length: 1024 },
           evaluation: { inference: { batchSize: 4, maxNewTokens: 32, temperature: 0 }, scoring: { mode: "exact_match" },
             maxExamples: 100, sampleSeed: 42 },

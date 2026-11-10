@@ -18,6 +18,7 @@ from transformers import (
     AutoTokenizer,
     Trainer,
     TrainingArguments,
+    set_seed,
 )
 
 from model_contract import (
@@ -256,6 +257,12 @@ def create_model_archive() -> Path:
 
 
 def run_training(rows: list[dict[str, Any]], model_source: str) -> tuple[dict[str, Any], torch.dtype]:
+    # Trainer seeds too late for randomly initialized LoRA weights.
+    seed = hp_int("seed", 42)
+    if not 0 <= seed <= 4294967295:
+        raise ValueError("Training seed must be between 0 and 4294967295")
+    set_seed(seed)
+    torch.cuda.reset_peak_memory_stats()
     model, tokenizer, dtype = create_model_and_tokenizer(model_source)
     model.config.use_cache = False
     model = apply_lora(model)
@@ -284,6 +291,8 @@ def run_training(rows: list[dict[str, Any]], model_source: str) -> tuple[dict[st
             bf16=dtype == torch.bfloat16,
             fp16=dtype == torch.float16,
             optim="adamw_torch",
+            seed=seed,
+            data_seed=seed,
             gradient_checkpointing=str(hp("gradient_checkpointing", "false")).lower() == "true",
         )
         trainer = Trainer(
@@ -300,7 +309,13 @@ def run_training(rows: list[dict[str, Any]], model_source: str) -> tuple[dict[st
         adapter_config.revision = hp("base_model_revision")
     model.save_pretrained(MODEL_DIR)
     tokenizer.save_pretrained(MODEL_DIR)
-    return result.metrics, dtype
+    return {
+        **result.metrics,
+        "seed": seed,
+        "peak_cuda_allocated_bytes": torch.cuda.max_memory_allocated(),
+        "peak_cuda_reserved_bytes": torch.cuda.max_memory_reserved(),
+        "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
+    }, dtype
 
 
 def main() -> None:

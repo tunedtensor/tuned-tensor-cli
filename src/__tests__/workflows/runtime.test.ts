@@ -416,7 +416,7 @@ describe("agent result review and task acceptance", () => {
     const { store, result } = await setupAgent();
     expect(await listProjectRuns(root)).toMatchObject({ runs: [{ id: firstRunId, status: "completed" }] });
     expect(await inspectProjectReport(root, firstRunId)).toMatchObject({
-      candidate: { score: 1 }, baseline: { score: 0 }, activation_eligible: true,
+      candidate: { score: 1, eval_split: "spec_holdout", inference_provider: "transformers" }, baseline: { score: 0 }, activation_eligible: true,
       task_quality: { configured: true, passed: true },
     });
     const action = await prepareProjectModelAction(root, "activate", firstRunId);

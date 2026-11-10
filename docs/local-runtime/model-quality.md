@@ -55,7 +55,7 @@ Foundation and decision engines retain their existing engine-specific workflows.
    and preview/run training using the existing pipeline tools.
 3. “Review my latest run. Activate it if it meets our agreed criteria.”
    `list_local_runs` discovers actual run IDs and `inspect_local_run` returns
-   verified scores, gates and a bounded set of failures. The activation proposal
+   verified scores, the recorded evaluation split, gates and a bounded set of failures. The activation proposal
    seals the selected run, report, manifest, project configuration and current
    active selection. Approval rechecks these; changes require a new proposal.
 4. “Serve this reviewed model on port 8000.” Approval starts loading; the agent
@@ -81,3 +81,18 @@ model and server IDs without asking the user to paste terminal output.
 
 An abrupt OS kill (for example SIGKILL) cannot run application cleanup; this
 session manager is not a crash-recovery supervisor.
+
+## Repeating a training experiment
+
+Adapter specs accept `hyperparameters.seed` (an integer from 0 through
+4,294,967,295; default 42). The runner seeds before loading the model and
+initializing LoRA, then uses the same seed for Trainer and data sampling.
+`training-metrics.json` records the effective seed, trainable parameter count
+and peak CUDA allocated/reserved bytes. These are PyTorch allocator peaks,
+not total device or Spark unified-memory usage. A seed improves repeatability;
+it does not guarantee identical GPU kernels across hardware or library versions.
+Keep model revision, data hashes, runtime versions and evaluation policy fixed
+when comparing backends. Never treat training speed alone as model quality.
+
+For a measured Spark comparison with Unsloth, including startup cost, memory,
+quality and repeatability limits, see the [backend review](https://github.com/tunedtensor/tuned-tensor-cli/blob/main/docs/reviews/2026-11-10-unsloth-comparison.md).

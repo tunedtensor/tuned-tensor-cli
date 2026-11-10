@@ -56,7 +56,8 @@ export async function inspectProjectReport(workspaceRoot: string, runId: string,
   if (report.candidate.eval_truncated) warnings.push("Evaluation used a subset of the held-out data.");
   if (!report.general_regression) warnings.push("No general-regression suite: activation is blocked.");
   if (!report.general_regression?.passed && report.general_regression) warnings.push(...report.general_regression.failures);
-  const compact = (r: typeof report.candidate) => ({ score: r.avg_score, pass_rate: r.pass_rate, examples: r.eval_examples_used, scoring: r.scoring_mode ?? r.scoring_method });
+  const compact = (r: typeof report.candidate) => ({ score: r.avg_score, pass_rate: r.pass_rate, examples: r.eval_examples_used,
+    eval_split: r.eval_split ?? null, inference_provider: r.inference_provider ?? null, scoring: r.scoring_mode ?? r.scoring_method });
   return { run_id: run.id, model_id: run.model_id ?? `local-${run.id}`, base_model: report.base_model,
     baseline: compact(report.baseline), candidate: compact(report.candidate),
     score_delta: report.candidate.avg_score - report.baseline.avg_score,

@@ -71,8 +71,9 @@ A separate full-pipeline repeat using the identical training recipe and the
 final-test split scored 97.92% with passing gates. It trained a **different**
 adapter; it does not erase the first model's failure or establish an unbiased
 new test result. The recipe was not tuned to that test. The variation is a reason
-to avoid selecting a lucky run: the current runner creates LoRA weights before
-Trainer initializes its default RNG seed. Neither demonstration adapter is left
+to avoid selecting a lucky run: the original runner created LoRA weights before
+Trainer initialized its default RNG seed. The follow-up fixes initialization
+and records repeatability limits in the backend comparison. Neither demonstration adapter is left
 active or serving.
 
 The separate final-test evaluation of the frozen model is supplemental evidence;
@@ -85,9 +86,9 @@ an extension needed for repeated model selection.
 
 | Priority | Work | Why |
 | --- | --- | --- |
-| P1 | Seed adapter initialization before model/LoRA creation, record seeds, compare repeated runs | Stable comparisons require controlling initialization and reporting remaining GPU nondeterminism |
+| Completed | Seed model/LoRA initialization and record seed/memory/parameter metrics | Repeated initial weights match; GPU training remains numerically nondeterministic |
 | P1 | Add a final evaluation/promotion stage for frozen artifacts | Avoid retraining merely to assess another split; keep final-test evidence separate from tuning |
-| P1 | Benchmark the current trainer against Unsloth on matched model/data/precision/context and quality | No training speedup claim is made by this UX change |
+| Completed | Compare the trainer against Unsloth on matched model/data/precision/context and quality | See [measured comparison](2026-11-10-unsloth-comparison.md); production backend stays unchanged |
 | P1 | Hardware-calibrated training and serving resource policies | Current serving defaults are bounded, not measured optimal settings |
 | P1 | Task-specific SFT, preference and verifier/reward data contracts | Structural JSONL checks cannot establish label truth, licensing or RL reward validity |
 
@@ -104,7 +105,7 @@ specs, dataset hashes, run reports/manifests, original live failures, follow-up
 results, Chinese conversation events, serving logs, holdout results and scripts.
 No release was published and no customer model was replaced.
 
-Final `npm run check` passed: TypeScript checks, 1,023 CLI tests, 209 runtime
+The initial tranche's `npm run check` passed: TypeScript checks, 1,023 CLI tests, 209 runtime
 tests, 62 adapter Python tests, 40 foundation Python tests, four decision Python
 tests, and the build; 15 platform/integration cases were explicitly skipped.
 An earlier full gate overlapping the adapter experiment failed the foundation
@@ -113,3 +114,65 @@ now reports the first subprocess's exit code/stdout/stderr and requires the
 expected checkpointed SIGTERM exit, so unrelated process failure cannot be
 misdiagnosed merely as missing resume output. The earlier transient's underlying
 cause was not established; it is retained in `check-initial-failure.log`.
+
+## Follow-up security review
+
+The diff was checked again around proposal validation, artifact verification,
+workspace scoping, process ownership, loopback binding and filesystem writes.
+Health probes now reject redirects and cannot update a replacement child's
+readiness from an earlier child's probe. Tests exercise redirect refusal,
+occupied ports, wrong identity, log symlinks and owned-process cleanup.
+
+The production npm dependency audit initially reported
+[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)
+through pi-coding-agent's minimatch. The bundled dependency now resolves to
+minimatch 11.0.3. Both the working installation and a separate installation of
+the actual npm tarball reported zero known production npm vulnerabilities;
+the installed CLI also passed version and status checks.
+
+The adapter Python inventory reported no known vulnerabilities for audited
+packages. Its CUDA-specific torch version was skipped by PyPI lookup, so
+public torch 2.13.0 was queried separately and also had no reported advisories.
+This checks published advisories, not the CUDA binary's implementation.
+
+The serving inventory reported three entries for setuptools 80.10.2, representing
+two unique advisories: a duplicated
+[source-distribution exclusion issue](https://github.com/advisories/GHSA-h35f-9h28-mq5c)
+and a [Windows legacy-wheel path issue](https://github.com/advisories/GHSA-xmj3-9gf7-h52w).
+TT's serving environment is restricted to Linux, installs with uv, and does not
+build/publish source distributions or use setuptools' legacy Windows wheel
+installer. These vulnerable paths are not exercised by the reviewed serving
+workflow. The findings are retained, not suppressed. vLLM 0.32.0 requires
+setuptools <81; moving to a fixed setuptools >=84.1 needs a compatible upstream
+runtime and separate serving certification. This review does not claim the
+entire dependency inventory is advisory-free or prove absence of all flaws.
+
+The follow-up real-provider evaluation completed three eight-scenario suites
+with all automated assertions passing. Manual review still caught an invented
+list of required fields during malformed-JSON advice and unsolicited stale
+hardware summaries. The prompt now requires the actual parse error/location
+without guessing missing fields, and excludes unsolicited cached hardware advice.
+Three focused repeats of each affected case passed and were manually checked.
+The earlier responses remain in the evidence; an automated pass is not treated
+as sufficient evidence of correct conversation content. The agent also now
+qualifies its task-policy requirements as requirements of the agent tools;
+manual `tt serve <model-id>` is not described as universally blocked.
+
+Report inspection also exposes the recorded split and inference provider. The
+agent distinguishes validation from a separate final test and does not present
+unrecorded external experiments as evidence covered by the selected report.
+
+The final Chinese Spark acceptance repeated the five-turn workflow against the
+separately recorded, passing run `d1e248c6-8657-4c55-8709-b2b1021c1993` using
+11 model requests. It identified the `prebuilt_test` split and bounded score
+improvement, approved activation and serving, confirmed exact model identity and
+health, received the expected refund-routing HTTP completion, stopped the owned
+server and rolled back to no active adapter. The port was released and no CUDA
+process remained. This reuses an existing evaluated model; it is not another
+training result or an independent new quality test.
+
+Final follow-up `npm run check` passed: TypeScript, 1,024 CLI tests, 210 runtime
+tests, 64 adapter Python tests, 40 foundation tests, four decision tests and the
+build (1,342 passed; 15 explicitly skipped). The full gate ran after GPU
+experiments and serving cleanup. `git diff --check` passed. This result is
+separate from the original tranche's gate and retained failures above.

@@ -80,16 +80,17 @@ export class AgentLocalServer {
   async status() {
     if (!this.record) return { state: "stopped", server_id: null };
     const record = this.record;
-    if (this.child) {
+    const child = this.child;
+    if (child) {
       try {
-        const response = await fetch(`${record.url}/v1/models`, { signal: AbortSignal.timeout(2000) });
+        const response = await fetch(`${record.url}/v1/models`, { signal: AbortSignal.timeout(2000), redirect: "error" });
         const body = await response.json() as { data?: { id?: string }[] };
-        const health = await fetch(`${record.url}/health`, { signal: AbortSignal.timeout(2000) });
-        if (this.child && response.ok && health.ok && body.data?.some(model => model.id === record.model_id)) record.state = "ready";
-        else if (this.child) record.state = "starting";
-      } catch { if (this.child) record.state = "starting"; }
+        const health = await fetch(`${record.url}/health`, { signal: AbortSignal.timeout(2000), redirect: "error" });
+        if (this.child === child && response.ok && health.ok && body.data?.some(model => model.id === record.model_id)) record.state = "ready";
+        else if (this.child === child) record.state = "starting";
+      } catch { if (this.child === child) record.state = "starting"; }
     }
-    return { ...record };
+    return { ...this.record };
   }
   async stop(serverId: string) {
     if (!this.record || this.record.server_id !== serverId) throw new Error("Server selection changed; inspect the current service before stopping it.");
