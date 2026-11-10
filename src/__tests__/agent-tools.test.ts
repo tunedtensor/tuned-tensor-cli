@@ -698,7 +698,8 @@ exit 1
         "prepare_create_local_spec",
         "prepare_pipeline_run",
         "prepare_download",
-      ]);
+              "list_local_runs", "inspect_local_run", "prepare_activate_local_model", "prepare_rollback_local_model", "assess_local_dataset",
+]);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }

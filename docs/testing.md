@@ -220,15 +220,14 @@ large-workload benchmarks; repeated model staging dominated elapsed time.
 
 ## Current gaps and extension rule
 
-The local agent can prepare dry-run previews, start approved real training in the
-background after a matching dry-run, and inspect background-run logs and outcome
-metrics. It currently has no full local report-reading, activation, or serving
-tools; those operations require explicit shell commands. Cloud report tools are
-available when signed in, but this suite exercises the local workflow with cloud
-tools disabled. The live serving handoff case documents that limitation; it does
-not certify the full chat-to-serving promise.
-When those tools ship, replace the handoff with a multi-turn scenario that
-assesses an actual report and serves the exact reviewed artifact.
+The local agent can review adapter reports, prepare activation/rollback and
+start/stop a session-owned local server. See [model quality](local-runtime/model-quality.md).
+The fresh-project serving scenario checks that an empty run list produces no
+invented model or serving proposal. Full chat-to-serving acceptance still needs
+an actual evaluated artifact and a CUDA host; it is not established by that
+empty-project scenario. Deterministic tests cover task regression, insufficient
+held-out samples, changed policy/report/spec, approval dispatch, read-only listing,
+port conflicts, served identity, child failure and process cleanup.
 
 General-regression thresholds protect activation when a regression suite is
 configured. Explicit serving by model ID is not an automatic model-quality

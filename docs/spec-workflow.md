@@ -233,3 +233,12 @@ Splitting a multi-gigabyte master does not remove that training-loader limit.
 Do not treat a successful split preview as proof that an arbitrarily large split
 can train; streaming training ingestion or bounded dataset selection is separate
 work. Use `tt validate` on the saved spec to validate the actual training inputs.
+
+## Task acceptance and conversational model use
+
+Adapter specs can set `evaluation.taskQuality` before training. The report records
+the criteria; agent activation and serving require passing task and general
+regression checks, an unchanged policy, and verified artifacts. The agent can
+inspect local datasets and completed runs directly, then prepare activation,
+serving, stopping and rollback. See [model quality](local-runtime/model-quality.md)
+for policy fields, lifecycle behavior and limits.

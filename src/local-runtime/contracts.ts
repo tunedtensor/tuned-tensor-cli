@@ -1,3 +1,4 @@
+import { taskQualityPolicySchema, taskQualityGateSchema } from "./task-quality.js";
 import { z } from "zod";
 import { pipelineDocumentSchema, isFoundationPipeline, parsePipeline } from "@tuned-tensor/pipeline-contract";
 import { DEFAULT_ARTIFACT_ROOT } from "../paths.js";
@@ -186,6 +187,7 @@ export const datasetSourceSchema = z.object({
 
 export const fineTuneHyperparametersSchema = z.object({
   n_epochs: z.number().int().min(1).max(20).default(1),
+  seed: z.number().int().min(0).max(4294967295).optional(),
   learning_rate: z.number().positive().optional(),
   batch_size: z.number().int().min(1).optional(),
   lora_rank: z.number().int().min(1).optional(),
@@ -384,6 +386,7 @@ export const runReportSchema = z.object({
   baseline: evalReportSchema,
   candidate: evalReportSchema,
   comparison: comparisonReportSchema,
+  task_quality: taskQualityGateSchema.optional(),
   general_regression: z.object({
     dataset_uri: z.string(),
     dataset_sha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -454,6 +457,7 @@ const evaluationConfigSchema = z.object({
   maxExamples: z.number().int().min(1).optional(),
   sampleSeed: z.number().int().optional(),
   baselineCache: z.boolean().default(true),
+  taskQuality: taskQualityPolicySchema.optional(),
   generalRegression: z.object({
     dataset: z.string().min(1),
     systemPrompt: z.string().optional(),
@@ -583,6 +587,9 @@ export const localBehaviorSpecFileSchema = z.union([
   localDecisionSpecFileSchema,
   localAdapterSpecFileSchema,
 ]).superRefine((spec, ctx) => {
+  if (spec.engine === "decision" && spec.evaluation?.taskQuality) {
+    ctx.addIssue({ code: "custom", path: ["evaluation", "taskQuality"], message: "Task quality acceptance currently supports adapter models only." });
+  }
   if (spec.pipeline && isFoundationPipeline(parsePipeline(spec.pipeline)) !== (spec.engine === "foundation")) {
     ctx.addIssue({ code: "custom", path: ["pipeline"], message: "Pipeline engine must match the spec engine." });
   }

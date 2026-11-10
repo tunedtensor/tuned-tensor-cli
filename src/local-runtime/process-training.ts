@@ -28,6 +28,7 @@ export function buildTrainingHyperparameters(
     model_loader: model.modelLoader,
     ...(options.baseModelRevision ? { base_model_revision: options.baseModelRevision } : {}),
     n_epochs: String(hyper.n_epochs),
+    seed: String(hyper.seed ?? 42),
     learning_rate: String(hyper.learning_rate ?? model.defaultLearningRate),
     per_device_train_batch_size: String(hyper.batch_size ?? model.defaultPerDeviceBatchSize),
     gradient_accumulation_steps: String(

@@ -366,7 +366,7 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
   }
 
   async function listRunRecords(): Promise<LocalRunState[]> {
-    await ensure();
+    if (!await hardenExistingLocalStore(resolvedRoot)) return [];
     const records: LocalRunState[] = [];
     for (const id of await childDirectoryNames(paths.runsDir)) {
       const path = runStatePath(id);
@@ -376,7 +376,7 @@ export function createLocalStore(root = defaultLocalHome()): LocalStore {
   }
 
   async function listModelRecords(): Promise<LocalModelRecord[]> {
-    await ensure();
+    if (!await hardenExistingLocalStore(resolvedRoot)) return [];
     const records: LocalModelRecord[] = [];
     for (const id of await childDirectoryNames(paths.modelsDir)) {
       const path = modelPath(id);

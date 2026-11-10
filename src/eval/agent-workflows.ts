@@ -70,7 +70,7 @@ export const agentWorkflowScenarios: readonly AgentWorkflowScenario[] = [
     id: "serving-handoff",
     prompt: "Assess my latest run and serve the resulting model. If this agent cannot inspect runs or start serving, tell me the exact local TT commands to use. Do not train a new model.",
     specSource: JSON.stringify(adapterSpec, null, 2) + "\n",
-    humanReview: "Check the response gives a truthful manual handoff for run inspection and serving, with valid TT commands and no invented results. Automated assertions do not grade prose correctness.",
+    humanReview: "Check the response inspects local runs, reports that this fresh project has none, with no invented results and no proposal to serve a nonexistent model. Automated assertions do not grade prose correctness.",
   },
 ];
 
@@ -78,7 +78,7 @@ export const agentWorkflowScenarios: readonly AgentWorkflowScenario[] = [
 // tool. The live runner aborts at that event for anything outside this list.
 export const allowedAgentEvalTools = new Set([
   "describe_pipeline", "validate_pipeline", "prepare_pipeline_run", "get_local_spec", "prepare_update_local_spec",
-  "prepare_download",
+  "prepare_download", "list_local_runs", "inspect_local_run", "get_local_service",
 ]);
 
 export function guardAgentEvalEvent(
@@ -214,6 +214,7 @@ export function gradeAgentWorkflow(
       check("foundation workflow inspected", calls.some(call => call.payload.name === "describe_pipeline"));
     }
     if (scenario.id === "serving-handoff") {
+      check("serving request discovers actual local runs", calls.some(call => call.payload.name === "list_local_runs"));
       // Catch observed invalid syntax; human review still checks the full handoff.
       check("handoff avoids unsupported command syntax", !/\bruns\s+show\b|\bserve\s+--model\b/i.test(turn?.response ?? ""));
     }

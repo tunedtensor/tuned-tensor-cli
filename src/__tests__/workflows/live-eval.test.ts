@@ -237,12 +237,14 @@ describe("live agent workflow grading", () => {
     expect(failedChecks("foundation-dry-run", evidence)).toContain("spec training settings preserved");
   });
 
-  it("flags serving prose for review and never equates it with actual serving", () => {
+  it("requires run discovery and flags serving prose for review", () => {
     const evidence = preparedEvidence();
     evidence.turn!.status = "completed";
     evidence.turn!.actions = [];
     evidence.events = [];
     evidence.persistedActions = [];
+    expect(failedChecks("serving-handoff", evidence)).toContain("serving request discovers actual local runs");
+    evidence.events = [{ type: "tool_call", payload: { name: "list_local_runs", toolUseId: "list" } }];
     expect(failedChecks("serving-handoff", evidence)).toEqual([]);
     expect(scenario("serving-handoff").humanReview).toMatch(/no invented results/);
   });

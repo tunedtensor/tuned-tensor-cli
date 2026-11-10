@@ -1,3 +1,4 @@
+import { taskQualityForReport } from "./task-quality.js";
 import { randomUUID } from "node:crypto";
 import { appendFile, chmod, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -85,6 +86,8 @@ async function assertModelCanActivate(
       + (report.general_regression.failures.join(" ") || "regression budget exceeded"),
     );
   }
+  const task = taskQualityForReport(report);
+  if (!task.passed) throw new Error(`Model ${model.id} failed task quality: ${task.failures.join(" ")}`);
   return model;
 }
 

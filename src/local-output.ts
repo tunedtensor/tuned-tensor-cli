@@ -101,6 +101,14 @@ function gateFrom(value: unknown): Record<string, unknown> | undefined {
 }
 
 function renderGate(value: unknown): void {
+  const task = record(record(value)?.task_quality);
+  if (task?.passed === true) printSuccess("Task quality gate passed");
+  else if (task) {
+    printWarning("The local run completed, but the task quality gate failed; activation is blocked.");
+    for (const failure of Array.isArray(task.failures) ? task.failures : []) {
+      if (typeof failure === "string") printWarning(failure);
+    }
+  }
   const gate = gateFrom(value);
   if (!gate) {
     printWarning(

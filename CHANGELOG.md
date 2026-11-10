@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-10
+
+### Added
+
+- The local agent can inspect dataset structure, list real training runs, read
+  verified evaluation reports, and prepare model activation, local serving,
+  stopping and rollback through the approval flow. (#182)
+- Adapter task acceptance criteria cover score, pass rate, evaluated sample
+  count and non-regression against the base model. Activation through the agent
+  requires both task-quality and general-regression evidence. (#182)
+- Dataset assessment reports duplicate examples, conflicting answers and
+  train/evaluation overlap. Training records the configured seed, trainable
+  parameter count and peak CUDA allocator memory. (#182)
+
+### Fixed
+
+- Seed model and LoRA initialization before training, rather than only seeding
+  Trainer. GPU training can still produce numerically different results. (#182)
+- Restore the exact previous model when projects explicitly share a model store,
+  while keeping ordinary model inspection and activation project-scoped. (#182)
+- Improve empty-project and malformed-JSON guidance, distinguish validation
+  from final-test evidence, and preserve conversation text around tool calls. (#182)
+
+### Security
+
+- Invalidate approvals when reviewed specs, reports, manifests or active model
+  selections change. Serving checks health and exact model identity, rejects
+  health redirects and symlink logs, and cleans up its owned process group. (#182)
+- Update bundled minimatch to 11.0.3 to address its security advisory. (#182)
+
+### Notes
+
+- Spark acceptance and the matched Unsloth comparison are recorded under
+  [docs/reviews](docs/reviews/2026-11-10-agent-quality.md). The production training
+  backend remains unchanged; the small benchmark does not establish a general
+  performance or model-quality ranking. (#182)
+- Dataset checks are structural. A separate final evaluation/promotion stage
+  and task-specific preference/reward data contracts remain follow-up work.
+  The review documents two upstream setuptools advisories whose affected paths
+  are not used by the reviewed Linux serving workflow. (#182)
+
 ## [0.28.1] - 2026-11-07
 
 ### Security

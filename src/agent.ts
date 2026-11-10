@@ -138,6 +138,14 @@ function diffStyle(line: string): (text: string) => string {
 
 function approvalQuestion(action: AgentAction): string {
   switch (action.operation) {
+    case "serve_local_model":
+      return "Start this model server on your GPU?";
+    case "stop_local_service":
+      return "Stop this model server?";
+    case "activate_local_model":
+      return "Activate this reviewed model?";
+    case "rollback_local_model":
+      return "Restore the previous model selection?";
     case "update_local_spec":
       return "Save this spec edit?";
     case "create_local_spec":
@@ -166,6 +174,14 @@ function approvalQuestion(action: AgentAction): string {
 
 function completionMessage(action: AgentAction | null): string {
   switch (action?.operation) {
+    case "serve_local_model":
+      return "Model server loading started. Ask for service status to verify readiness.";
+    case "stop_local_service":
+      return "Model server stopped.";
+    case "activate_local_model":
+      return "Reviewed model activated. This changes the active selection; no server was started.";
+    case "rollback_local_model":
+      return "Previous model selection restored. Running servers are unchanged.";
     case "update_local_spec":
       return "Spec edit saved.";
     case "create_local_spec":

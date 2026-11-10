@@ -261,3 +261,53 @@ export async function executeDatasetSplit(workspaceRoot: string, input: Record<s
     if (reserved) await rmdir(p.target.path).catch(() => {});
   }
 }
+
+/** Full structural scan; deliberately makes no claim about semantic answer quality. */
+export async function assessLocalDataset(workspaceRoot: string, input: { training: string; evaluation?: string }, signal?: AbortSignal) {
+  const identities = new Map<string, string>();
+  const lengths: number[] = [];
+  const labels = new Map<string, number>();
+  let duplicates = 0, conflicts = 0, evaluationDuplicates = 0, overlap = 0;
+  const training = await sourceLocation(workspaceRoot, input.training);
+  const train = await scan(training.path, (row) => {
+    if (lengths.length >= 1_000_000) throw new Error("Dataset assessment supports up to 1,000,000 rows per file; assess smaller shards.");
+    const prompt = digest(datasetInputIdentity(row.messages.at(-2)!.content));
+    const answer = row.messages.at(-1)!.content;
+    const answerHash = digest(answer);
+    const prior = identities.get(prompt);
+    if (prior !== undefined) { duplicates++; if (prior !== answerHash) conflicts++; }
+    else identities.set(prompt, answerHash);
+    lengths.push(row.messages.reduce((sum, message) => sum + message.content.length, 0));
+    if (answer.length <= 80 && (labels.has(answer) || labels.size < 100)) labels.set(answer, (labels.get(answer) ?? 0) + 1);
+  }, signal, training.expectedDigest);
+  let evaluation: Awaited<ReturnType<typeof scan>> | undefined;
+  if (input.evaluation) {
+    const heldout = await sourceLocation(workspaceRoot, input.evaluation);
+    const seen = new Set<string>();
+    let evaluatedRows = 0;
+    evaluation = await scan(heldout.path, (row) => {
+      if (++evaluatedRows > 1_000_000) throw new Error("Evaluation assessment supports up to 1,000,000 rows per file; assess smaller shards.");
+      const prompt = digest(datasetInputIdentity(row.messages.at(-2)!.content));
+      if (seen.has(prompt)) evaluationDuplicates++;
+      seen.add(prompt);
+      if (identities.has(prompt)) overlap++;
+    }, signal, heldout.expectedDigest);
+  }
+  lengths.sort((a, b) => a - b);
+  const warnings: string[] = [];
+  if (conflicts) warnings.push(`${conflicts} repeated training prompts have conflicting answers; review them before training.`);
+  if (duplicates) warnings.push(`${duplicates} repeated training prompts can over-weight those examples.`);
+  if (!evaluation) warnings.push("No held-out file was assessed; this is not evidence that a model will generalize.");
+  if (evaluation && evaluation.rows < 20) warnings.push("Fewer than 20 evaluation rows: useful for a smoke test, weak evidence of business quality.");
+  if (overlap) warnings.push(`${overlap} evaluation rows overlap training; use independent held-out data.`);
+  if (evaluationDuplicates) warnings.push(`${evaluationDuplicates} evaluation prompts repeat; scores would over-weight them.`);
+  return {
+    training: { file: training.display, ...train, unique_prompts: identities.size, duplicate_prompts: duplicates, conflicting_answers: conflicts },
+    evaluation: evaluation ? { file: input.evaluation, ...evaluation, duplicate_prompts: evaluationDuplicates, training_overlap: overlap } : null,
+    text_lengths_characters: { median: lengths[Math.floor(lengths.length / 2)], p95: lengths[Math.min(lengths.length - 1, Math.floor(lengths.length * .95))], max: lengths.at(-1) },
+    frequent_short_answers: [...labels].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([answer, rows]) => ({ answer, rows })),
+    structural_checks_passed: conflicts === 0 && overlap === 0 && evaluationDuplicates === 0,
+    warnings,
+    limitations: "Checks normalized exact prompts, not semantic duplicates. Lengths are characters, not tokens. Short answers are a bounded frequency sample, not inferred class labels. Source rights, factual accuracy, private data and business coverage still need review. No files changed.",
+  };
+}

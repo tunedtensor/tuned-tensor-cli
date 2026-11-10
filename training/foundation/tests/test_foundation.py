@@ -716,8 +716,8 @@ class FoundationPretrainReliabilityTests(unittest.TestCase):
                     first.send_signal(__import__("signal").SIGTERM)
                     break
                 __import__("time").sleep(0.05)
-            first.communicate(timeout=30)
-            self.assertNotEqual(first.returncode, 0)
+            first_stdout, first_stderr = first.communicate(timeout=30)
+            self.assertEqual(first.returncode, 143, f"Expected checkpointed SIGTERM exit; stdout={first_stdout} stderr={first_stderr}")
             second = subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
             self.assertEqual(second.returncode, 0, second.stderr)
             self.assertIn('"event": "resumed"', second.stdout)

@@ -887,3 +887,10 @@ authenticated CPU endpoint, with per-request prepaid billing. See the
 [hosting guide](docs/local-runtime/hosting.md) for creation, inference keys,
 retry-safe requests, costs and deletion. Hosting requires the new server API;
 GPU and adapter checkpoints remain outside this serverless flow.
+
+### Review and use a customized model
+
+The local agent can inspect adapter datasets for conflicts/overlap, read actual
+run reports, and prepare activation, local serving, stopping and rollback.
+Agree `evaluation.taskQuality` before training; task and general-regression
+checks protect the reviewed selection. See [model quality and agent workflow](docs/local-runtime/model-quality.md).
