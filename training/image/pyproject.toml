@@ -1,0 +1,26 @@
+[project]
+name = "tuned-tensor-image-runner"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "diffusers",
+  "peft>=0.20.0",
+  "torch>=2.11.0",
+  "torchvision>=0.26.0",
+  "transformers>=5.15.0",
+  "accelerate>=1.0.0",
+  "pillow>=12.0.0",
+]
+
+[tool.uv.sources]
+diffusers = { git = "https://github.com/huggingface/diffusers.git", rev = "7475e2229773beb1f77b73b8ba9ca94227b5264e" }
+torchvision = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
+torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv]
+package = false

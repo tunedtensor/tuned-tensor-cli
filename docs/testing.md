@@ -253,3 +253,19 @@ samples its actual CPU/RAM/OS, handles absent optional programs, and persists
 and reloads a hardware report. These checks do not certify CUDA/MPS training
 on those runners. Real model training/evaluation remains a separate validation;
 never turn a simulated accelerator fixture into a hardware support claim.
+
+## Experimental H3-Image runner
+
+The image runtime has a separate locked environment and is exercised by
+`npm run test:image` (also included in `npm test`). Its CPU tests instantiate
+the real Diffusers H3-Image transformer with tiny synthetic weights. Set
+`TT_IMAGE_TEST_DEVICE=cuda` to exercise BF16 base weights, FP32 adapter weights
+and the training/report/export path on an actual CUDA device. The full runner
+test substitutes pretrained encoding with small cached tensors; it is not a
+published-weight acceptance run.
+
+Before treating image training as production ready, complete a pinned
+published-weight run, reload the adapter into a fresh full pipeline, and compare
+fixed-seed baseline/candidate images at the intended output size. The six-head
+held-out velocity loss is a diagnostic, not an image-quality score. See the
+[image guide](local-runtime/image.md) for the supported scope and input format.
