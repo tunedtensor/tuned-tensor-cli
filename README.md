@@ -26,6 +26,10 @@ for project creation, AWS quota and SSH setup, a preview, training, result
 verification, and shutdown. You still run `tt pipeline run` on your laptop;
 `tt cloud` is for TT account records, not user-owned GPU execution.
 
+Experimental H3-Image captioned-image LoRA training is available through
+`tt pipeline image`; see the [image training guide](docs/local-runtime/image.md)
+for the pinned spec, local GPU requirements and validation limits.
+
 ## Unified commands
 
 Local workflows remain the default: `tt pipeline run`, `tt runs list`,

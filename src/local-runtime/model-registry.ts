@@ -147,6 +147,9 @@ export function resolveTrainingModel(modelId: string): TrainingModel {
   const model = findCertifiedTrainingModel(modelId);
   if (model) return model;
   const id = modelId.trim();
+  if (id.toLowerCase() === "minimaxai/minimax-h3-image") {
+    throw new Error("MiniMax-H3-Image is a diffusion model. Use `tt pipeline image --spec <image-spec.json>` for experimental image LoRA training.");
+  }
   if (HUGGING_FACE_REPO_ID.test(id)) return uncertifiedTrainingModel(id);
   throw new Error(
     `Unsupported base model "${modelId}". Use a certified model (${TRAINING_MODELS.map((item) => item.id).join(", ")}) `

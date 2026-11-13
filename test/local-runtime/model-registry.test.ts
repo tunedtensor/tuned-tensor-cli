@@ -338,3 +338,10 @@ test("an uncertified spec is valid only once it pins base_model_revision", async
   });
   assert.equal(pinned.success, true, JSON.stringify(pinned.error?.issues));
 });
+
+test("H3-Image is directed to the image pipeline before causal-LM loading", () => {
+  assert.throws(
+    () => resolveTrainingModel(" minimaxai/minimax-h3-image "),
+    /tt pipeline image/,
+  );
+});

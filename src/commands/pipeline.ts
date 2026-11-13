@@ -1,3 +1,4 @@
+import { registerImagePipelineCommand } from "./image-pipeline.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { Command } from "commander";
@@ -155,6 +156,8 @@ function printDecisionSummary(result: Awaited<ReturnType<typeof runDecisionPipel
 
 export function registerPipelineCommands(parent: Command): void {
   const pipeline = parent.command("pipeline").description("Create, validate, dry-run, run, and start background runs of ordered pipeline recipes");
+
+  registerImagePipelineCommand(pipeline);
 
   pipeline.command("init")
     .description("Write a canonical v1 pipeline recipe")
