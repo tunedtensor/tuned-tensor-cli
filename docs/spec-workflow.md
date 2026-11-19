@@ -137,8 +137,8 @@ downloads them (the agent's `prepare_download` runs it after approval), and `tt 
 adopt them with a spec edit afterwards. Spec downloads and the first real run
 write `tunedtensor.lock.json` beside the spec, which pins the dataset and
 base-model commit and file digests; later runs stop when they disagree with it.
-Runs record the resolved commit and file digests in the report. See the README
-section "Train on a Hugging Face dataset".
+Runs record the resolved commit and file digests in the report. See
+[Train on a Hugging Face dataset](datasets.md#train-on-a-hugging-face-dataset).
 
 In the agent, ask which datasets are downloaded, then ask to use one in the
 spec. `list_local_datasets` finds TT's local download records;

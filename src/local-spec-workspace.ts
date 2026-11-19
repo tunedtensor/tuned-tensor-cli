@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, type BigIntStats } from "node:fs";
 import { lstat, open, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Type, type Static } from "typebox";
@@ -106,13 +106,22 @@ export async function canonicalWorkspace(workspaceRoot: string): Promise<string>
 }
 
 export async function fingerprintWorkspace(canonicalRoot: string): Promise<string> {
-  return fingerprintWorkspaceInfo(await lstat(canonicalRoot));
+  return fingerprintWorkspaceInfo(await lstat(canonicalRoot, { bigint: true }));
 }
 
-function fingerprintWorkspaceInfo(
-  info: { dev: number | bigint; ino: number | bigint; birthtimeMs: number },
+const NS_PER_SECOND = 1_000_000_000n;
+
+// BigInt stats keep dev and ino exact: Windows file IDs exceed 2^53, where
+// number stats round neighbouring directories to the same inode. Birthtime is
+// rebuilt as Node's millisecond number, so identities that were already exact
+// hash as they did in earlier releases and pending approvals stay valid.
+// Exported for tests.
+export function fingerprintWorkspaceInfo(
+  info: Pick<BigIntStats, "dev" | "ino" | "birthtimeNs">,
 ): string {
-  const identity = `${info.dev}:${info.ino}:${info.birthtimeMs}`;
+  const birthtimeMs = Number(info.birthtimeNs / NS_PER_SECOND) * 1000
+    + Number(info.birthtimeNs % NS_PER_SECOND) / 1_000_000;
+  const identity = `${info.dev}:${info.ino}:${birthtimeMs}`;
   return createHash("sha256").update(identity).digest("hex");
 }
 
@@ -176,7 +185,7 @@ export async function createLocalSpecProject(
       canonicalRoot,
       constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
     );
-    if ((windows ? await fingerprintWorkspace(canonicalRoot) : fingerprintWorkspaceInfo(await workspaceHandle!.stat())) !== expectedWorkspaceFingerprint) {
+    if ((windows ? await fingerprintWorkspace(canonicalRoot) : fingerprintWorkspaceInfo(await workspaceHandle!.stat({ bigint: true }))) !== expectedWorkspaceFingerprint) {
       throw new LocalSpecMutationError(
         "The local workspace changed after this action was prepared; return to the original workspace and prepare it again.",
         "not_applied",
@@ -204,7 +213,7 @@ export async function createLocalSpecProject(
       flag: "wx",
       mode: 0o600,
     });
-    const finalWorkspaceInfo = await lstat(canonicalRoot);
+    const finalWorkspaceInfo = await lstat(canonicalRoot, { bigint: true });
     if (
       finalWorkspaceInfo.isSymbolicLink()
       || !finalWorkspaceInfo.isDirectory()

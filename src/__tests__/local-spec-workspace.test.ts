@@ -1,5 +1,6 @@
 import { symlinkSync } from "./platform-fixtures.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,6 +8,8 @@ import { join } from "node:path";
 import { Value } from "typebox/value";
 import {
   createLocalSpecProject,
+  fingerprintWorkspace,
+  fingerprintWorkspaceInfo,
   LocalProjectSpecSchema,
   prepareLocalSpecProject,
 } from "../local-spec-workspace.js";
@@ -35,6 +38,41 @@ afterEach(() => {
 
 describe("local spec workspace", () => {
   const specPath = () => join(workspace, "tunedtensor.json");
+
+  it("gives sibling directories created back to back distinct fingerprints", async () => {
+    // Windows file IDs exceed 2^53 and its file times are coarse, so a lossy
+    // inode once made neighbouring workspaces look identical.
+    const directories = Array.from({ length: 8 }, (_, index) => {
+      const directory = join(workspace, `sibling-${index}`);
+      mkdirSync(directory);
+      return directory;
+    });
+    const fingerprints = await Promise.all(directories.map(fingerprintWorkspace));
+    expect(new Set(fingerprints).size).toBe(directories.length);
+    expect(await fingerprintWorkspace(directories[0]!)).toBe(fingerprints[0]);
+  });
+
+  it("keeps file IDs above 2^53 distinct", () => {
+    const stats = { dev: 7n, birthtimeNs: 1_795_044_330_425_801_800n };
+    const ino = 2n ** 60n + 1n;
+    // These IDs round to the same JavaScript number.
+    expect(Number(ino)).toBe(Number(ino + 1n));
+    expect(fingerprintWorkspaceInfo({ ...stats, ino }))
+      .not.toBe(fingerprintWorkspaceInfo({ ...stats, ino: ino + 1n }));
+  });
+
+  it("keeps the fingerprint format of earlier releases where it was already exact", async () => {
+    const legacy = lstatSync(workspace);
+    const exact = lstatSync(workspace, { bigint: true });
+    const hash = (identity: string) => createHash("sha256").update(identity).digest("hex");
+    // Number stats were exact for small IDs (Linux, macOS); Windows NTFS IDs
+    // often exceed 2^53, where only the BigInt digits identify the folder.
+    const legacyWasExact = Number.isSafeInteger(legacy.ino) && Number.isSafeInteger(legacy.dev);
+    const expected = legacyWasExact
+      ? hash(`${legacy.dev}:${legacy.ino}:${legacy.birthtimeMs}`)
+      : hash(`${exact.dev}:${exact.ino}:${legacy.birthtimeMs}`);
+    expect(await fingerprintWorkspace(workspace)).toBe(expected);
+  });
 
   it("validates foundation execution settings before proposing a new spec", async () => {
     const { base_model: _model, ...behavior } = spec;

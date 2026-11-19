@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Workspace fingerprints now use exact file IDs. On Windows, NTFS file IDs
+  above 2^53 were rounded, so two neighbouring folders could share a
+  fingerprint and an approval prepared for one folder could be accepted in
+  another. Fingerprints that were already exact are unchanged; on Windows,
+  actions prepared by an earlier release may need to be prepared again.
+- Native Windows tests allow 120 seconds per test, so slower ARM64 runners no
+  longer time out while PowerShell workspace transactions start.
+
+### Changed
+
+- The README is now a short introduction with a quick start and examples. The
+  detailed reference moved to guides in `docs/`.
+
 ## [0.30.0] - 2026-11-19
 
 ### Removed
