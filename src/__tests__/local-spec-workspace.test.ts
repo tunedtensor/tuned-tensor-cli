@@ -63,10 +63,14 @@ describe("local spec workspace", () => {
 
   it("keeps the fingerprint format of earlier releases where it was already exact", async () => {
     const legacy = lstatSync(workspace);
-    expect(Number.isSafeInteger(legacy.ino)).toBe(true);
-    const expected = createHash("sha256")
-      .update(`${legacy.dev}:${legacy.ino}:${legacy.birthtimeMs}`)
-      .digest("hex");
+    const exact = lstatSync(workspace, { bigint: true });
+    const hash = (identity: string) => createHash("sha256").update(identity).digest("hex");
+    // Number stats were exact for small IDs (Linux, macOS); Windows NTFS IDs
+    // often exceed 2^53, where only the BigInt digits identify the folder.
+    const legacyWasExact = Number.isSafeInteger(legacy.ino) && Number.isSafeInteger(legacy.dev);
+    const expected = legacyWasExact
+      ? hash(`${legacy.dev}:${legacy.ino}:${legacy.birthtimeMs}`)
+      : hash(`${exact.dev}:${exact.ino}:${legacy.birthtimeMs}`);
     expect(await fingerprintWorkspace(workspace)).toBe(expected);
   });
 
