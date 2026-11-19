@@ -39,6 +39,8 @@ Free and open source (Apache-2.0). No account, sign-in, hosted service or usage 
 | **Decision** | A small classifier-style model that picks a label, answers yes/no or gives a score, with a probability per label | CPU, Apple MPS or CUDA |
 | **Foundation** | A small GPT and tokenizer trained from scratch, for learning and experiments | NVIDIA CUDA, local or AWS |
 
+See [hardware and platform support](docs/hardware.md) for what each platform can run.
+
 ## Install
 
 **macOS or Linux:**
@@ -151,7 +153,8 @@ tt init --name "Ticket router" --engine decision
 tt pipeline run --spec tunedtensor.json
 ```
 
-This trains on CPU or Apple Silicon, no NVIDIA GPU needed. See [decision models](docs/local-runtime/decision.md) and the
+It trains on CPU or Apple Silicon, with no NVIDIA GPU needed, on
+[supported platforms](docs/hardware.md). See [decision models](docs/local-runtime/decision.md) and the
 [card-triage example](examples/single-spec/decision/tunedtensor.json).
 
 ### Train on your own AWS GPU

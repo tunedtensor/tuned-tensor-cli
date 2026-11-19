@@ -109,12 +109,19 @@ export async function fingerprintWorkspace(canonicalRoot: string): Promise<strin
   return fingerprintWorkspaceInfo(await lstat(canonicalRoot, { bigint: true }));
 }
 
-// BigInt stats keep the identity exact. Windows file IDs exceed 2^53, so
-// number stats can round two different directories to the same inode.
-function fingerprintWorkspaceInfo(
+const NS_PER_SECOND = 1_000_000_000n;
+
+// BigInt stats keep dev and ino exact: Windows file IDs exceed 2^53, where
+// number stats round neighbouring directories to the same inode. Birthtime is
+// rebuilt as Node's millisecond number, so identities that were already exact
+// hash as they did in earlier releases and pending approvals stay valid.
+// Exported for tests.
+export function fingerprintWorkspaceInfo(
   info: Pick<BigIntStats, "dev" | "ino" | "birthtimeNs">,
 ): string {
-  const identity = `${info.dev}:${info.ino}:${info.birthtimeNs}`;
+  const birthtimeMs = Number(info.birthtimeNs / NS_PER_SECOND) * 1000
+    + Number(info.birthtimeNs % NS_PER_SECOND) / 1_000_000;
+  const identity = `${info.dev}:${info.ino}:${birthtimeMs}`;
   return createHash("sha256").update(identity).digest("hex");
 }
 

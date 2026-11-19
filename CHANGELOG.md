@@ -7,7 +7,8 @@
 - Workspace fingerprints now use exact file IDs. On Windows, NTFS file IDs
   above 2^53 were rounded, so two neighbouring folders could share a
   fingerprint and an approval prepared for one folder could be accepted in
-  another. Actions prepared by an earlier release must be prepared again.
+  another. Fingerprints that were already exact are unchanged; on Windows,
+  actions prepared by an earlier release may need to be prepared again.
 - Native Windows tests allow 120 seconds per test, so slower ARM64 runners no
   longer time out while PowerShell workspace transactions start.
 

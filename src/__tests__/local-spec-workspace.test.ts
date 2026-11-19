@@ -1,5 +1,6 @@
 import { symlinkSync } from "./platform-fixtures.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,6 +9,7 @@ import { Value } from "typebox/value";
 import {
   createLocalSpecProject,
   fingerprintWorkspace,
+  fingerprintWorkspaceInfo,
   LocalProjectSpecSchema,
   prepareLocalSpecProject,
 } from "../local-spec-workspace.js";
@@ -48,6 +50,24 @@ describe("local spec workspace", () => {
     const fingerprints = await Promise.all(directories.map(fingerprintWorkspace));
     expect(new Set(fingerprints).size).toBe(directories.length);
     expect(await fingerprintWorkspace(directories[0]!)).toBe(fingerprints[0]);
+  });
+
+  it("keeps file IDs above 2^53 distinct", () => {
+    const stats = { dev: 7n, birthtimeNs: 1_795_044_330_425_801_800n };
+    const ino = 2n ** 60n + 1n;
+    // These IDs round to the same JavaScript number.
+    expect(Number(ino)).toBe(Number(ino + 1n));
+    expect(fingerprintWorkspaceInfo({ ...stats, ino }))
+      .not.toBe(fingerprintWorkspaceInfo({ ...stats, ino: ino + 1n }));
+  });
+
+  it("keeps the fingerprint format of earlier releases where it was already exact", async () => {
+    const legacy = lstatSync(workspace);
+    expect(Number.isSafeInteger(legacy.ino)).toBe(true);
+    const expected = createHash("sha256")
+      .update(`${legacy.dev}:${legacy.ino}:${legacy.birthtimeMs}`)
+      .digest("hex");
+    expect(await fingerprintWorkspace(workspace)).toBe(expected);
   });
 
   it("validates foundation execution settings before proposing a new spec", async () => {
