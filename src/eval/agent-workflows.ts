@@ -50,6 +50,7 @@ export const agentWorkflowScenarios: readonly AgentWorkflowScenario[] = [
     id: "invalid-spec",
     prompt: "Dry-run the workflow for ./tunedtensor.json. Use the existing file; do not replace it or create a new project.",
     specSource: '{ "name": "Broken spec", ',
+    humanReview: "Verify the response reports the actual JSON error, refuses the dry-run, and does not claim a repair or completed run.",
   },
   {
     id: "dataset-handoff",
@@ -221,9 +222,14 @@ export function gradeAgentWorkflow(
     if (scenario.id === "invalid-spec") {
       const prepareIds = calls.filter((call) => call.payload.name === "prepare_pipeline_run")
         .map((call) => call.payload.toolUseId);
-      check("invalid spec discovered by the preparation tool", prepareIds.length > 0
-        && events.some((event) => event.type === "tool_result"
-          && prepareIds.includes(event.payload.toolUseId) && event.payload.status === "error"));
+      // get_local_spec returns malformed JSON as a successful inspection with
+      // validation errors. Refusing there is correct; a second failing tool
+      // call adds no evidence and should not be required by the evaluator.
+      const readIds = calls.filter((call) => call.payload.name === "get_local_spec")
+        .map((call) => call.payload.toolUseId);
+      check("invalid spec inspected before refusing the run", events.some((event) => event.type === "tool_result"
+        && ((prepareIds.includes(event.payload.toolUseId) && event.payload.status === "error")
+          || (readIds.includes(event.payload.toolUseId) && event.payload.status === "success"))));
     }
   }
   return assertions;

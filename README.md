@@ -8,9 +8,10 @@ instance in your own AWS account; decision models also train on CPU or Apple MPS
 
 Tuned Tensor is free and community-driven. There is no account, sign-in,
 hosted service or usage fee: specs, data, runs, reports and model weights stay
-on your machines. The only network calls are the ones you choose, such as
-Hugging Face downloads, SSH to your own GPU instance, and the model provider
-you configure for the optional conversational agent.
+on your machines. Network calls include Hugging Face downloads, SSH to your own GPU instance,
+and the model provider you configure for the optional conversational agent.
+The CLI also checks the public npm registry for updates at most every 12 hours;
+set `TT_NO_UPDATE_CHECK=1` to disable these checks.
 
 Agent inference uses your own provider: OpenRouter, OpenAI, Anthropic or any
 other provider in the catalog, including a local OpenAI-compatible endpoint
@@ -72,7 +73,7 @@ dist-tag or version on `sh`, not `curl`:
 
 ```bash
 curl -fsSL https://tunedtensor.com/install.sh | TT_VERSION=beta sh
-curl -fsSL https://tunedtensor.com/install.sh | TT_VERSION=0.13.0 sh
+curl -fsSL https://tunedtensor.com/install.sh | TT_VERSION=0.30.0 sh
 ```
 
 Or install the package directly:

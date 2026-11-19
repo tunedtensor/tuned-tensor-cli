@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.30.0] - 2026-11-19
 
 ### Removed
 
@@ -20,6 +20,12 @@
   Proposals saved by earlier releases for hosted operations fail safely if approved.
 - The decision hosting guide now explains how to serve a tuned model on
   infrastructure you control.
+
+### Fixed
+
+- Live agent evaluation accepts a safe malformed-spec refusal after spec
+  inspection without requiring a redundant pipeline preparation attempt, and
+  requires review of the reported error.
 
 ## [0.29.0] - 2026-11-10
 

@@ -77,6 +77,30 @@ async function realPreparedEvidence(
 }
 
 describe("live agent workflow grading", () => {
+  it("accepts malformed-spec refusal after inspection without requiring a redundant preparation", () => {
+    const evidence = preparedEvidence();
+    evidence.turn!.status = "completed";
+    evidence.turn!.response = "The spec contains invalid JSON; no dry-run was prepared.";
+    evidence.turn!.actions = [];
+    evidence.persistedActions = [];
+    evidence.events = [];
+    const check = "invalid spec inspected before refusing the run";
+    expect(failedChecks("invalid-spec", evidence)).toContain(check);
+    evidence.events = [
+      { type: "tool_call", payload: { name: "get_local_spec", toolUseId: "read" } },
+      { type: "tool_result", payload: { toolUseId: "other", status: "success" } },
+    ];
+    expect(failedChecks("invalid-spec", evidence)).toContain(check);
+    evidence.events[1]!.payload.toolUseId = "read";
+    evidence.events[1]!.payload.status = "error";
+    expect(failedChecks("invalid-spec", evidence)).toContain(check);
+    evidence.events[1]!.payload.status = "success";
+    expect(failedChecks("invalid-spec", evidence)).toEqual([]);
+    evidence.persistedActions = preparedEvidence().persistedActions;
+    expect(failedChecks("invalid-spec", evidence)).toContain("no mutation proposed");
+    expect(scenario("invalid-spec").humanReview).toContain("actual JSON error");
+  });
+
   async function downloadEvidence(): Promise<AgentWorkflowEvidence> {
     const workspace = await mkdtemp(join(tmpdir(), "tt-live-eval-download-"));
     try {
@@ -205,7 +229,7 @@ describe("live agent workflow grading", () => {
     evidence.turn!.status = "completed";
     evidence.turn!.actions = [];
     evidence.persistedActions = [];
-    expect(failedChecks("invalid-spec", evidence)).toContain("invalid spec discovered by the preparation tool");
+    expect(failedChecks("invalid-spec", evidence)).toContain("invalid spec inspected before refusing the run");
     evidence.events.push({ type: "tool_result", payload: { toolUseId: "tool", status: "error" } });
     expect(failedChecks("invalid-spec", evidence)).toEqual([]);
   });
@@ -216,7 +240,7 @@ describe("live agent workflow grading", () => {
     evidence.turn!.actions = [];
     evidence.persistedActions = [];
     evidence.events.push({ type: "tool_result", payload: { toolUseId: "unrelated", status: "error" } });
-    expect(failedChecks("invalid-spec", evidence)).toContain("invalid spec discovered by the preparation tool");
+    expect(failedChecks("invalid-spec", evidence)).toContain("invalid spec inspected before refusing the run");
   });
 
   it("checks foundation stages and the spec's bounded training settings", () => {
