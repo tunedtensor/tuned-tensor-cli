@@ -15,7 +15,7 @@ import {
 } from "./local-runtime/hardware-snapshot.js";
 import type { CapabilityReport } from "./local-runtime/capability.js";
 import { hardenExistingLocalStore } from "./local-runtime/store.js";
-import { MANAGED_AGENT_SELECTION, MANAGED_AGENT_PROVIDER, MANAGED_AGENT_MODEL } from "./config.js";
+import { isRetiredManagedSelection } from "./config.js";
 
 export type TargetSource = "default-local";
 
@@ -127,18 +127,17 @@ function configPath(env: Readonly<NodeJS.ProcessEnv>): string {
 function agentSelectionFrom(
   env: Readonly<NodeJS.ProcessEnv>,
   configAgent: unknown,
-  hasToken: boolean,
 ): ShellAgentContext | undefined {
-  const stored = configAgent && typeof configAgent === "object" && !Array.isArray(configAgent)
+  const saved = configAgent && typeof configAgent === "object" && !Array.isArray(configAgent)
     ? configAgent as Record<string, unknown>
     : {};
+  // A saved selection of the retired hosted model counts as unconfigured.
+  const stored = isRetiredManagedSelection(stringField(saved, "provider"), stringField(saved, "model")) ? {} : saved;
   const provider = env.TUNED_TENSOR_AGENT_PROVIDER?.trim() || stringField(stored, "provider");
-  const model = env.TUNED_TENSOR_AGENT_MODEL?.trim()
-    || (provider === MANAGED_AGENT_PROVIDER ? MANAGED_AGENT_MODEL : stringField(stored, "model"));
+  const model = env.TUNED_TENSOR_AGENT_MODEL?.trim() || stringField(stored, "model");
   const thinking = env.TUNED_TENSOR_AGENT_THINKING?.trim()
-    || (provider === stringField(stored, "provider") ? stringField(stored, "thinking") : undefined)
-    || (provider === MANAGED_AGENT_PROVIDER ? "off" : undefined);
-  if (!provider && !model && !thinking) return hasToken ? { ...MANAGED_AGENT_SELECTION } : undefined;
+    || (provider === stringField(stored, "provider") ? stringField(stored, "thinking") : undefined);
+  if (!provider && !model && !thinking) return undefined;
   return { provider, model, thinking };
 }
 
@@ -291,9 +290,7 @@ export async function discoverShellContext(
   if (storedConfigJson.invalid) {
     warnings.push("The Tuned Tensor config could not be parsed.");
   }
-  const agent = agentSelectionFrom(env, storedConfigJson.value?.agent, Boolean(
-    env.TUNED_TENSOR_API_KEY || stringField(storedConfigJson.value, "api_key"),
-  ));
+  const agent = agentSelectionFrom(env, storedConfigJson.value?.agent);
 
   await hardenExistingLocalStore(storeRoot);
   const [activeModelId, latestRun, hardware] = await Promise.all([

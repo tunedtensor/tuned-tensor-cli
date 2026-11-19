@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { createPiModelRuntime, readStoredProviderSecrets } from "../src/agent-model.js";
 import { LocalAgentStore } from "../src/agent-store.js";
-import { getAgentSelection, getApiKey } from "../src/config.js";
+import { getAgentSelection } from "../src/config.js";
 import { createLocalAgentClient } from "../src/local-agent-client.js";
 import { fingerprintWorkspace } from "../src/local-spec-workspace.js";
 import type { AgentAction, AgentStreamEvent, AgentTurnResult } from "../src/agent-client.js";
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   if (!selection) throw new Error("Configure an agent first");
   const runtime = await createPiModelRuntime();
   const secrets = [
-    ...readStoredProviderSecrets(), getApiKey(),
+    ...readStoredProviderSecrets(),
     ...Object.entries(process.env)
       .filter(([key, value]) => /API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(key) && (value?.length ?? 0) >= 6)
       .map(([, value]) => value),
@@ -163,8 +163,7 @@ async function main(): Promise<void> {
               signal: args[2]?.signal ? AbortSignal.any([args[2].signal, controller.signal]) : controller.signal });
           },
         },
-        toolApi: { get: blocked, postRead: blocked, propose: async (action) => action },
-        mutationApi: { get: blocked, post: blocked, put: blocked },
+        toolApi: { propose: async (action) => action },
         runPipelineCommand: blocked,
       });
       const thread = await client.createThread();

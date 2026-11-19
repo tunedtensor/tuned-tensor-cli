@@ -3,14 +3,15 @@
 ## Development instructions
 
 This is a single-package Node.js/TypeScript CLI (`tt`) for Tuned Tensor's
-local CUDA runner and laptop-local agent. Local workflow commands require no
-TT token. Hosted operations are registered under `tt cloud`; `tt auth`,
-`tt usage`, `tt balance`, `tt topup`, and `tt publish` handle account access and
-reporting. Decision specs (`engine: "decision"`) fine-tune a small typed decision
+local CUDA runner and laptop-local agent. Tuned Tensor is a free, community-driven
+open-source project: there is no hosted service, account, token or billing, and
+nothing in this repository may depend on one. Every command runs on machines the
+user controls; the optional agent uses the model provider the user configures.
+Decision specs (`engine: "decision"`) fine-tune a small typed decision
 model such as `convaiinnovations/laya` on CPU, MPS or CUDA; see
 `docs/local-runtime/decision.md`. Training uses one local orchestrator; optional `runtime.gpu` configuration
-sends GPU processes to a user-owned EC2 instance over SSH. Hosted training
-start/estimate are retired. See `docs/local-runtime/aws-gpu.md`. No Docker or database is required for CLI development.
+sends GPU processes to a user-owned EC2 instance over SSH.
+See `docs/local-runtime/aws-gpu.md`. No Docker or database is required for CLI development.
 
 ### Behavior spec workflow
 
@@ -44,11 +45,10 @@ After `npm run build`, run `npm link` to make the `tt` command available globall
 - The CLI targets Node 22+ (`tsup.config.ts` sets `target: "node22"`)
   because the bundled local workflow and its locked Python runner require it.
 - Agent selection is stored at `~/.tuned-tensor/config.json`.
-  A TT access token automatically selects managed inference when no BYO
-  selection exists. The reserved `tunedtensor/managed` provider reuses this
-  token; its endpoint and model cannot be overridden through `models.json`.
   Provider auth and custom models live under
-  `~/.tuned-tensor/agent/` (`auth.json`, `models.json`, threads).
+  `~/.tuned-tensor/agent/` (`auth.json`, `models.json`, threads). A saved
+  selection of the retired `tunedtensor/managed` provider counts as
+  unconfigured, and the next config write drops retired `api_key`/`base_url` keys.
 - Standard tests need no API key or GPU. Workflow tests use temporary workspaces
   and controlled model/process responses while exercising production code.
   AWS transport tests also execute local rsync 3.2+, bash, setsid and GNU
@@ -64,8 +64,6 @@ After `npm run build`, run `npm link` to make the `tt` command available globall
   Long runs can use `tt pipeline start --reason` or an approved agent background
   run; see `docs/local-runtime/background-runs.md`. Background runs require a
   completed dry-run of the same spec bytes and keep an audit record per run.
-  `tt cloud` operates TT account records; never recommend retired hosted
-  start/estimate commands or require TT credits for user-owned EC2 training.
 - `tt hardware` and `examine_hardware` inspect the laptop only. A missing local
   GPU does not rule out AWS training; use the configured `tt doctor` for that.
 - An AWS profile does not provision a GPU. Explain quota, capacity, networking,
@@ -93,10 +91,8 @@ gate before `npm publish`.
   stable WinGet manifests. See `docs/windows.md` for the catalog submission step;
   merging a PR does not publish a release or list it in WinGet.
 
-## Hosted decision models
+## Self-hosted decision models
 
-Use `tt cloud endpoints` for paid serverless CPU inference. Read
-`docs/local-runtime/hosting.md`: only complete English Laya checkpoints are
-supported, using a pinned serving runtime. Each invocation sends the complete model JSON payload. Create uploads
-weights directly with no user AWS profile. Preserve request IDs across transport
-retries and never retry a failed/refunded invocation under the same ID.
+Tuned Tensor does not host models. `docs/local-runtime/hosting.md` explains how
+users serve a complete Laya decision checkpoint on infrastructure they control.
+Keep its Laya version in step with `training/decision/pyproject.toml`.

@@ -45,7 +45,6 @@ import {
   type AgentProviderChoice,
 } from "./agent-control.js";
 import { unknownAgentProviderMessage, type AgentModelRuntime } from "./agent-model.js";
-import { MANAGED_AGENT_PROVIDER } from "./config.js";
 import { promptHiddenInput, promptKeyChoice, promptVisibleInput } from "./secret-prompt.js";
 
 export type { WorkflowMode } from "./command-catalog.js";
@@ -261,7 +260,6 @@ export type SlashCommandName =
   | "status"
   | "context"
   | "system"
-  | "usage"
   | "model"
   | "login"
   | "clear"
@@ -279,7 +277,6 @@ const SLASH_NAMES = new Set([
   "status",
   "context",
   "system",
-  "usage",
   "model",
   "login",
   "clear",
@@ -805,7 +802,7 @@ export class TunedTensorShellSession {
       }
       lines.push(chalk.dim("  Other providers: /login <id> or /model <id>"));
       if (providers.some((choice) => !choice.authenticated)) {
-        lines.push(chalk.dim("  Use /login tunedtensor for your TT token, or /login <provider> for a BYO key."));
+        lines.push(chalk.dim("  Use /login <provider> to save your API key for that provider."));
       }
     }
 
@@ -899,10 +896,6 @@ export class TunedTensorShellSession {
         this.writeLines(renderMachinePanel(usage, this.context, { columns: this.columns(), detailed: true }));
         return "continue";
       }
-      case "usage":
-        assertNoArgs("usage", command.args);
-        await this.runner({ args: ["usage"], cwd: this.cwd });
-        return "continue";
       case "palette":
         this.io.write(helpText(this.mode, undefined, true));
         return "continue";
@@ -986,17 +979,10 @@ export class TunedTensorShellSession {
           throw new ShellParseError("Provider login needs an interactive tt session.");
         }
         const label = provider.name !== provider.id ? provider.name : provider.id;
-        const credentialLabel = provider.id === MANAGED_AGENT_PROVIDER ? "TT access token" : `${label} API key`;
-        const apiKey = await this.io.promptSecret(`${credentialLabel}: `);
-        const result = await loginAgentProvider(runtime, provider.id, apiKey, {
-          baseUrl: this.env.TUNED_TENSOR_URL,
-        });
+        const apiKey = await this.io.promptSecret(`${label} API key: `);
+        const result = await loginAgentProvider(runtime, provider.id, apiKey);
         await this.refreshContext();
-        this.io.write(
-          result.provider === MANAGED_AGENT_PROVIDER
-            ? `${successMark()} TT access token saved for managed inference and cloud operations. Agent model saved: tunedtensor/managed.\n`
-            : `${successMark()} Saved ${result.provider} credentials. Chat and /model can use this provider now.\n`,
-        );
+        this.io.write(`${successMark()} Saved ${result.provider} credentials. Chat and /model can use this provider now.\n`);
         return "continue";
       }
       case "clear":

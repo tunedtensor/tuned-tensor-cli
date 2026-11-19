@@ -50,13 +50,11 @@ function fakeClient(): AgentConversationClient {
           payload: {
             action: {
               id: "action-123",
-              title: "Create behaviour spec",
+              title: "Example action",
               summary: "Create the reviewed Support spec.",
               risk: "medium",
-              operation: "create_spec",
+              operation: "example_operation",
               arguments: { spec: { name: "Support" } },
-              method: "POST",
-              path: "/api/v1/behavior-specs",
             },
           },
         },
@@ -114,9 +112,7 @@ describe("TunedTensorAgentSession", () => {
     expect(stdout.join("")).toContain("Approval needed");
     expect(stdout.join("")).toContain("Nothing changes until you decide");
     expect(stdout.join("")).toContain("\"name\": \"Support\"");
-    expect(stdout.join("")).toContain(
-      "\"request\": \"POST /api/v1/behavior-specs\"",
-    );
+    expect(stdout.join("")).toContain("\"operation\": \"example_operation\"");
     expect(session.snapshot().pendingActions).toHaveLength(1);
 
     await session.handleLine("/approve");
@@ -174,7 +170,7 @@ describe("TunedTensorAgentSession", () => {
     await session.handleLine("/approve");
 
     expect(session.snapshot().pendingActions).toHaveLength(0);
-    expect(stderr.join(" ")).toMatch(/outcome is unknown.*cannot be retried.*inspect the remote spec/i);
+    expect(stderr.join(" ")).toMatch(/outcome is unknown.*cannot be retried.*inspect the local workspace/i);
     expect(await session.handleLine("/approve")).toBe("continue");
     expect(client.approveAction).toHaveBeenCalledTimes(1);
   });
@@ -450,7 +446,7 @@ describe("TunedTensorAgentSession", () => {
       await session.handleLine("Create a support spec");
 
       expect(prompter).toHaveBeenCalledTimes(1);
-      expect(prompter.mock.calls[0]![0]).toContain("Apply this change to your TT account?");
+      expect(prompter.mock.calls[0]![0]).toContain("Approve this action?");
       expect(client.approveAction).toHaveBeenCalledWith(
         "action-123",
         expect.any(Function),

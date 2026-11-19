@@ -12,11 +12,9 @@ import {
 import type { AgentToolApi } from "../agent-tools.js";
 import { prepareLocalSpecProject } from "../local-spec-workspace.js";
 import { prepareLocalPipelineAction } from "../local-pipeline-action.js";
-import { createCloudActionContext } from "../agent-approval.js";
-import type { CloudActionContext } from "../agent-client.js";
+import type { AgentLocalServer } from "../agent-local-server.js";
 
-const TT_SECRET = "tt_never_send_this_to_pi";
-const CLOUD_CONTEXT = createCloudActionContext("https://account-a.example", TT_SECRET);
+const PROVIDER_SECRET = "sk_never_send_this_to_pi";
 let root: string;
 
 beforeEach(() => {
@@ -25,77 +23,54 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("local agent conversation client", () => {
-  it.each(["create_spec", "update_spec"] as const)("binds persisted %s approvals to the original account and API origin", async (operation) => {
-    const mutationApi = {
-      get: vi.fn(async (path: string) => path === "/version"
-        ? { data: { capabilities: ["local_agent_spec_mutation_guards_v1"] } }
-        : { data: { updated_at: "2026-09-06T00:00:00.000Z" } }),
-      post: vi.fn(async () => ({ data: { id: "created-spec" } })),
-      put: vi.fn(async () => ({ data: { id: "updated-spec" } })),
-    };
-    const clientFor = (cloudContext: CloudActionContext | undefined) => createLocalAgentClient({
-      store: new LocalAgentStore(root),
-      workspaceRoot: root,
-      selection: { provider: "openai", model: "gpt-5.2", thinking: "off" },
-      modelRuntime: {
-        getProviders: () => [{ id: "openai" }],
-        getModels: () => [{ id: "gpt-5.2", provider: "openai", reasoning: true }],
-        getModel: () => ({ id: "gpt-5.2", provider: "openai", reasoning: true }),
-        hasConfiguredAuth: () => true,
-      },
-      cloudEnabled: Boolean(cloudContext),
-      cloudContext,
-      toolApi: { get: mutationApi.get, postRead: vi.fn(), propose: async (action) => action },
-      mutationApi,
-      createAgent: (options) => ({
-        state: { messages: [] },
-        subscribe: () => () => {},
-        abort: () => {},
-        prompt: async () => {
-          const tool = options.tools.find((candidate) => candidate.name === `prepare_${operation}`)!;
-          await tool.execute("prepare-cloud-spec", operation === "create_spec"
-            ? { spec: { name: "Support", examples: [{ input: "Hi", output: "Hello" }] } }
-            : { spec_id: "11111111-1111-4111-8111-111111111111", changes: { name: "Support" } });
+  it.each(["create_spec", "update_spec", "start_label_job", "download_label_job"])(
+    "fails a persisted %s proposal from the retired hosted service without dispatch",
+    async (operation) => {
+      const store = new LocalAgentStore(root);
+      const threadId = "251f122f-dd8e-4894-a0ab-99965e976e29";
+      const actionId = "ed8e4bca-ab1c-4c9f-8b65-9f7997f76670";
+      await store.save({
+        thread: {
+          id: threadId,
+          title: "Legacy proposal",
+          status: "active",
+          last_message_at: null,
+          created_at: "2026-08-09T10:00:00.000Z",
+          updated_at: "2026-08-09T10:00:00.000Z",
         },
-      }),
-    });
-    const original = clientFor(CLOUD_CONTEXT);
-    const thread = await original.createThread();
-    const turn = await original.runTurn(thread.id, "Prepare the cloud spec", () => {});
-    const action = turn.actions[0]!;
-    expect(action.cloud_context).toEqual(CLOUD_CONTEXT);
-    expect(action.preview).toEqual({ api_origin: CLOUD_CONTEXT.origin });
-    expect(readFileSync(join(root, "threads", `${thread.id}.json`), "utf8")).not.toContain(TT_SECRET);
-    mutationApi.get.mockClear();
-
-    for (const changed of [
-      createCloudActionContext("https://account-b.example", TT_SECRET),
-      createCloudActionContext(CLOUD_CONTEXT.origin, "tt_different_account_token"),
-      undefined,
-    ]) {
-      await expect(clientFor(changed).approveAction(action.id, () => {})).rejects.toThrow(/current TT account and API origin/);
-      expect(mutationApi.get).not.toHaveBeenCalled();
-      expect(mutationApi.post).not.toHaveBeenCalled();
-      expect(mutationApi.put).not.toHaveBeenCalled();
-      expect((await new LocalAgentStore(root).load(thread.id)).actions[0]?.status).toBe("proposed");
-    }
-
-    // Legacy/unbound proposals must not gain the current account implicitly.
-    const legacyStore = new LocalAgentStore(root);
-    const legacyState = await legacyStore.load(thread.id);
-    delete legacyState.actions[0]!.cloud_context;
-    await legacyStore.save(legacyState);
-    await expect(clientFor(CLOUD_CONTEXT).approveAction(action.id, () => {})).rejects.toThrow(/current TT account and API origin/);
-    expect(mutationApi.get).not.toHaveBeenCalled();
-    legacyState.actions[0]!.cloud_context = CLOUD_CONTEXT;
-    await legacyStore.save(legacyState);
-
-    const result = await clientFor(createCloudActionContext(`${CLOUD_CONTEXT.origin}/`, TT_SECRET))
-      .approveAction(action.id, () => {});
-    expect(result.status).toBe("completed");
-    expect(operation === "create_spec" ? mutationApi.post : mutationApi.put).toHaveBeenCalledTimes(1);
-    expect((await new LocalAgentStore(root).load(thread.id)).actions[0]?.status).toBe("completed");
-  });
+        messages: [],
+        actions: [{
+          id: actionId,
+          operation,
+          title: "Legacy",
+          summary: "Prepared by an earlier tt release",
+          risk: "Hosted account change",
+          status: "proposed",
+          arguments: { spec: { name: "Support", examples: [{ input: "a", output: "b" }] } },
+        }],
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const client = createLocalAgentClient({
+        store,
+        workspaceRoot: root,
+        selection: { provider: "openai", model: "gpt-5.2", thinking: "off" },
+        modelRuntime: {
+          getProviders: () => [{ id: "openai" }],
+          getModels: () => [{ id: "gpt-5.2", provider: "openai", reasoning: true }],
+          getModel: () => ({ id: "gpt-5.2", provider: "openai", reasoning: true }),
+          hasConfiguredAuth: () => true,
+        },
+        createAgent: vi.fn(),
+      });
+      try {
+        await expect(client.approveAction(actionId, () => {})).rejects.toThrow(/unsupported prepared operation/i);
+        expect((await store.load(threadId)).actions[0]?.status).toBe("failed");
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    },
+  );
 
   it("maps agent streaming events to the existing UI seam and resumes locally", async () => {
     const created: LocalPiAgentOptions[] = [];
@@ -146,10 +121,10 @@ describe("local agent conversation client", () => {
       };
     });
     const toolApi: AgentToolApi = {
-      get: vi.fn(), postRead: vi.fn(), propose: vi.fn(async (action) => action),
+      propose: vi.fn(async (action) => action),
     };
     const client = createLocalAgentClient({
-      store: new LocalAgentStore(root, { secretValues: [TT_SECRET] }),
+      store: new LocalAgentStore(root, { secretValues: [PROVIDER_SECRET] }),
       workspaceRoot: root,
       selection: { provider: "openai", model: "gpt-5.2", thinking: "high" },
       modelRuntime: {
@@ -160,7 +135,6 @@ describe("local agent conversation client", () => {
       },
       createAgent,
       toolApi,
-      mutationApi: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
     });
 
     const thread = await client.createThread();
@@ -198,7 +172,8 @@ describe("local agent conversation client", () => {
     expect(created[0]?.systemPrompt).toMatch(/approved dry-runs never train/i);
     expect(created[0]?.systemPrompt).toMatch(/after a dry-run of the same spec completed.*prepare_background_run/is);
     expect(created[0]?.systemPrompt).toMatch(/tt pipeline run --spec tunedtensor\.json/);
-    expect(created[0]?.systemPrompt).toMatch(/account and cloud tools are unavailable/i);
+    expect(created[0]?.systemPrompt).toMatch(/no Tuned Tensor account, token or hosted service exists/i);
+    expect(created[0]?.systemPrompt).not.toMatch(/tt cloud|tt auth|TT access token|TT credits|labeling job/i);
     expect(created[0]?.systemPrompt).toMatch(/adapter.*foundation.*describe_pipeline/is);
     expect(created[0]?.systemPrompt).toContain("search_hugging_face");
     expect(created[0]?.systemPrompt).toMatch(/models or datasets/i);
@@ -212,11 +187,11 @@ describe("local agent conversation client", () => {
     expect(created[0]?.systemPrompt).not.toContain("Cloud execution is explicit through");
     expect(created[0]?.systemPrompt).toContain("do not use a missing local GPU to reject AWS training");
     expect(created[0]?.systemPrompt).toMatch(/examine this host.*GPU/is);
-    expect(JSON.stringify(created[0])).not.toContain(TT_SECRET);
+    expect(JSON.stringify(created[0])).not.toContain(PROVIDER_SECRET);
 
     await client.runTurn(thread.id, "Continue", () => {});
     expect(created[1]?.messages.length).toBeGreaterThan(0);
-    await client.runTurn(thread.id, `please use ${TT_SECRET}`, () => {});
+    await client.runTurn(thread.id, `please use ${PROVIDER_SECRET}`, () => {});
     expect(prompts.at(-1)).toBe("please use [REDACTED]");
 
     const failureEvents: string[] = [];
@@ -242,10 +217,11 @@ describe("local agent conversation client", () => {
     const store = new LocalAgentStore(root);
     const threadId = "251f122f-dd8e-4894-a0ab-99965e976e29";
     const actionId = "ed8e4bca-ab1c-4c9f-8b65-9f7997f76670";
+    const serverId = "11111111-1111-4111-8111-111111111111";
     await store.save({
       thread: {
         id: threadId,
-        title: "Create spec",
+        title: "Stop server",
         status: "active",
         last_message_at: null,
         created_at: "2026-08-09T10:00:00.000Z",
@@ -254,17 +230,21 @@ describe("local agent conversation client", () => {
       messages: [],
       actions: [{
         id: actionId,
-        operation: "create_spec",
-        title: "Create spec",
-        summary: "Create Support",
-        risk: "Creates a remote spec",
+        operation: "stop_local_service",
+        title: "Stop local model server",
+        summary: "Release the GPU used by this session's server.",
+        risk: "Stops a local process",
         status: "proposed",
-        cloud_context: CLOUD_CONTEXT,
-        arguments: { spec: { name: "Support", examples: [{ input: "a", output: "b" }] } },
+        arguments: { server_id: serverId },
       }],
     });
+    const localServer = {
+      status: vi.fn(async () => ({ server_id: serverId })),
+      stop: vi.fn(async () => { throw new Error("process did not confirm exit"); }),
+    } as unknown as AgentLocalServer;
     const client = createLocalAgentClient({
       store,
+      localServer,
       workspaceRoot: root,
       selection: { provider: "openai", model: "gpt-5.2", thinking: "high" },
       modelRuntime: {
@@ -274,14 +254,6 @@ describe("local agent conversation client", () => {
         hasConfiguredAuth: () => true,
       },
       createAgent: vi.fn(),
-      cloudEnabled: true,
-      cloudContext: CLOUD_CONTEXT,
-      toolApi: { get: vi.fn(), postRead: vi.fn(), propose: vi.fn() },
-      mutationApi: {
-        get: vi.fn(async () => ({ data: { capabilities: ["local_agent_spec_mutation_guards_v1"] } })),
-        post: vi.fn(async () => { throw new Error("response lost"); }),
-        put: vi.fn(),
-      },
     });
     const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
 
@@ -366,8 +338,6 @@ describe("local agent conversation client", () => {
         hasConfiguredAuth: () => true,
       },
       createAgent: vi.fn(),
-      toolApi: { get: vi.fn(), postRead: vi.fn(), propose: vi.fn() },
-      mutationApi: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
       runPipelineCommand,
     });
 
@@ -430,7 +400,6 @@ describe("local agent conversation client", () => {
         },
       }],
     });
-    const mutationApi = { get: vi.fn(), post: vi.fn(), put: vi.fn() };
     const client = createLocalAgentClient({
       store,
       workspaceRoot: root,
@@ -442,8 +411,6 @@ describe("local agent conversation client", () => {
         hasConfiguredAuth: () => true,
       },
       createAgent: vi.fn(),
-      toolApi: { get: vi.fn(), postRead: vi.fn(), propose: vi.fn() },
-      mutationApi,
     });
 
     await expect(client.approveAction(actionId, () => {}, undefined, {
@@ -464,9 +431,6 @@ describe("local agent conversation client", () => {
     )))
       .toEqual({ id: expect.any(String), ...spec });
     expect((await store.load(threadId)).actions[0]?.status).toBe("completed");
-    expect(mutationApi.get).not.toHaveBeenCalled();
-    expect(mutationApi.post).not.toHaveBeenCalled();
-    expect(mutationApi.put).not.toHaveBeenCalled();
   });
 });
 

@@ -387,7 +387,7 @@ export function bannerTip(input: BannerInput): string {
   const { context, usage } = input;
   const agent = agentLabel(context);
   if (!agent) {
-    return "Hi! Connect a model with /login tunedtensor, or /model to use your own. Workflow commands work now.";
+    return "Hi! Connect a model with /login and /model. Workflow commands work now.";
   }
   if (!context.spec) {
     return "What should your model do? Describe it and I'll draft a spec.";

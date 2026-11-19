@@ -109,8 +109,6 @@ function actionFromPayload(payload: Record<string, unknown>): AgentAction | null
     turn_id: stringValue(value.turn_id) ?? undefined,
     arguments: value.arguments,
     preview: value.preview,
-    method: stringValue(value.method) ?? undefined,
-    path: stringValue(value.path) ?? undefined,
   };
 }
 
@@ -160,13 +158,6 @@ function approvalQuestion(action: AgentAction): string {
       return "Create these dataset splits?";
     case "prefetch_local":
       return "Start this download?";
-    case "create_spec":
-    case "update_spec":
-      return "Apply this change to your TT account?";
-    case "start_label_job":
-      return "Upload this file and start labeling (uses TT credits)?";
-    case "download_label_job":
-      return "Download the labeled data?";
     default:
       return "Approve this action?";
   }
@@ -196,29 +187,15 @@ function completionMessage(action: AgentAction | null): string {
       return "Dataset split saved. Ask me to attach the new files to your spec.";
     case "prefetch_local":
       return "Download finished.";
-    case "start_label_job":
-      return "Labeling started. It runs in the cloud; ask me for its status any time.";
-    case "download_label_job":
-      return "Labeled data downloaded.";
     default:
       return "Approved action completed.";
   }
 }
 
-function labelingCompletionDetail(operation: string | undefined, output: unknown): string | undefined {
+function completionDetail(operation: string | undefined, output: unknown): string | undefined {
   if (!isRecord(output)) return undefined;
   if (operation === "start_local_pipeline" && typeof output.background_run_id === "string") {
     return `Run ${output.background_run_id.slice(0, 8)} · tt pipeline status ${output.background_run_id.slice(0, 8)}`;
-  }
-  if (operation === "start_label_job" && typeof output.job_id === "string") {
-    const cents = typeof output.estimated_cost_cents === "number"
-      ? ` · est. $${(output.estimated_cost_cents / 100).toFixed(2)}`
-      : "";
-    return `Job ${output.job_id}${cents}`;
-  }
-  if (operation === "download_label_job" && isRecord(output.dataset_prebuilt)) {
-    return `${String(output.training_rows ?? "?")} training · ${String(output.validation_rows ?? "?")} validation rows → `
-      + `${String(output.dataset_prebuilt.training)}, ${String(output.dataset_prebuilt.validation)}`;
   }
   return undefined;
 }
@@ -397,10 +374,8 @@ export class TunedTensorAgentSession {
       out.push(`${GUTTER}${bar}`);
       push(formatJson(action.preview ?? {}), chalk.dim);
     } else {
-      const request = [action.method, action.path].filter(Boolean).join(" ");
       const technical = {
         operation: action.operation,
-        ...(request ? { request } : {}),
         arguments: action.arguments ?? null,
         preview: action.preview ?? null,
       };
@@ -482,12 +457,8 @@ export class TunedTensorAgentSession {
 
     if (event.type === "action_result") {
       if (payload.status === "outcome_unknown") {
-        const operation = this.runningAction?.operation;
-        const target = operation === "start_label_job"
-          ? "labeling jobs (tt cloud label list)"
-          : operation === "download_label_job" ? "download directory" : "remote spec";
         this.writeErrorLine(
-          `Approved action outcome is unknown. It cannot be retried; inspect the ${target} before preparing another action.`,
+          "Approved action outcome is unknown. It cannot be retried; inspect the local workspace and runs before preparing another action.",
         );
         return;
       }
@@ -498,7 +469,7 @@ export class TunedTensorAgentSession {
         return;
       }
       this.writeStatus(`${successMark()} ${completionMessage(this.runningAction)}`);
-      const detail = labelingCompletionDetail(this.runningAction?.operation, payload.output);
+      const detail = completionDetail(this.runningAction?.operation, payload.output);
       if (detail) this.writeStatus(chalk.dim(`${GUTTER}${sanitizeTerminalText(detail)}`));
       return;
     }

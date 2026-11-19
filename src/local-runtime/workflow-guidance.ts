@@ -122,7 +122,7 @@ export function workflowGuidance(host: HostInventory, report: CapabilityReport):
       id: "prepare", label: "Specs and datasets", status: host.node.ok ? "ready" : "needs_setup",
       reason: "Create specs, inspect and split local data; no GPU required.",
       next: host.node.ok
-        ? "Ask TT to prepare a dataset or create a spec. Agent chat requires managed access or your own model provider."
+        ? "Ask TT to prepare a dataset or create a spec. Agent chat uses your own model provider (/login)."
         : "Install Node 22 or newer.",
     },
     decision,

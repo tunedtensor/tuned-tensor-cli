@@ -322,7 +322,7 @@ export const trainingReportSchema = z.object({
 
 /**
  * What produced a run, recorded once in the report so it travels with
- * `tt publish`: software and host, execution target, exact inputs (spec,
+ * the run when shared: software and host, execution target, exact inputs (spec,
  * base model, data) by digest, and the training configuration.
  */
 export const runProvenanceSchema = z.object({

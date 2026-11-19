@@ -390,17 +390,15 @@ describe("agent result review and task acceptance", () => {
 
   it("routes actual tool proposals through approval and refuses duplicate dispatch", async () => {
     const { store } = await setupAgent();
-    const blocked = vi.fn(async () => { throw new Error("Unexpected cloud call"); });
-    const tools = createTunedTensorTools({ get: blocked, postRead: blocked, propose: async action => action }, { workspaceRoot: root });
+    const tools = createTunedTensorTools({ propose: async action => action }, { workspaceRoot: root });
     const proposed = await tools.find(tool => tool.name === "prepare_activate_local_model")!.execute("prepare", { run_id: firstRunId });
     const action = proposed.details as AgentAction;
     expect(action.operation).toBe("activate_local_model");
     expect((await getActiveModel(store)).pointer).toBeNull();
     const persist = vi.fn(async () => {});
-    expect(await approvePreparedAction(action, { get: blocked, post: blocked, put: blocked }, persist, { workspaceRoot: root })).toMatchObject({ active_model_id: `local-${firstRunId}` });
+    expect(await approvePreparedAction(action, persist, { workspaceRoot: root })).toMatchObject({ active_model_id: `local-${firstRunId}` });
     expect(action.status).toBe("completed");
-    await expect(approvePreparedAction(action, { get: blocked, post: blocked, put: blocked }, persist, { workspaceRoot: root })).rejects.toThrow(/not proposed/);
-    expect(blocked).not.toHaveBeenCalled();
+    await expect(approvePreparedAction(action, persist, { workspaceRoot: root })).rejects.toThrow(/not proposed/);
   });
 
   it("does not silently apply a run accepted under different criteria", async () => {

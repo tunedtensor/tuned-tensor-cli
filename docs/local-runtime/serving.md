@@ -2,14 +2,9 @@
 
 `tt serve` verifies TT artifacts and launches **vLLM 0.32.0**. vLLM owns model
 execution, batching, KV/prefix caching, streaming, and native tool-call parsing.
-This local serving path connects the harness directly to vLLM; TT's managed
-agent proxy is a separate inference option. The serving dependencies are locked
+This local serving path connects the harness directly to vLLM. The serving dependencies are locked
 separately from training, in an external cache environment; an npm upgrade does
 not mutate the training runtime.
-
-The legacy `tt cloud models serve --managed` wrapper accepts completion bodies
-up to 8 MiB and up to eight simultaneous requests, including uploads and queued
-generations. It returns HTTP 413 for larger bodies and HTTP 503 when full.
 
 ## Requirements and scope
 

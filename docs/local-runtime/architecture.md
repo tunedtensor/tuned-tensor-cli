@@ -1,10 +1,10 @@
 # Architecture
 
 This document describes the local CUDA runtime bundled with the unified `tt`
-agent and CLI. The standalone `tt-local` product surface is deprecated. Local
-workflow commands need no TT token. Managed agent inference reuses a TT access
-token; BYO inference uses the selected provider's credentials. Cloud operations
-are explicit through `tt cloud` and use the TT account token.
+agent and CLI. The standalone `tt-local` product surface is deprecated. Every
+command runs on machines the user controls; there is no Tuned Tensor account,
+token or hosted service. The optional conversational agent uses the model
+provider and credentials the user configures.
 
 The local adapter runtime boundary is text SFT of a registry-certified
 Transformers causal LM into a LoRA adapter on CUDA. Certified checkpoints

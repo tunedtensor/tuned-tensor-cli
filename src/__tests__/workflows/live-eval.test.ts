@@ -302,8 +302,7 @@ describe("live agent workflow grading", () => {
           getModel: () => ({ id: "scripted", provider: "fixture" }),
           hasConfiguredAuth: () => true, streamSimple,
         },
-        toolApi: { get: forbidden, postRead: forbidden, propose: forbidden },
-        mutationApi: { get: forbidden, post: forbidden, put: forbidden },
+        toolApi: { propose: forbidden },
       });
       const thread = await client.createThread();
       const controller = new AbortController();

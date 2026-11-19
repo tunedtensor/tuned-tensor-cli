@@ -126,7 +126,7 @@ describe("agent access to downloaded datasets", () => {
   it("exposes local inspection without TT account access and paginates downloads", async () => {
     await cache({ "data/train.jsonl": '{"input":"a","output":"b"}\n' });
     const forbidden = vi.fn(async (): Promise<never> => { throw new Error("Unexpected hosted API call"); });
-    const tools = createTunedTensorTools({ get: forbidden, postRead: forbidden, propose: forbidden }, { localOnly: true });
+    const tools = createTunedTensorTools({ propose: forbidden });
     expect(tools.some((tool) => tool.name === "list_datasets")).toBe(false);
     const list = await tools.find((tool) => tool.name === "list_local_datasets")!.execute("list", {});
     expect(list.details).toMatchObject({ total: 1 });
