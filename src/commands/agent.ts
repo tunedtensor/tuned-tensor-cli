@@ -6,7 +6,7 @@ import {
   listAgentModels,
   setAgentModel,
 } from "../agent-control.js";
-import { MANAGED_AGENT_PROVIDER, MANAGED_AGENT_MODEL, type AgentThinkingLevel } from "../config.js";
+import type { AgentThinkingLevel } from "../config.js";
 import { isJsonMode } from "../output.js";
 
 export interface AgentCommandsOptions {
@@ -24,7 +24,7 @@ export function registerAgentCommands(parent: Command, options: AgentCommandsOpt
       const summary = describeAgentModel(runtime, options.env);
       if (!summary) {
         throw new Error(
-          "The agent is not configured. Run `tt auth login` for managed inference, or configure a BYO provider and model with `tt agent configure`. Local workflow commands need no token.",
+          "The agent is not configured. Choose your own provider and model with `tt agent configure --provider <provider> --model <model>`, or /login and /model in the tt shell. Workflow commands need no agent.",
         );
       }
       const value = {
@@ -70,20 +70,17 @@ export function registerAgentCommands(parent: Command, options: AgentCommandsOpt
       }
     });
 
-  agent.command("configure").description("Select managed inference or a BYO provider, model, and thinking level")
+  agent.command("configure").description("Select your model provider, model, and thinking level")
     .requiredOption("--provider <provider>", "Provider ID")
-    .option("--model <model>", "BYO model ID (managed is automatic for tunedtensor)")
+    .requiredOption("--model <model>", "Model ID")
     .option("--thinking <level>", "off, minimal, low, medium, high, xhigh, or max")
-    .action(async (commandOptions: { provider: string; model?: string; thinking?: string }) => {
-      const managed = commandOptions.provider === MANAGED_AGENT_PROVIDER;
-      const model = commandOptions.model || (managed ? MANAGED_AGENT_MODEL : undefined);
-      if (!model) throw new Error("--model is required when using your own provider.");
+    .action(async (commandOptions: { provider: string; model: string; thinking?: string }) => {
       const result = setAgentModel(
         await options.getRuntime(),
         options.env,
         commandOptions.provider,
-        model,
-        { thinking: (commandOptions.thinking || (managed ? "off" : "medium")) as AgentThinkingLevel, adjustThinking: false },
+        commandOptions.model,
+        { thinking: (commandOptions.thinking || "medium") as AgentThinkingLevel, adjustThinking: false },
       );
       const value = { execution: "local", ...result.selection };
       options.output.write(isJsonMode()

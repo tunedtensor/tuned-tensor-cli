@@ -9,10 +9,7 @@ import { createLocalAgentClient, type LocalPiAgent, type LocalPiAgentOptions } f
 import { LocalAgentStore } from "./agent-store.js";
 import { createPiModelRuntime, readStoredProviderSecrets, type AgentModelRuntime } from "./agent-model.js";
 import type { AgentToolApi } from "./agent-tools.js";
-import type { AgentMutationApi, AgentMutationGuard } from "./agent-approval.js";
-import { createCloudActionContext } from "./agent-approval.js";
-import * as api from "./client.js";
-import { getApiKey, getBaseUrl, getAgentSelection, getAgentConfigDir, getConfigRevision } from "./config.js";
+import { getAgentSelection, getAgentConfigDir, getConfigRevision } from "./config.js";
 import { TunedTensorAgentSession } from "./agent.js";
 import { executeLocalCommand } from "./local-runner.js";
 import {
@@ -32,15 +29,7 @@ import { registerLocalCommands } from "./commands/local.js";
 import { registerAgentCommands } from "./commands/agent.js";
 import { registerPipelineCommands } from "./commands/pipeline.js";
 import { createBackgroundRunExecutor, type BackgroundRunExecutor } from "./local-background-run-action.js";
-import { registerAuthCommands } from "./commands/auth.js";
-import { registerBalanceCommands } from "./commands/balance.js";
-import { registerTopupCommands } from "./commands/topup.js";
-import { registerPublishCommand } from "./commands/publish.js";
-import { registerCloudCommands, registerUsageCommand } from "./commands/cloud.js";
 import { registerUpgradeCommand } from "./commands/upgrade.js";
-import { beforeLabelingStarts, downloadLabelingJob, startLabelingJob } from "./commands/label.js";
-import { pushLocalSpec } from "./commands/push.js";
-import type { AgentLabelingExecutor } from "./agent-labeling.js";
 import {
   cachedCliUpdate,
   checkForCliUpdate,
@@ -51,58 +40,6 @@ import {
   spawnCliUpdateRefresh,
 } from "./update-check.js";
 export { extractPassthroughOptions } from "./passthrough.js";
-
-function createAccountToolApi(opts: api.ClientOpts): AgentToolApi {
-  return {
-    get: async (path, query) => api.get(path, query, opts),
-    postRead: async (path, body) => api.post(path, body, opts),
-    propose: async (action) => action,
-  };
-}
-
-function createAccountMutationApi(opts: api.ClientOpts): AgentMutationApi {
-  const headers = (guard?: AgentMutationGuard): Record<string, string> | undefined => guard ? {
-    "x-tuned-tensor-action-id": guard.actionId,
-    ...(guard.expectedUpdatedAt ? { "x-tuned-tensor-expected-updated-at": guard.expectedUpdatedAt } : {}),
-  } : undefined;
-  return {
-    get: async (path) => api.get(path, undefined, opts),
-    post: async (path, body, guard) => api.post(path, body, opts, headers(guard)),
-    put: async (path, body, guard) => api.put(path, body, opts, headers(guard)),
-  };
-}
-
-export function createAccountLabelingExecutor(opts: api.ClientOpts): AgentLabelingExecutor {
-  return {
-    start: async (args) => {
-      const { data: spec, created } = await beforeLabelingStarts(() => pushLocalSpec(args.specPath, opts));
-      const job = await startLabelingJob({
-        file: args.file,
-        fileBytes: args.fileBytes,
-        format: args.format,
-        specId: spec.id,
-        inputColumn: args.inputColumn,
-        name: args.name ?? undefined,
-      }, opts);
-      return {
-        job_id: job.id,
-        name: job.name,
-        status: job.status,
-        estimated_cost_cents: job.est_cost_cents,
-        cloud_spec_id: spec.id,
-        cloud_spec_created: created,
-      };
-    },
-    download: async (args) => await downloadLabelingJob({
-      jobId: args.jobId,
-      specPath: args.specPath,
-      outDir: args.outDir,
-      includeUnreviewed: args.includeUnreviewed,
-      validationRatio: args.validationRatio,
-      force: args.overwrite,
-    }, opts),
-  };
-}
 
 export interface SelfCommandOptions {
   cwd?: string;
@@ -144,8 +81,6 @@ export interface CliRuntime {
   createPiAgent?: (options: LocalPiAgentOptions) => LocalPiAgent;
   agentStore?: LocalAgentStore;
   agentToolApi?: AgentToolApi;
-  agentMutationApi?: AgentMutationApi;
-  agentLabeling?: AgentLabelingExecutor;
 }
 
 async function createDefaultAgentClient(
@@ -157,31 +92,23 @@ async function createDefaultAgentClient(
   const selection = getAgentSelection(env);
   if (!selection) {
     throw new Error(
-      "The laptop-local agent is not configured. Use /login tunedtensor for managed inference, or /login and /model for your own provider. Local workflow commands need no token.",
+      "The local agent is not configured. Use /login and /model to choose your own model provider. Workflow commands need no agent.",
     );
   }
   const modelRuntime = await getModelRuntime();
-  const secret = getApiKey({ apiKey: env.TUNED_TENSOR_API_KEY });
-  const accountOpts = { apiKey: secret, baseUrl: getBaseUrl({ baseUrl: env.TUNED_TENSOR_URL }) };
-  const toolApi = runtime.agentToolApi ?? createAccountToolApi(accountOpts);
-  const mutationApi = runtime.agentMutationApi ?? createAccountMutationApi(accountOpts);
   const providerSecrets = Object.entries(env)
     .filter(([name, value]) => value && /(?:API_KEY|TOKEN|SECRET)$/i.test(name))
     .map(([, value]) => value!)
-    .filter((value) => value.length >= 8 && value !== secret);
+    .filter((value) => value.length >= 8);
   return createLocalAgentClient({
     store: runtime.agentStore ?? new LocalAgentStore(getAgentConfigDir(), {
-      secretValues: [...(secret ? [secret] : []), ...providerSecrets],
+      secretValues: providerSecrets,
       secretValueProvider: readStoredProviderSecrets,
     }),
     workspaceRoot,
     selection,
     modelRuntime,
-    toolApi,
-    mutationApi,
-    cloudEnabled: Boolean(secret),
-    cloudContext: secret ? createCloudActionContext(accountOpts.baseUrl, secret) : undefined,
-    labeling: runtime.agentLabeling ?? (secret ? createAccountLabelingExecutor(accountOpts) : undefined),
+    ...(runtime.agentToolApi ? { toolApi: runtime.agentToolApi } : {}),
     runPipelineCommand: async (args, options) => await (
       runtime.runSelfCommand ?? runSelfCommand
     )(args, {
@@ -212,7 +139,7 @@ function createModelRuntimeGetter(
     const fingerprint = agentConfigFingerprint(env);
     if (!promise || builtFingerprint !== fingerprint) {
       builtFingerprint = fingerprint;
-      const attempt = createPiModelRuntime(env);
+      const attempt = createPiModelRuntime();
       promise = attempt;
       attempt.catch(() => { if (promise === attempt) promise = undefined; });
     }
@@ -221,11 +148,7 @@ function createModelRuntimeGetter(
 }
 
 function agentConfigFingerprint(env: NodeJS.ProcessEnv): string {
-  return JSON.stringify([
-    getConfigRevision(), getAgentSelection(env),
-    getApiKey({ apiKey: env.TUNED_TENSOR_API_KEY }),
-    getBaseUrl({ baseUrl: env.TUNED_TENSOR_URL }),
-  ]);
+  return JSON.stringify([getConfigRevision(), getAgentSelection(env)]);
 }
 
 function createLazyDefaultAgentClient(
@@ -333,14 +256,12 @@ export async function runSelfCommand(
 }
 
 function childEnvironment(
-  root: { color?: boolean; apiKey?: string; baseUrl?: string },
+  root: { color?: boolean },
   base: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   return {
     ...base,
     ...(root.color === false ? { FORCE_COLOR: "0" } : {}),
-    ...(root.apiKey ? { TUNED_TENSOR_API_KEY: root.apiKey } : {}),
-    ...(root.baseUrl ? { TUNED_TENSOR_URL: root.baseUrl } : {}),
   };
 }
 
@@ -401,8 +322,6 @@ export function createProgram(
     .version(version)
     .option("--json", "Output raw JSON")
     .option("--no-color", "Disable colors")
-    .option("--api-key <key>", "TT access token for managed inference and cloud operations")
-    .option("--base-url <url>", "Tuned Tensor API base URL")
     .showSuggestionAfterError()
     .hook("preAction", () => {
       const root = program.opts<{ json?: boolean; color?: boolean }>();
@@ -423,12 +342,6 @@ export function createProgram(
   });
   registerSpecCommands(program, cwd);
   registerPipelineCommands(program);
-  registerAuthCommands(program);
-  registerBalanceCommands(program);
-  registerTopupCommands(program);
-  registerUsageCommand(program);
-  registerPublishCommand(program);
-  registerCloudCommands(program);
   registerUpgradeCommand(program, {
     version,
     entrypoint: runtime.argv?.[1] ?? process.argv[1],
@@ -475,9 +388,7 @@ Examples:
   tt pipeline run --spec tunedtensor.json --dry-run
   tt serve active
   tt runs list
-  tt auth login          Enable managed agent inference and cloud access
-  tt cloud runs list
-  tt usage
+  tt agent configure --provider openrouter --model <model>
 `,
   );
 

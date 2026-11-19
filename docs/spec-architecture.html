@@ -107,7 +107,7 @@
       <div class="tt-unit"><button class="btn" type="button" data-component="serve" aria-pressed="false">Serve verified model</button><small class="text-small">vLLM → OpenAI-compatible clients</small></div>
     </div>
     <div class="tt-arrow text-small">↺ evaluation evidence informs the next reviewed spec edit</div>
-    <div class="viz-row"><button class="btn btn-ghost" type="button" data-component="cli" aria-pressed="false">CLI entry points</button><button class="btn btn-ghost" type="button" data-component="publish" aria-pressed="false">Optional publish → dashboard</button></div>
+    <div class="viz-row"><button class="btn btn-ghost" type="button" data-component="cli" aria-pressed="false">CLI entry points</button></div>
   </div>
   <section class="tt-detail" aria-label="Selected component details">
     <hr>
@@ -125,7 +125,7 @@
     <div class="tt-tree">
       <details open><summary><code>src/</code> · TypeScript CLI and orchestration</summary>
         <ul><li><code>index.ts → cli.ts</code> — executable and command registration</li><li><code>shell.ts / agent.ts</code> — terminal routing and conversation control</li><li><code>local-agent-client.ts / agent-model.ts</code> — local agent loop and provider selection</li><li><code>agent-tools.ts / agent-approval.ts</code> — tool schemas, proposals and approval</li><li><code>local-pipeline-action.ts / spec-workspace.ts</code> — pipeline previews and reviewed spec edits</li><li><code>agent-store.ts / config.ts / paths.ts</code> — conversation, credentials and paths</li><li><code>pipeline.ts</code> — shared pipeline contract and execution planning</li><li><code>client.ts</code> — account HTTP API</li></ul>
-        <details><summary><code>commands/</code> · user-facing actions</summary><ul><li><code>pipeline.ts</code> — init / validate / plan / run</li><li><code>spec.ts</code> — shared CLI and shell review</li><li><code>local.ts</code> — local runtime command forwarding</li><li><code>cloud.ts / auth.ts / publish.ts</code> — account operations</li></ul></details>
+        <details><summary><code>commands/</code> · user-facing actions</summary><ul><li><code>pipeline.ts</code> — init / validate / plan / run</li><li><code>spec.ts</code> — shared CLI and shell review</li><li><code>local.ts</code> — local runtime command forwarding</li><li><code>agent.ts</code> — agent provider and model selection</li></ul></details>
         <details><summary><code>local-runtime/</code> · execution machinery</summary><ul><li><code>contracts.ts / local-project.ts</code> — strict schemas, parsing and shared spec validation</li><li><code>orchestrator.ts / foundation-runner.ts</code> — separate engine coordinators</li><li><code>dataset.ts / evaluation.ts</code> — compile data, score predictions</li><li><code>process-training.ts / process-runner.ts / gpu-executor.ts</code> — process lifecycle and transport</li><li><code>store.ts / artifacts.ts / model-registry.ts</code> — records and artifact integrity</li><li><code>model-server.ts / serving-runtime.ts</code> — verified serving process</li></ul></details>
       </details>
       <details open><summary><code>training/</code> · independently locked runtimes</summary>
@@ -473,30 +473,6 @@
       "docs/local-runtime/serving.md"
     ],
     "example": "tt serve local-<run-id>\n# Or a foundation checkpoint:\ntt serve foundation --checkpoint <model-dir> --tokenizer <tokenizer.json>"
-  },
-  "publish": {
-    "title": "Publish & account operations",
-    "location": "Laptop HTTP client → TT service",
-    "summary": "Optionally publish adapter run evidence to the dashboard. Account commands separately inspect hosted records and manage authentication and usage.",
-    "input": "Stored spec plus run report, including prompts and model outputs.",
-    "output": "A dashboard run record and URL.",
-    "boundary": "Publishing uploads evidence, not model weights. It needs a TT token. Hosted training start/estimate are retired; EC2 training uses pipeline run.",
-    "flow": [
-      "local store",
-      "spec + report",
-      "POST /publish/runs",
-      "dashboard"
-    ],
-    "path": "src/commands/publish.ts",
-    "line": 172,
-    "code": "      const report = runReportSchema.parse(rawReport);\n      const specRecord = await store.getSpec(run.behavior_spec_id);\n      const exampleCount = report.candidate.results.length\n        || report.baseline.results.length;\n\n      const payload = {\n        spec: {\n          id: specRecord.id,\n          ...specRecord.spec,\n        },\n        report,",
-    "files": [
-      "src/commands/publish.ts",
-      "src/client.ts",
-      "src/commands/cloud.ts",
-      "src/commands/auth.ts"
-    ],
-    "example": "tt publish <run-id> --dry-run\n# Optional upload, after reviewing the payload:\ntt publish <run-id>\ntt cloud runs list\ntt usage"
   },
   "review": {
     "title": "Direct review & history",

@@ -10,10 +10,9 @@ import { canonicalPipeline } from "../pipeline.js";
 import { prepareLocalPipelineAction, validatePreparedLocalPipelineAction } from "../local-pipeline-action.js";
 import { loadLocalRunInput } from "../local-runtime/local-project.js";
 import { pipelineForRunInput } from "../pipeline.js";
-import { projectCloudSpec, projectLocalSpec } from "../project-spec.js";
+import { projectLocalSpec } from "../project-spec.js";
 import { createProgram } from "../cli.js";
 import { setJsonMode } from "../output.js";
-import { resolvePublishStoreRoot } from "../commands/publish.js";
 
 async function resolveProjectWorkflow(path: string, options: { pipelinePath?: string } = {}) {
   const input = await loadLocalRunInput(path);
@@ -28,13 +27,12 @@ beforeEach(async () => { root = await realpath(await mkdtemp(join(tmpdir(), "tt-
 afterEach(async () => { setJsonMode(false); vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }); });
 
 describe("single spec workflows", () => {
-  it("keeps shell context and publish lookup aligned with the core runtime section", async () => {
+  it("keeps shell context aligned with the core runtime section", async () => {
     await writeFile(file, JSON.stringify({ ...spec, runtime: { storeRoot: "my-state", artifactRoot: "my-artifacts" } }));
     const context = await discoverShellContext({ cwd: root, env: { HOME: root } });
     expect(context.local.storeRoot).toBe(join(root, "my-state"));
     expect(context.local.artifactRoot).toBe(join(root, "my-artifacts"));
     expect(context.local.configPath).toBeUndefined();
-    expect(resolvePublishStoreRoot({ cwd: root, env: { HOME: root } })).toBe(context.local.storeRoot);
   });
 
   it("materializes an advanced recipe in the existing spec without a sidecar", async () => {
@@ -63,7 +61,6 @@ describe("single spec workflows", () => {
     expect(result.config).toMatchObject({ artifactRoot: join(root, "output"), storeRoot: join(root, "state"), paths: { modelCache: join(root, "cache") }, evaluation: { scoring: { mode: "json_fields", fields: ["label"] }, generalRegression: { dataset: join(root, "regression.jsonl") } } });
     expect(result.pipeline.steps.map(s => s.id)).toEqual(["baseline", "train", "candidate", "compare"]);
     expect(result.input.kind === "spec" && result.input.request.spec_snapshot).not.toHaveProperty("runtime");
-    expect(resolvePublishStoreRoot({ cwd: root })).toBe(join(root, "state"));
     expect((await resolveProjectConfig(file)).config).toEqual(result.config);
   });
 
@@ -125,11 +122,8 @@ describe("single spec workflows", () => {
     await expect(createProgram("test").parseAsync(["node", "tt", "pipeline", "run", "--dry-run", "--spec", file])).rejects.toThrow();
   });
 
-  it("keeps local workflow fields out of the cloud behavior projection", () => {
+  it("keeps local workflow fields in the local behavior projection", () => {
     const project = { ...spec, runtime: { storeRoot: "private" }, evaluation: {}, pipeline: canonicalPipeline("local") };
-    expect(projectCloudSpec(project).body).not.toHaveProperty("runtime");
-    expect(projectCloudSpec(project).body).not.toHaveProperty("evaluation");
-    expect(projectCloudSpec(project).body).not.toHaveProperty("pipeline");
     expect(projectLocalSpec(project).body).toMatchObject(project);
   });
 });
@@ -140,7 +134,6 @@ describe("single-spec review regressions", () => {
     vi.stubEnv("TT_LOCAL_HOME", "   ");
     try {
       expect((await resolveProjectConfig(file)).config.storeRoot).toBe(join(root, ".tuned-tensor/store"));
-      expect(resolvePublishStoreRoot({ cwd: root })).toBe(join(root, ".tuned-tensor/store"));
       expect((await discoverShellContext({ cwd: root })).local.storeRoot).toBe(join(root, ".tuned-tensor/store"));
     } finally { vi.unstubAllEnvs(); }
   });

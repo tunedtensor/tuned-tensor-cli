@@ -88,11 +88,9 @@ function conversation(
       result: async () => message,
     };
   });
-  const forbidden = vi.fn(async (): Promise<never> => { throw new Error("Unexpected cloud API call"); });
   const store = new LocalAgentStore(join(root, "agent"));
-  const newClient = (cloudEnabled = false) => createLocalAgentClient({
+  const newClient = () => createLocalAgentClient({
     store,
-    cloudEnabled,
     workspaceRoot: root,
     selection: { provider: "fixture", model: "scripted", thinking: "off" },
     modelRuntime: {
@@ -102,8 +100,7 @@ function conversation(
       hasConfiguredAuth: () => true,
       streamSimple,
     },
-    toolApi: { get: forbidden, postRead: forbidden, propose: async (action) => action },
-    mutationApi: { get: forbidden, post: forbidden, put: forbidden },
+    toolApi: { propose: async (action) => action },
     runPipelineCommand: runCommand,
     backgroundRuns,
   });
@@ -114,7 +111,7 @@ function conversation(
     client,
     io: { write: (text) => output.push(text), writeError: (text) => errors.push(text), clear: () => {} },
   });
-  return { client, newClient, store, session: newSession(), newSession, output, errors, contexts, streamSimple, forbidden };
+  return { client, newClient, store, session: newSession(), newSession, output, errors, contexts, streamSimple };
 }
 
 describe("conversation workflow contracts (scripted provider, real agent and tools)", () => {
@@ -155,7 +152,6 @@ describe("conversation workflow contracts (scripted provider, real agent and too
     await resumed.handleLine("Preview training.");
     expect(c.errors).toEqual([]);
     expect(resumed.snapshot().pendingActions).toMatchObject([{ operation: "run_local_pipeline", arguments: { dry_run: true } }]);
-    expect(c.forbidden).not.toHaveBeenCalled();
   });
 
   it("discovers cached Parquet data, inspects both splits and attaches it only after approval", async () => {
@@ -198,7 +194,6 @@ describe("conversation workflow contracts (scripted provider, real agent and too
     expect(c.errors).toEqual([]);
     expect(resumed.snapshot().pendingActions).toMatchObject([{ operation: "run_local_pipeline", arguments: { dry_run: true } }]);
     expect(JSON.stringify(c.contexts[7])).toContain('data/train.parquet');
-    expect(c.forbidden).not.toHaveBeenCalled();
   });
 
   it("reports a failed summary visibly and retains the conversation for retry", async () => {
@@ -281,7 +276,6 @@ describe("conversation workflow contracts (scripted provider, real agent and too
     await resumed.handleLine("/approve");
     expect(runner).toHaveBeenCalledTimes(1);
     expect(c.streamSimple).toHaveBeenCalledTimes(2);
-    expect(c.forbidden).not.toHaveBeenCalled();
   });
 
   it("creates a reviewed spec, resumes the conversation, and approves the same plan through the real CLI", async () => {
@@ -338,7 +332,6 @@ describe("conversation workflow contracts (scripted provider, real agent and too
     expect(runCommand).toHaveBeenCalledTimes(1);
     expect(c.streamSimple).toHaveBeenCalledTimes(4); // Approvals never call the model.
     expect(c.errors.join("")).toContain("There is no pending action");
-    expect(c.forbidden).not.toHaveBeenCalled();
   }, 20_000);
 
   it.each(["reject", "spec changed", "config changed"])("does not execute a prepared run after %s", async (reason) => {
@@ -429,24 +422,28 @@ describe("conversation workflow contracts (scripted provider, real agent and too
       .toEqual(["user", "assistant", "user", "assistant"]);
   });
 
-  it("refreshes account instructions and tool declarations when a thread resumes after logout", async () => {
-    const c = conversation(["Signed in.", "Signed out."]);
-    const signedIn = c.newClient(true);
-    const thread = await signedIn.createThread();
-    await signedIn.runTurn(thread.id, "Hello", () => {});
+  it("drops hosted-account instructions and tools saved by older releases when a thread resumes", async () => {
+    const c = conversation(["First answer.", "Second answer."]);
+    const thread = await c.client.createThread();
+    await c.client.runTurn(thread.id, "Hello", () => {});
     const initialSystem = c.contexts[0].messages.find((message) => message.role === "system")!;
-    expect(initialSystem.content).toContain("Account tools inspect cloud");
-    expect(initialSystem.toolsAdded?.some((tool) => tool.name === "list_specs")).toBe(true);
+    expect(initialSystem.toolsAdded?.map((tool) => tool.name)).toContain("get_local_spec");
+    expect(initialSystem.toolsAdded?.some((tool) => tool.name === "list_specs")).toBe(false);
 
     // Include both leading and mid-conversation system messages from Pi 1.x.
+    const legacySystem = {
+      ...initialSystem,
+      content: "STALE ACCOUNT INSTRUCTIONS",
+      toolsAdded: [...(initialSystem.toolsAdded ?? []), { name: "list_specs" }],
+    };
     const saved = await c.store.load(thread.id);
-    saved.messages.unshift(initialSystem);
-    saved.messages.push({ ...initialSystem, content: "STALE ACCOUNT INSTRUCTIONS" });
+    saved.messages.unshift(legacySystem);
+    saved.messages.push(legacySystem);
     await c.store.save(saved);
-    await c.newClient(false).runTurn(thread.id, "Again", () => {});
+    await c.newClient().runTurn(thread.id, "Again", () => {});
     const systems = c.contexts[1].messages.filter((message) => message.role === "system");
     expect(systems).toHaveLength(1);
-    expect(systems[0].content).toContain("No TT access token is configured");
+    expect(systems[0].content).toContain("no Tuned Tensor account, token or hosted service exists");
     expect(systems[0].toolsAdded?.map((tool) => tool.name)).toContain("get_local_spec");
     expect(systems[0].toolsAdded?.map((tool) => tool.name)).not.toContain("list_specs");
     expect(JSON.stringify(c.contexts[1].messages)).not.toContain("STALE ACCOUNT INSTRUCTIONS");
@@ -504,7 +501,6 @@ describe("spec-centered conversation", () => {
     expect(resumed.snapshot().pendingActions[0].arguments).toMatchObject({ spec_sha256: (await inspectLocalSpec(root)).sha256 });
     await resumed.handleLine("/approve");
     expect(command).toHaveBeenCalledTimes(1);
-    expect(c.forbidden).not.toHaveBeenCalled();
     expect(c.errors).toEqual([]);
   });
 

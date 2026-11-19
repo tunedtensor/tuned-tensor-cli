@@ -111,10 +111,9 @@ npm run --silent eval:agent > agent-eval.jsonl # Save JSON lines without npm's b
 
 The runner uses TT's configured provider, model, and thinking level, including
 the usual environment overrides. Configure these with `tt agent configure`
-and authenticate through TT first. Live calls may incur provider charges;
-they are deliberately excluded from `npm test` and CI's default gate.
-Managed inference consumes TT usage allowance; BYO calls use the selected
-provider's billing. The runner uses the normal model-runtime initialization,
+and save that provider's credentials with `/login` first. Live calls may incur
+provider charges; they are deliberately excluded from `npm test` and CI's
+default gate. The runner uses the normal model-runtime initialization,
 including its saved configuration normalization and any provider credential refresh.
 
 Eight synthetic cases cover spec review, a reviewed spec edit, an adapter preview, a foundation preview,

@@ -11,10 +11,11 @@ import { getConfigDir } from "./paths.js";
 export { getAgentConfigDir, getConfigDir } from "./paths.js";
 
 export interface Config {
-  api_key?: string;
-  base_url?: string;
   agent?: AgentSelection;
 }
+
+/** Keys written by earlier releases for the retired hosted service. */
+const RETIRED_CONFIG_KEYS = ["api_key", "base_url"] as const;
 
 export const AGENT_THINKING_LEVELS = [
   "off",
@@ -34,20 +35,15 @@ export interface AgentSelection {
   thinking: AgentThinkingLevel;
 }
 
-export const MANAGED_AGENT_PROVIDER = "tunedtensor";
-export const MANAGED_AGENT_MODEL = "managed";
-export const MANAGED_AGENT_SELECTION: AgentSelection = {
-  provider: MANAGED_AGENT_PROVIDER,
-  model: MANAGED_AGENT_MODEL,
-  thinking: "off",
-};
+/**
+ * Earlier releases offered hosted inference as `tunedtensor/managed`. That
+ * service is retired, so a saved selection of it counts as unconfigured.
+ */
+export const RETIRED_MANAGED_PROVIDER = "tunedtensor";
+export const RETIRED_MANAGED_MODEL = "managed";
 
-export function validateAccessToken(value: string): string {
-  const token = value.trim();
-  if (!token.startsWith("tt_") || token.length !== 51) {
-    throw new Error("Invalid TT access token format. Tokens start with tt_ and are 51 characters long.");
-  }
-  return token;
+export function isRetiredManagedSelection(provider: string | undefined, model?: string): boolean {
+  return provider === RETIRED_MANAGED_PROVIDER && (model === undefined || model === RETIRED_MANAGED_MODEL);
 }
 
 const CONFIG_FILE_NAME = "config.json";
@@ -89,8 +85,10 @@ export function writeConfig(config: Config): void {
 }
 
 export function updateConfig(partial: Partial<Config>): void {
-  const current = readConfig();
-  writeConfig({ ...current, ...partial });
+  const current: Record<string, unknown> = { ...readConfig() };
+  // Drop the retired hosted-service token rather than keep an unused credential on disk.
+  for (const key of RETIRED_CONFIG_KEYS) delete current[key];
+  writeConfig({ ...current, ...partial } as Config);
 }
 
 export function clearConfig(): void {
@@ -98,29 +96,21 @@ export function clearConfig(): void {
   if (existsSync(path)) writeConfig({});
 }
 
-export const DEFAULT_BASE_URL = "https://tunedtensor.com";
-
-export function getBaseUrl(opts?: { baseUrl?: string }): string {
-  return opts?.baseUrl || process.env.TUNED_TENSOR_URL || readConfig().base_url || DEFAULT_BASE_URL;
-}
-
-export function getApiKey(opts?: { apiKey?: string }): string | undefined {
-  return opts?.apiKey || process.env.TUNED_TENSOR_API_KEY || readConfig().api_key;
-}
-
 export function getAgentSelection(
   env: Readonly<NodeJS.ProcessEnv> = process.env,
 ): AgentSelection | undefined {
-  const stored = readConfig().agent;
+  const saved = readConfig().agent;
+  const stored = saved && isRetiredManagedSelection(saved.provider, saved.model) ? undefined : saved;
   const provider = env.TUNED_TENSOR_AGENT_PROVIDER || stored?.provider;
-  const model = env.TUNED_TENSOR_AGENT_MODEL
-    || (provider === MANAGED_AGENT_PROVIDER ? MANAGED_AGENT_MODEL : stored?.model);
-  if (!provider && !model && (env.TUNED_TENSOR_API_KEY || readConfig().api_key)) {
-    return { ...MANAGED_AGENT_SELECTION };
+  const model = env.TUNED_TENSOR_AGENT_MODEL || stored?.model;
+  if (isRetiredManagedSelection(provider, model)) {
+    throw new Error(
+      "Tuned Tensor managed inference has been retired. Choose your own provider with /login and /model, or `tt agent configure --provider <provider> --model <model>`.",
+    );
   }
   const rawThinking = env.TUNED_TENSOR_AGENT_THINKING
     || (stored?.provider === provider ? stored?.thinking : undefined)
-    || (provider === MANAGED_AGENT_PROVIDER ? "off" : "medium");
+    || "medium";
   if (!AGENT_THINKING_LEVELS.includes(rawThinking as AgentThinkingLevel)) {
     throw new Error(
       "Agent thinking must be off, minimal, low, medium, high, xhigh, or max.",

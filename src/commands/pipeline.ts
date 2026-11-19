@@ -245,7 +245,7 @@ export function registerPipelineCommands(parent: Command): void {
 
   pipeline.command("run")
     .description("Run an ordered local pipeline, or safely preview any pipeline")
-    .option("--dry-run", "Resolve and display only; never execute, transfer, or reserve credits")
+    .option("--dry-run", "Resolve and display only; never execute or transfer")
     .option("-f, --file <path>", "Explicit pipeline recipe (default: derive from behavior spec)")
     .option("--spec <path>", "Local behavior spec", DEFAULT_SPEC_FILE)
     .option("--config <path>", "Local runtime config")

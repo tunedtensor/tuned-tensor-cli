@@ -60,7 +60,7 @@ function childEnvironment(
 /**
  * Register the local CUDA workflow at the root of `tt`.
  *
- * Cloud operations are registered separately under `tt cloud`. `tt local …`
+ * Everything runs on machines the user controls. `tt local …`
  * remains as a hidden alias so older scripts keep working.
  */
 export function registerLocalCommands(

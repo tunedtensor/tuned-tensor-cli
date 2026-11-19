@@ -3,8 +3,7 @@ import type { AgentLocalServer } from "./agent-local-server.js";
 import { validateProjectModelAction, executeProjectModelAction, buildProjectModelLaunch } from "./agent-local-models.js";
 import { validateDatasetSplit, executeDatasetSplit } from "./local-runtime/dataset-split.js";
 import { applySpecUpdate, validateSpecUpdate, SpecWorkspaceMismatchError, type SpecUpdate } from "./spec-workspace.js";
-import { createHash } from "node:crypto";
-import type { AgentAction, CloudActionContext } from "./agent-client.js";
+import type { AgentAction } from "./agent-client.js";
 import {
   canonicalWorkspace,
   createLocalSpecProject,
@@ -30,32 +29,7 @@ import {
 } from "./local-background-run-action.js";
 import type { BackgroundRunRequester } from "./local-runtime/background-runs.js";
 
-import {
-  revalidateLabelDownload,
-  revalidateLabelJob,
-  type AgentLabelingExecutor,
-} from "./agent-labeling.js";
-
-export interface AgentMutationApi {
-  get(path: string): Promise<unknown>;
-  post(path: string, body?: unknown, guard?: AgentMutationGuard): Promise<unknown>;
-  put(path: string, body?: unknown, guard?: AgentMutationGuard): Promise<unknown>;
-}
-
-export interface AgentMutationGuard {
-  actionId: string;
-  operation: "create_spec" | "update_spec";
-  expectedUpdatedAt?: string;
-}
-
 export type PersistAction = (action: AgentAction) => Promise<void>;
-
-export function createCloudActionContext(baseUrl: string, token: string): CloudActionContext {
-  return {
-    origin: new URL(baseUrl).origin,
-    credential_fingerprint: createHash("sha256").update(token).digest("hex"),
-  };
-}
 
 export interface AgentApprovalOptions {
   localServer?: AgentLocalServer;
@@ -64,7 +38,6 @@ export interface AgentApprovalOptions {
   runPipelineCommand?: LocalPipelineCommandRunner;
   signal?: AbortSignal;
   durableClaimed?: boolean;
-  labeling?: AgentLabelingExecutor;
   backgroundRuns?: BackgroundRunExecutor;
   /** Recorded as the approver of background runs and cancellations. */
   requestedBy?: BackgroundRunRequester;
@@ -81,10 +54,6 @@ function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
-}
-
-function data(value: unknown): unknown {
-  return record(value)?.data ?? value;
 }
 
 function args(action: AgentAction): Record<string, unknown> {
@@ -106,19 +75,6 @@ function requiredBoolean(value: unknown, label: string): boolean {
 function optionalString(value: unknown, label: string): string | undefined {
   if (value === null || value === undefined) return undefined;
   return requiredString(value, label);
-}
-
-async function requireMutationGuardSupport(api: AgentMutationApi): Promise<void> {
-  const version = record(data(await api.get("/version")));
-  const capabilities = version?.capabilities;
-  if (
-    !Array.isArray(capabilities) ||
-    !capabilities.includes("local_agent_spec_mutation_guards_v1")
-  ) {
-    throw new Error(
-      "The Tuned Tensor API does not advertise local-agent mutation guard support. Refusing to mutate; update the server or use an explicit direct CLI command.",
-    );
-  }
 }
 
 async function fail(
@@ -233,15 +189,6 @@ export async function preflightPreparedAction(
       );
     }
     await prepareLocalSpecProject(workspaceRoot, input.spec, expectedWorkspaceFingerprint);
-  } else if (action.operation === "start_label_job" || action.operation === "download_label_job") {
-    if (!options.workspaceRoot) throw new Error("A local workspace is required for labeling.");
-    try {
-      const validate = action.operation === "start_label_job" ? revalidateLabelJob : revalidateLabelDownload;
-      await validate(options.workspaceRoot, args(action));
-    } catch (error) {
-      if (error instanceof SpecWorkspaceMismatchError) throw new PreparedActionWorkspaceMismatchError(error.message, error);
-      throw error;
-    }
   } else if (action.operation === "split_local_dataset") {
     if (!options.workspaceRoot) throw new Error("A local workspace is required to split data.");
     try { await validateDatasetSplit(options.workspaceRoot, args(action), options.signal); }
@@ -278,7 +225,6 @@ export async function preflightPreparedAction(
 
 export async function approvePreparedAction(
   action: AgentAction,
-  api: AgentMutationApi,
   persist: PersistAction,
   options: AgentApprovalOptions = {},
 ): Promise<unknown> {
@@ -377,48 +323,6 @@ export async function approvePreparedAction(
         execute = async () => await executeLocalPrefetch(prepared, runCommand, options.signal);
         break;
       }
-      case "create_spec": {
-        await requireMutationGuardSupport(api);
-        const spec = record(input.spec);
-        if (!spec) throw new Error("Prepared create spec body is invalid.");
-        execute = async () => data(await api.post("/behavior-specs", spec, {
-          actionId: action.id,
-          operation: "create_spec",
-        }));
-        break;
-      }
-      case "update_spec": {
-        await requireMutationGuardSupport(api);
-        const specId = requiredString(input.spec_id, "spec ID");
-        const expected = requiredString(input.expected_spec_updated_at, "spec version");
-        const changes = record(input.changes);
-        if (!changes) throw new Error("Prepared spec changes are invalid.");
-        const current = record(data(await api.get(`/behavior-specs/${specId}`)));
-        if (current?.updated_at !== expected) {
-          throw new Error("The behaviour spec changed after this action was prepared; prepare it again.");
-        }
-        execute = async () => data(await api.put(`/behavior-specs/${specId}`, changes, {
-          actionId: action.id,
-          operation: "update_spec",
-          expectedUpdatedAt: expected,
-        }));
-        break;
-      }
-      case "start_label_job": {
-        const labeling = options.labeling;
-        if (!options.workspaceRoot || !labeling) throw new Error("Teacher labeling needs a local workspace and a TT account.");
-        const start = await revalidateLabelJob(options.workspaceRoot, input);
-        execute = async () => await labeling.start(start);
-        break;
-      }
-      case "download_label_job": {
-        const labeling = options.labeling;
-        if (!options.workspaceRoot || !labeling) throw new Error("Downloading labeled data needs a local workspace and a TT account.");
-        const download = await revalidateLabelDownload(options.workspaceRoot, input);
-        execute = async () => await labeling.download(download);
-        break;
-      }
-
       default:
         throw new Error(`Unsupported prepared operation: ${String(action.operation)}.`);
     }
@@ -457,9 +361,6 @@ export async function approvePreparedAction(
         && (isBackgroundRunFailure(error) || isKnownLocalPipelineFailure(error)))
       // Downloads resume into a content-addressed cache; retrying is safe.
       || error instanceof LocalPrefetchError
-      // A download only writes local files after every row is fetched; retrying is safe.
-      || (action.operation as string | undefined) === "download_label_job"
-      || (error instanceof Error && error.name === "LabelingNotStartedError")
     ) {
       action.status = "failed";
       try {
@@ -489,11 +390,7 @@ export async function approvePreparedAction(
           ? "background runs (tt pipeline list)"
         : action.operation === "prefetch_local"
           ? "local Hugging Face cache (tt datasets verify / tt models verify-base)"
-        : action.operation === "start_label_job"
-          ? "labeling jobs (tt cloud label list)"
-          : action.operation === "download_label_job"
-            ? "download directory"
-            : "remote resource";
+          : "local workspace";
     throw new Error(
       `The mutation outcome is unknown and this action cannot be retried automatically. Inspect the ${inspectionTarget} before preparing another action. ${detail}`,
       { cause: error },

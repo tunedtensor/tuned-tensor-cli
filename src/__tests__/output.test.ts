@@ -14,7 +14,6 @@ import {
   printTable,
   printDetail,
 } from "../output.js";
-import { ApiError } from "../client.js";
 
 beforeEach(() => {
   setJsonMode(false);
@@ -71,30 +70,14 @@ describe("output", () => {
   });
 
   describe("reportError", () => {
-    it("formats ApiError as text by default", () => {
+    it("formats errors as text by default", () => {
       const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-      reportError(new ApiError(500, "INTERNAL", "boom"));
+      reportError(new Error("boom"));
       expect(errSpy).toHaveBeenCalledTimes(1);
-      expect(errSpy.mock.calls[0][0] as string).toContain("[500]");
       expect(errSpy.mock.calls[0][0] as string).toContain("boom");
     });
 
-    it("emits JSON for ApiError when --json mode is on", () => {
-      setJsonMode(true);
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-      reportError(new ApiError(500, "INTERNAL", "boom"));
-
-      expect(errSpy).not.toHaveBeenCalled();
-      expect(logSpy).toHaveBeenCalledTimes(1);
-      const parsed = JSON.parse(logSpy.mock.calls[0][0] as string);
-      expect(parsed).toEqual({
-        error: { status: 500, code: "INTERNAL", message: "boom" },
-      });
-    });
-
-    it("emits JSON for non-ApiError when --json mode is on", () => {
+    it("emits JSON for errors when --json mode is on", () => {
       setJsonMode(true);
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 

@@ -27,9 +27,8 @@ trainable; consumer cards typically only fit Qwen LoRA. `tt status` and the
 shell agent reuse the cached report.
 
 Local TT training requires Node 22.19+, `uv`, working CUDA PyTorch, and enough free space
-for the Hugging Face cache plus run artifacts. Local commands need no TT
-access token. Agent inference can use your TT token through the managed proxy,
-or your own provider credentials and model.
+for the Hugging Face cache plus run artifacts. No Tuned Tensor account is
+needed. Agent inference uses your own provider credentials and model.
 
 ## Create a project
 

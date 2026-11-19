@@ -1,6 +1,5 @@
 import chalk from "chalk";
 import Table from "cli-table3";
-import { ApiError } from "./client.js";
 
 /* Brand accent — matches the app's violet-400 for labels on dark terminals. */
 const labelStyle = chalk.bold.hex("#A78BFA");
@@ -64,19 +63,16 @@ export function printError(message: string) {
 }
 
 export function reportError(err: unknown): void {
-  const isApi = err instanceof ApiError;
   const message = (err as Error)?.message || String(err);
 
   if (jsonMode) {
     printJson({
       error: {
-        status: isApi ? err.status : null,
-        code: isApi ? err.code : "CLI_ERROR",
+        status: null,
+        code: "CLI_ERROR",
         message,
       },
     });
-  } else if (isApi) {
-    printError(`[${err.status}] ${message}`);
   } else {
     printError(message);
   }

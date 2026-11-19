@@ -29,18 +29,16 @@ function workspace(document: unknown = spec): string {
 
 async function prepare(root: string, kind: "dataset" | "base_model", source?: Record<string, unknown>): Promise<AgentAction> {
   const api: AgentToolApi = {
-    get: vi.fn(),
-    postRead: vi.fn(),
     propose: vi.fn(async (action: AgentAction) => action),
   };
-  const tool = createTunedTensorTools(api, { workspaceRoot: root, localOnly: true })
+  const tool = createTunedTensorTools(api, { workspaceRoot: root })
     .find((candidate) => candidate.name === "prepare_download")!;
   await tool.execute("download", { kind, ...(source ? { source } : {}) });
   return vi.mocked(api.propose).mock.calls[0]![0];
 }
 
 const approve = (action: AgentAction, root: string, runPipelineCommand: (...args: never[]) => unknown) =>
-  approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+  approvePreparedAction(action, async () => {}, {
     workspaceRoot: root,
     runPipelineCommand: runPipelineCommand as never,
   });
@@ -60,8 +58,7 @@ describe("agent downloads", () => {
           getProviders: () => [{ id: "test" }], getModels: () => [{ id: "test", provider: "test" }],
           getModel: () => ({ id: "test", provider: "test" }), hasConfiguredAuth: () => true,
         },
-        toolApi: { get: vi.fn(), postRead: vi.fn(), propose: async (action) => action },
-        mutationApi: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
+        toolApi: { propose: async (action) => action },
         runPipelineCommand: async () => ({ exitCode: 0, stdout: JSON.stringify({
           repo, revision, snapshot_path: "/cache/snapshot", manifest_path: "/assets/manifest.json",
           file_count: 13, size_bytes: 59581829216, verified_blob_count: 13,
@@ -107,7 +104,7 @@ describe("agent downloads", () => {
         },
       });
       const runPipelineCommand = vi.fn(async () => ({ exitCode: 0, signal: null }));
-      const output = await approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+      const output = await approvePreparedAction(action, async () => {}, {
         workspaceRoot: root,
         runPipelineCommand,
       });
@@ -125,7 +122,7 @@ describe("agent downloads", () => {
       const action = await prepare(root, "base_model");
       expect(action.preview).toMatchObject({ base_model: "Qwen/Qwen3.5-2B", command: ["tt", "models", "prefetch", "./tunedtensor.json"] });
       const runPipelineCommand = vi.fn(async () => ({ exitCode: 1, signal: null }));
-      await expect(approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+      await expect(approvePreparedAction(action, async () => {}, {
         workspaceRoot: root,
         runPipelineCommand,
       })).rejects.toThrow(/models prefetch tunedtensor\.json exited with code 1/);
@@ -142,7 +139,7 @@ describe("agent downloads", () => {
       const action = await prepare(root, "dataset");
       writeFileSync(join(root, "tunedtensor.json"), JSON.stringify({ ...spec, name: "Changed" }));
       const runPipelineCommand = vi.fn();
-      await expect(approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+      await expect(approvePreparedAction(action, async () => {}, {
         workspaceRoot: root,
         runPipelineCommand,
       })).rejects.toThrow(/spec changed/);
@@ -267,7 +264,7 @@ describe("agent downloads", () => {
         expect(executed.runtime.paths.modelCache).toBe(join(root, "cache"));
         return { exitCode: 0, signal: null };
       });
-      await approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, { workspaceRoot: root, runPipelineCommand: runner });
+      await approvePreparedAction(action, async () => {}, { workspaceRoot: root, runPipelineCommand: runner });
       expect(existsSync(executedPath)).toBe(false);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
@@ -278,7 +275,7 @@ describe("agent downloads", () => {
     try {
       const action = await prepare(root, "dataset");
       const runner = vi.fn();
-      await expect(approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+      await expect(approvePreparedAction(action, async () => {}, {
         workspaceRoot: other, runPipelineCommand: runner,
       })).rejects.toThrow(/workspace changed/i);
       expect(runner).not.toHaveBeenCalled();
@@ -292,7 +289,7 @@ describe("agent downloads", () => {
       const action = await prepare(root, "dataset");
       writeFileSync(join(root, "local-runner.json"), JSON.stringify({ paths: { modelCache: "./second" } }));
       const runner = vi.fn();
-      await expect(approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+      await expect(approvePreparedAction(action, async () => {}, {
         workspaceRoot: root, runPipelineCommand: runner,
       })).rejects.toThrow(/local-runner.json changed/);
       expect(runner).not.toHaveBeenCalled();
@@ -303,7 +300,7 @@ describe("agent downloads", () => {
     const root = workspace();
     try {
       const action = await prepare(root, "dataset");
-      await expect(approvePreparedAction(action, { get: vi.fn(), post: vi.fn(), put: vi.fn() }, async () => {}, {
+      await expect(approvePreparedAction(action, async () => {}, {
         workspaceRoot: root, runPipelineCommand: async () => { throw new Error("spawn failed"); },
       })).rejects.toThrow(/spawn failed/);
       expect(action.status).toBe("failed");

@@ -18,8 +18,6 @@ const TEST_DIR = join(tmpdir(), `tt-test-config-${process.pid}`);
 beforeEach(async () => {
   rmSync(TEST_DIR, { recursive: true, force: true });
   process.env.TUNED_TENSOR_HOME = TEST_DIR;
-  delete process.env.TUNED_TENSOR_URL;
-  delete process.env.TUNED_TENSOR_API_KEY;
   configModule = await import("../config.js");
 });
 
@@ -51,9 +49,9 @@ describe("config", () => {
       mkdirSync(dir, { recursive: true });
       writeFileSync(
         join(dir, "config.json"),
-        JSON.stringify({ api_key: "tt_test123" }),
+        JSON.stringify({ agent: { provider: "openai", model: "gpt-5.2", thinking: "high" } }),
       );
-      expect(configModule.readConfig()).toEqual({ api_key: "tt_test123" });
+      expect(configModule.readConfig()).toEqual({ agent: { provider: "openai", model: "gpt-5.2", thinking: "high" } });
     });
 
     it("returns empty object for malformed JSON", () => {
@@ -66,12 +64,11 @@ describe("config", () => {
 
   describe("writeConfig", () => {
     it("creates config dir and file", () => {
-      configModule.writeConfig({ api_key: "tt_abc" });
+      const agent = { provider: "openai", model: "gpt-5.2", thinking: "high" } as const;
+      configModule.writeConfig({ agent });
       const path = join(TEST_DIR, "config.json");
       expect(existsSync(path)).toBe(true);
-      expect(JSON.parse(readFileSync(path, "utf-8"))).toEqual({
-        api_key: "tt_abc",
-      });
+      expect(JSON.parse(readFileSync(path, "utf-8"))).toEqual({ agent });
       if (process.platform !== "win32") {
         expect(
           statSync(TEST_DIR).mode & 0o777,
@@ -83,17 +80,28 @@ describe("config", () => {
 
   describe("updateConfig", () => {
     it("merges partial config into existing", () => {
-      configModule.writeConfig({ api_key: "tt_old" });
-      configModule.updateConfig({ base_url: "https://example.com" });
-      const config = configModule.readConfig();
-      expect(config.api_key).toBe("tt_old");
-      expect(config.base_url).toBe("https://example.com");
+      mkdirSync(TEST_DIR, { recursive: true });
+      writeFileSync(join(TEST_DIR, "config.json"), JSON.stringify({ project_note: "keep" }));
+      const agent = { provider: "openai", model: "gpt-5.2", thinking: "high" } as const;
+      configModule.updateConfig({ agent });
+      expect(configModule.readConfig()).toEqual({ project_note: "keep", agent });
+    });
+
+    it("removes the retired hosted-service token and URL on the next write", () => {
+      mkdirSync(TEST_DIR, { recursive: true });
+      writeFileSync(join(TEST_DIR, "config.json"), JSON.stringify({
+        api_key: "tt_retired", base_url: "https://tunedtensor.com",
+      }));
+      const agent = { provider: "openai", model: "gpt-5.2", thinking: "high" } as const;
+      configModule.updateConfig({ agent });
+      expect(configModule.readConfig()).toEqual({ agent });
+      expect(readFileSync(join(TEST_DIR, "config.json"), "utf8")).not.toContain("tt_retired");
     });
   });
 
   describe("clearConfig", () => {
     it("resets config to empty object", () => {
-      configModule.writeConfig({ api_key: "tt_old" });
+      configModule.writeConfig({ agent: { provider: "openai", model: "gpt-5.2", thinking: "high" } });
       configModule.clearConfig();
       expect(configModule.readConfig()).toEqual({});
     });
@@ -109,71 +117,36 @@ describe("config", () => {
     });
   });
 
-  describe("getBaseUrl", () => {
-    it("returns default URL when nothing is set", () => {
-      expect(configModule.getBaseUrl()).toBe("https://tunedtensor.com");
-    });
-
-    it("uses opts.baseUrl first", () => {
-      expect(configModule.getBaseUrl({ baseUrl: "https://custom.com" })).toBe(
-        "https://custom.com",
-      );
-    });
-
-    it("uses TUNED_TENSOR_URL env var", () => {
-      process.env.TUNED_TENSOR_URL = "https://env.com";
-      expect(configModule.getBaseUrl()).toBe("https://env.com");
-    });
-
-    it("uses stored config", () => {
-      configModule.writeConfig({ base_url: "https://stored.com" });
-      expect(configModule.getBaseUrl()).toBe("https://stored.com");
-    });
-  });
-
-  describe("getApiKey", () => {
-    it("returns undefined when nothing is set", () => {
-      expect(configModule.getApiKey()).toBeUndefined();
-    });
-
-    it("uses opts.apiKey first", () => {
-      expect(configModule.getApiKey({ apiKey: "tt_opts" })).toBe("tt_opts");
-    });
-
-    it("uses TUNED_TENSOR_API_KEY env var", () => {
-      process.env.TUNED_TENSOR_API_KEY = "tt_env";
-      expect(configModule.getApiKey()).toBe("tt_env");
-    });
-
-    it("uses stored config", () => {
-      configModule.writeConfig({ api_key: "tt_stored" });
-      expect(configModule.getApiKey()).toBe("tt_stored");
-    });
-  });
-
   describe("local agent model selection", () => {
-    it("needs no token for local workflows and automatically uses a saved TT token for managed inference", () => {
+    it("is unconfigured until the user chooses a provider, even with a leftover TT token", () => {
       expect(configModule.getAgentSelection({})).toBeUndefined();
-      configModule.writeConfig({ api_key: "tt_saved" });
-      expect(configModule.getAgentSelection({})).toEqual({
-        provider: "tunedtensor", model: "managed", thinking: "off",
-      });
+      mkdirSync(TEST_DIR, { recursive: true });
+      writeFileSync(join(TEST_DIR, "config.json"), JSON.stringify({ api_key: "tt_saved" }));
+      expect(configModule.getAgentSelection({})).toBeUndefined();
+      expect(configModule.getAgentSelection({ TUNED_TENSOR_API_KEY: "tt_env" })).toBeUndefined();
     });
 
-    it("preserves an explicit BYO selection when a TT token is available", () => {
+    it("treats a saved selection of the retired managed model as unconfigured", () => {
+      mkdirSync(TEST_DIR, { recursive: true });
+      writeFileSync(join(TEST_DIR, "config.json"), JSON.stringify({
+        api_key: "tt_saved",
+        agent: { provider: "tunedtensor", model: "managed", thinking: "off" },
+      }));
+      expect(configModule.getAgentSelection({})).toBeUndefined();
+      expect(configModule.getAgentSelection({
+        TUNED_TENSOR_AGENT_PROVIDER: "openai", TUNED_TENSOR_AGENT_MODEL: "gpt-5.2",
+      })).toEqual({ provider: "openai", model: "gpt-5.2", thinking: "medium" });
+    });
+
+    it("explains that managed inference is retired when the environment selects it", () => {
+      expect(() => configModule.getAgentSelection({ TUNED_TENSOR_AGENT_PROVIDER: "tunedtensor" }))
+        .toThrow(/managed inference has been retired/i);
+    });
+
+    it("preserves an explicit selection of the user's own provider", () => {
       const agent = { provider: "openrouter", model: "vendor/new-model", thinking: "high" } as const;
-      configModule.writeConfig({ api_key: "tt_saved", agent });
+      configModule.writeConfig({ agent });
       expect(configModule.getAgentSelection({})).toEqual(agent);
-      expect(configModule.getAgentSelection({ TUNED_TENSOR_AGENT_PROVIDER: "tunedtensor" })).toEqual({
-        provider: "tunedtensor", model: "managed", thinking: "off",
-      });
-    });
-
-    it("automatically uses a TT environment token without saving a model selection", () => {
-      expect(configModule.getAgentSelection({ TUNED_TENSOR_API_KEY: "tt_env" })).toEqual({
-        provider: "tunedtensor", model: "managed", thinking: "off",
-      });
-      expect(configModule.readConfig()).toEqual({});
     });
 
     it("stores only non-secret metadata and applies environment overrides", () => {

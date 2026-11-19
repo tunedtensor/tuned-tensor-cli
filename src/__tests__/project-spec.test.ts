@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { localBehaviorSpecFileSchema } from "../local-runtime/contracts.js";
 import {
   hasLocalOnlySpecFields,
-  projectCloudSpec,
   projectLocalSpec,
   unknownProjectSpecKeys,
 } from "../project-spec.js";
@@ -35,27 +34,6 @@ const sharedSpec = {
 };
 
 describe("project spec projections", () => {
-  it("projects only hosted API fields for cloud operations", () => {
-    const projection = projectCloudSpec(sharedSpec);
-
-    expect(projection.body).toEqual({
-      name: "Shared Spec",
-      description: "Works in both execution modes.",
-      base_model: "Qwen/Qwen3.5-2B",
-      system_prompt: "Be concise.",
-      guidelines: ["Answer directly."],
-      constraints: [],
-      examples: sharedSpec.examples,
-      eval_cases: sharedSpec.eval_cases,
-    });
-    expect(projection.droppedKeys).toEqual([
-      "id",
-      "hyperparameters",
-      "dataset_prebuilt",
-      "project_note",
-    ]);
-  });
-
   it("projects only local runtime fields for local operations", () => {
     const projection = projectLocalSpec(sharedSpec);
 
@@ -80,10 +58,10 @@ describe("project spec projections", () => {
     expect(
       unknownProjectSpecKeys(sharedSpec),
     ).toEqual(["project_note"]);
-    expect(hasLocalOnlySpecFields({ name: "Cloud only" })).toBe(false);
+    expect(hasLocalOnlySpecFields({ name: "Core fields only" })).toBe(false);
   });
 
-  it("keeps foundation hyperparameters local-only and omits them from cloud projection", () => {
+  it("keeps foundation settings in the local projection", () => {
     const foundationSpec = {
       engine: "foundation",
       name: "Tiny GPT",
@@ -108,18 +86,13 @@ describe("project spec projections", () => {
       project_note: "keep this in the project file",
     };
 
-    const cloud = projectCloudSpec(foundationSpec);
-    expect(cloud.body.engine).toBeUndefined();
-    expect(cloud.body.foundation).toBeUndefined();
-    expect(cloud.body.base_model).toBeUndefined();
-    expect(cloud.droppedKeys).toEqual(expect.arrayContaining(["engine", "foundation", "project_note"]));
-
     const local = projectLocalSpec(foundationSpec);
     expect(local.body).toMatchObject({
       engine: "foundation",
       name: "Tiny GPT",
       foundation: foundationSpec.foundation,
     });
+    expect(local.droppedKeys).toEqual(["project_note"]);
     expect(() => localBehaviorSpecFileSchema.parse(local.body)).not.toThrow();
   });
 });

@@ -81,7 +81,7 @@ GPU/driver, uv, rsync 3.2+, bash, setsid, and GNU timeout. TT
 copies the bundled Python source and lockfile and runs that exact runtime
 with `uv run --frozen`; there is no separate training image or Step Functions
 pipeline. Internet access on the instance is needed to install the locked
-runtime. No TT token is needed for training.
+runtime. No Tuned Tensor account is involved.
 
 `profile` and `region` are optional. AWS CLI uses its normal credential chain,
 including environment credentials, configured profiles and SSO. For SSO, log
@@ -248,9 +248,8 @@ terminate or resize instances, request quotas, choose fallback instances or
 fall back to another account. An AWS profile alone cannot create capacity.
 The instance remains running after the job; its lifecycle is yours to manage.
 
-Hosted training submission (`tt cloud runs start` and `estimate`) is retired.
-Existing cloud reports and cancellation of older hosted jobs remain available.
-This CLI change does not delete deployed AWS infrastructure or historical data.
+Tuned Tensor does not run a hosted training service. GPU work runs only on
+machines you own or rent.
 
 ## Troubleshooting a first run
 
@@ -258,7 +257,7 @@ This CLI change does not delete deployed AWS infrastructure or historical data.
 | --- | --- |
 | AWS credentials expired or access denied | Renew your SSO login, check the selected profile/account, and ask for `ec2:DescribeInstances` permission. |
 | Instance not found or not running | Confirm the instance ID and region, and start the instance through AWS. |
-| GPU quota or capacity error during launch | Check the regional quota and AWS capacity; a TT token or credit top-up will not fix it. |
+| GPU quota or capacity error during launch | Check the regional quota and AWS capacity with AWS. |
 | SSH timeout or permission denied | Check IP routing, security group TCP 22 access, SSH username, key and agent using the manual SSH command above. |
 | Host key verification failed | Verify the host fingerprint through AWS or your administrator; do not disable strict host checking. |
 | `uv` missing or CUDA probe fails | Check the remote login-shell PATH and GPU driver; rerun `tt doctor` after correcting the host. |

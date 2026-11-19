@@ -1,44 +1,38 @@
 import { describe, expect, it, vi } from "vitest";
 import { createProgram } from "../cli.js";
 
-describe("unified local and cloud CLI surface", () => {
-  it("keeps local commands at the root and cloud operations in an explicit namespace", () => {
+describe("local-only CLI surface", () => {
+  it("keeps workflow commands at the root and has no hosted-account commands", () => {
     const program = createProgram("test");
     const names = program.commands.map((command) => command.name());
     expect(names).toEqual(expect.arrayContaining([
       "info", "init", "doctor", "hardware", "validate", "serve", "runs", "models",
-      "agent", "pipeline", "status", "shell", "cloud", "auth", "balance", "topup", "usage", "publish",
+      "agent", "pipeline", "status", "shell", "upgrade",
     ]));
-    expect(names).not.toEqual(expect.arrayContaining(["specs", "datasets", "push", "label"]));
-    const cloud = program.commands.find((command) => command.name() === "cloud")!;
-    expect(cloud.commands.map((command) => command.name())).toEqual(expect.arrayContaining([
-      "push", "specs", "datasets", "label", "runs", "models",
-    ]));
+    for (const retired of ["cloud", "auth", "balance", "topup", "usage", "publish", "specs", "push", "label"]) {
+      expect(names).not.toContain(retired);
+    }
     const help = program.helpInformation();
-    expect(help).toMatch(/cloud/);
-    expect(help).toMatch(/TT access token/);
+    expect(help).not.toMatch(/--api-key|--base-url|TT access token|tt cloud|tt auth/);
     expect(help).not.toMatch(/^\s+run\b/m);
     expect(help.match(/Commands:/g)?.length).toBe(1);
   });
 
-  it("does not expose hosted agent tools on the default client", async () => {
+  it("rejects the retired hosted-service options", async () => {
+    const program = createProgram("test");
+    program.exitOverride();
+    program.configureOutput({ writeErr: () => {}, writeOut: () => {} });
+    await expect(program.parseAsync(["node", "tt", "--api-key", "tt_x", "status"])).rejects.toThrow(/unknown option/i);
+  });
+
+  it("exposes no hosted agent tools", async () => {
     const { createTunedTensorTools } = await import("../agent-tools.js");
     const names = createTunedTensorTools({
-      get: async () => {
-        throw new Error("No TT access token is configured.");
-      },
-      postRead: async () => {
-        throw new Error("No TT access token is configured.");
-      },
       propose: async (action) => action,
-    }, { localOnly: true, workspaceRoot: process.cwd() }).map((tool) => tool.name);
-    expect(names).not.toEqual(expect.arrayContaining([
-      "list_specs",
-      "list_runs",
-      "get_balance",
-      "list_transactions",
-      "prepare_create_spec",
-    ]));
+    }, { workspaceRoot: process.cwd() }).map((tool) => tool.name);
+    for (const hosted of ["list_specs", "list_runs", "get_balance", "list_transactions", "get_agent_usage", "prepare_create_spec", "prepare_label_job"]) {
+      expect(names).not.toContain(hosted);
+    }
     expect(names).toEqual(expect.arrayContaining([
       "examine_hardware",
       "describe_pipeline",

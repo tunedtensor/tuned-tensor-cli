@@ -164,15 +164,16 @@ describe("parseSlashCommand", () => {
 });
 
 describe("command completion", () => {
-  it("completes local, cloud, account, and slash commands", () => {
+  it("completes workflow and slash commands, with no hosted-account commands", () => {
     const complete = createCommandCompleter();
 
     expect(complete("runs c")[0]).toContain("runs compare");
     expect(complete("/mo")[0]).toEqual(["/model"]);
     expect(complete("/lo")[0]).toEqual(["/login"]);
-    expect(complete("cl")[0]).toContain("cloud runs list");
-    expect(complete("auth")[0]).toContain("auth login");
-    expect(complete("publish")[0]).toEqual(["publish"]);
+    for (const retired of ["cloud", "auth", "balance", "topup", "usage", "publish"]) {
+      expect(complete(retired)[0].some((candidate) => candidate.startsWith(retired))).toBe(false);
+    }
+    expect(complete("/")[0]).not.toContain("/usage");
     expect(complete("pipeline")[0]).toContain("pipeline init");
     expect(complete("doctor")[0]).toContain("doctor");
   });
@@ -300,7 +301,7 @@ describe("renderShellBanner", () => {
     expect(banner).toContain("agent not configured");
     expect(banner).toContain("workflow model model_abc123");
     expect(banner).toContain("ctrl+c stop");
-    expect(banner).toContain("Connect a model with /login tunedtensor");
+    expect(banner).toContain("Connect a model with /login and /model");
     expect(banner).toContain("Workflow commands work now");
     expect(banner).not.toContain("MACHINE");
   });
@@ -321,7 +322,7 @@ describe("renderShellBanner", () => {
     });
     expect(banner).toContain("spec Support triage · Qwen/Qwen3.5-2B · 120 examples");
     expect(banner).toContain("What would you like to work on?");
-    expect(banner).not.toContain("Use /login tunedtensor");
+    expect(banner).not.toContain("Connect a model");
   });
 
   it.each([
@@ -531,7 +532,7 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     expect(stderr.join("")).toMatch(/Shell operator/);
   });
 
-  it("runs the usage command from /usage", async () => {
+  it("has no /usage command for the retired hosted allowance", async () => {
     const requests: ShellCommandRequest[] = [];
     const stderr: string[] = [];
     const session = await createShellSession({
@@ -548,8 +549,8 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
     await session.handleLine("/usage");
     await session.handleLine("/usage now");
 
-    expect(requests).toEqual([{ args: ["usage"], cwd: resolve("/tmp/local-project") }]);
-    expect(stderr.join("")).toMatch(/\/usage does not accept arguments/);
+    expect(requests).toEqual([]);
+    expect(stderr.join("")).toMatch(/Unknown session command/);
   });
 
   it("stays local even when the discovered context favours cloud", async () => {
@@ -771,7 +772,8 @@ describe("TunedTensorShellSession", () => {  it("routes commands locally and rec
       expect(output).not.toContain("groq");
       expect(output).toContain("Other providers: /login <id> or /model <id>");
       expect(output).toMatch(/openai[\s\S]*auth required/);
-      expect(output).toContain("Use /login tunedtensor for your TT token, or /login <provider> for a BYO key.");
+      expect(output).toContain("Use /login <provider> to save your API key for that provider.");
+      expect(output).not.toContain("tunedtensor");
       expect(output).toContain("/login <provider>");
       expect(output).toContain("Suggestions");
       expect(output).toContain("openai/gpt-5.6-sol");

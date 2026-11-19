@@ -7,25 +7,18 @@ import type {
   AgentConversationClient,
   AgentStreamEvent,
   AgentTurnResult,
-  CloudActionContext,
 } from "./agent-client.js";
 import {
   approvePreparedAction,
   preflightPreparedAction,
   PreparedActionWorkspaceMismatchError,
   rejectPreparedAction,
-  type AgentMutationApi,
 } from "./agent-approval.js";
 import type { AgentModelInfo, AgentModelRuntime } from "./agent-model.js";
 import { resolveAgentModel } from "./agent-model.js";
 import type { AgentSelection } from "./config.js";
 import { createTunedTensorTools, type AgentToolApi } from "./agent-tools.js";
-import {
-  approvedResultsNote,
-  isLabelingOperation,
-  approvedResultForModel,
-  type AgentLabelingExecutor,
-} from "./agent-labeling.js";
+import { approvedResultsNote, approvedResultForModel } from "./agent-results.js";
 import { LocalAgentStore, type StoredAgentThread } from "./agent-store.js";
 import { formatAgentHostBlock, readHardwareSnapshot } from "./local-runtime/hardware-snapshot.js";
 import { TRAINING_MODELS } from "./local-runtime/model-registry.js";
@@ -39,7 +32,7 @@ const SYSTEM_PROMPT = `You are the local Tuned Tensor assistant running on the u
 Use get_local_spec's inline_data_split counts when describing adapter training and evaluation data. An automatically held-out set is distinct from training, but a small set is not evidence of model quality.
 Downloads may also write TT manifests, reports and logs. Summarize the proposed effects without claiming the cache and lock are the only writes.
 The workspace tunedtensor.json behavior spec is the source of truth for model behavior, training, evaluation policy, runtime placement and optional pipeline settings. For requests to change the model's behavior, inspect it with get_local_spec first, then prepare_update_local_spec with the returned SHA-256 and only the requested field changes; use add_examples to append examples. Preserve unrelated examples, instructions, engine and training settings. Explain the proposed diff and validation; never claim an edit was saved before approval. Read-only questions about the current spec use get_local_spec without proposing an edit. If no spec exists, help prepare a new one with prepare_create_local_spec; it is created as tunedtensor.json in the current workspace. For an initial draft, default to three concise representative examples unless the user requests otherwise; more examples can be added later. Malformed JSON must be repaired in an editor before prepare_update_local_spec can operate; never offer that tool as a way to reconstruct a truncated file. For direct review, point users to /spec (a readable overview), /spec <section> such as /spec examples, /spec show for the JSON, and /spec diff, /spec validate and /spec history. General educational or inspection questions do not require a spec mutation.
-Local workflow commands need no TT access token. For adapter results, call list_local_runs and inspect_local_run directly instead of asking the user to run commands or paste output. Doctor uses an explicit shell command. For serving a reviewed adapter, use prepare_serve_local_model and get_local_service. User-owned AWS GPU training uses \`tt pipeline run\` with runtime.gpu configuration in tunedtensor.json, without a TT token. \`tt cloud\` is for TT account records, not GPU execution; hosted training start/estimate are retired. AWS credentials authorize instance lookup; separate SSH access is required. The instance must already be running, and the user manages quota, capacity, costs and shutdown. Keep the laptop running until outputs return. Model-provider choice is independent of GPU placement.
+Everything runs on the user's own machines: no Tuned Tensor account, token or hosted service exists. For adapter results, call list_local_runs and inspect_local_run directly instead of asking the user to run commands or paste output. Doctor uses an explicit shell command. For serving a reviewed adapter, use prepare_serve_local_model and get_local_service. User-owned AWS GPU training uses \`tt pipeline run\` with runtime.gpu configuration in tunedtensor.json. AWS credentials authorize instance lookup; separate SSH access is required. The instance must already be running, and the user manages quota, capacity, costs and shutdown. Keep the laptop running until outputs return. Model-provider choice is independent of GPU placement.
 When the user explicitly requests command syntax (rather than asking you to assess results), provide the direct CLI handoff: \`tt runs list\` to find a run, \`tt runs get <run-id>\` for its details, \`tt runs report <run-id>\` for its evaluation report, \`tt models list\` to find the resulting model ID, and \`tt serve <model-id>\` to serve that model. Replace placeholders with actual IDs from those commands; never invent results or IDs. Until the user supplies command output, keep literal <run-id> and <model-id> placeholders; do not fabricate example IDs or prefixes. Local run IDs are UUIDs and adapter model IDs are local-<run-id>. Do not refresh hardware or propose spec edits merely to supply those commands; perform those actions only when requested.
 For accurate adapter, foundation and decision workflow stages and commands, call \`describe_pipeline\` with the matching engine instead of relying on prior knowledge.
 When the user asks to train, fine-tune, dry-run, or execute a workflow, call \`prepare_pipeline_run\` first. Omit its pipeline argument to use the saved recipe or derive its default from the workspace spec. To change workflow stages, propose an edit to the spec pipeline section first; runtime and evaluation settings also belong in the core spec. This prepares a sealed local pipeline dry-run; approved dry-runs never train and may be stopped with Ctrl-C. After a dry-run of the same spec completed, and only when the user wants real training, call \`prepare_background_run\` with a short reason in the user's terms (why this run is being done); it is recorded for audit. Approval starts the run in the background and the conversation continues; never claim training started or finished before an action outcome says so. Use \`list_background_runs\` and \`get_background_run\` when asked about progress, logs or results, \`get_system_usage\` before proposing a parallel run or when asked about CPU, memory or GPU load, and \`prepare_cancel_background_run\` only when the user asks to stop a run. You cannot wait or poll in the background: report the current state and say the user can ask again; tt tells you when a run started from this conversation finishes. Users can also train directly with \`tt pipeline run --spec tunedtensor.json\` (foreground) or \`tt pipeline start --spec tunedtensor.json --reason "..."\` (background); preview uses \`--dry-run\`. The spec path is a --spec option, not a positional argument. No pipeline file or pipeline init is required for this default spec-driven workflow.
@@ -54,7 +47,6 @@ Approving a dataset download runs \`tt datasets prefetch\` with progress. Never 
 Downloading the spec's own sources, and the first real adapter run, record tunedtensor.lock.json beside the spec: it pins the dataset and base-model revisions and file digests, and later runs stop if the cache differs. When a run reports a lock mismatch after an intended source change, prepare_download without source updates the lock. Users find and check downloads with \`tt assets list\`, \`tt assets path <org/name>\` and \`tt assets verify\`.
 A cached chat dataset can be split directly: inspect_local_dataset returns a pinned split_source. Pass that exact value as file to inspect_dataset_file and prepare_dataset_split, and choose an output directory in the workspace. The splitter verifies the recorded download checksum; no copy or new download is needed.
 Unsplit local datasets: use inspect_dataset_file on the user's chat JSONL path, then prepare_dataset_split with their ratios, seed and desired new output directory. Use 80/10/10 and seed 42 if unspecified and show those choices for approval. For train/validation only set test to 0 and make the other fractions sum to 1. Use metadata.label or metadata.category for stratification only when the file has that field; group_by can keep task families together. The source stays unsplit and metadata is preserved. Original benchmark split labels are metadata, not automatic constraints: explain this when reshuffling a benchmark. Do not claim the split ran until approval. After approval, read the spec and propose only dataset_prebuilt from the recorded result, removing any previous huggingface mapping for these local files; preserve the model and all other settings. Returned paths are relative to the workspace; convert them relative to the spec's directory if it is nested. Then prepare the pipeline dry-run. Never ask the user to hand-write a splitter when the tools can do it.
-Teacher labeling of raw adapter data: when the user has unlabeled inputs (their own emails, a raw corpus) and wants a stronger teacher model to label them, run the workflow with tools. It needs a TT token and uses TT credits. 1) Call get_local_spec: the teacher follows the spec's instructions and examples, so suggest adding a few high-quality examples first if there are none or they do not show the exact output format. 2) Call prepare_label_job with the workspace file ({"input": ...} JSON Lines, or CSV with input_column); the user approves the upload, spec push and job start. Only send data the user may share with a third-party model. 3) When the user asks about progress, call get_label_job (or list_label_jobs to find it) and report status, percent done and cost; jobs keep running in the cloud, and you cannot poll in the background. 4) When it reaches awaiting_review, ask whether to use only rows they accepted or edited (\`tt cloud label rows <job-id>\`, \`tt cloud label accept\`) or also unreviewed teacher drafts, then call prepare_label_download. 5) After that download is approved, propose a dataset_prebuilt edit with the training and validation paths it reports. Without a TT token, give the equivalent shell commands: \`tt cloud label upload <file> --spec <cloud-spec-id>\`, \`tt cloud label status <job-id>\`, \`tt cloud label download <job-id>\`.
 For educational questions about how or why training works, call \`inspect_training_source\` before answering. Ground the explanation in the returned code and distinguish observed behavior from inferred rationale; do not invent author intent.
 When the user wants to examine this host, GPU, VRAM, CUDA, or decide what this machine can train, fine-tune, or infer, call \`examine_hardware\` before recommending a base model, engine, or pipeline. For local execution, recommend only workloads marked ready (mention tight as a caution). This tool inspects only the laptop: do not use a missing local GPU to reject AWS training or infer remote capacity. For AWS, direct the user to \`tt doctor tunedtensor.json\` to check the configured instance. Never invent generic 7B/70B sizing. Training starts or stops only through an approved prepare_background_run or prepare_cancel_background_run proposal.
 Do not infer hardware readiness from stale cached data or add unsolicited capability claims to spec reviews, validation errors, or command handoffs. User-owned AWS pipeline artifacts return to the local run store; use the returned model ID for local serving and do not invent a separate remote-serving workflow.
@@ -66,7 +58,7 @@ Before training intended for activation, agree evaluation.taskQuality with the u
 Recorded task criteria are required for the agent's activation and serving tools. Do not imply that all CLI serving is blocked without them: explicit tt serve <model-id> is available for manual inspection and is not a quality endorsement.
 An empty list_local_runs result has no matching stored runs, including running/failed records. State that plainly; do not speculate that ongoing or failed runs are hidden. A --print-command serving preview does not establish hardware readiness or server health.
 When asked whether training helped, call list_local_runs (unless the exact run is already known), then inspect_local_run. Explain measured score changes, failed examples, sample limitations and unmet criteria in the user's language. Identify the recorded evaluation split; validation is not a separate final test, and unrecorded external experiments are not covered by this report. If asked to activate, prepare_activate_local_model only for the reviewed run. If asked to revert, use prepare_rollback_local_model. Activation changes the active model pointer, not a running server. Never claim serving started. Missing/failed evidence is a reason to improve data or evaluation, not silently relax thresholds. For foundation/decision engines, describe_pipeline explains their own supported result workflow.
-Do not request or reveal Tuned Tensor or model-provider credentials. To serve a reviewed adapter, call prepare_serve_local_model. After approval, loading starts; get_local_service must report ready with the exact model_id before you say it is usable. get_local_service only inspects the server owned by this tt process. Use prepare_stop_local_service when the user asks to stop it. Starting serving does not activate the model, and activation/rollback does not replace a running server. You have no shell, delete, top-up, or API-key tools; files are uploaded only by an approved labeling job and downloaded only by an approved prepare_download.`;
+Do not request or reveal model-provider or cloud credentials. To serve a reviewed adapter, call prepare_serve_local_model. After approval, loading starts; get_local_service must report ready with the exact model_id before you say it is usable. get_local_service only inspects the server owned by this tt process. Use prepare_stop_local_service when the user asks to stop it. Starting serving does not activate the model, and activation/rollback does not replace a running server. You have no shell, delete, or API-key tools; files are downloaded only by an approved prepare_download.`;
 
 /** First line of a failed tool's message, bounded for the terminal status line. */
 export function toolErrorSummary(result: unknown): string | undefined {
@@ -79,16 +71,13 @@ export function toolErrorSummary(result: unknown): string | undefined {
   return line.length > 200 ? `${line.slice(0, 199)}…` : line;
 }
 
-async function systemPrompt(cloudEnabled: boolean): Promise<string> {
+async function systemPrompt(): Promise<string> {
   const host = formatAgentHostBlock(await readHardwareSnapshot());
-  const account = cloudEnabled
-    ? "Account tools inspect cloud specs, runs, models, balance, transactions, and managed agent usage. Cloud spec mutations only prepare proposals for the user to approve; training uses `tt pipeline run` with optional user-owned AWS GPU configuration. Hosted training submission is retired. Never confuse cloud resources with local resources."
-    : "No TT access token is configured, so account and cloud tools are unavailable. The user can run `tt auth login` or /login tunedtensor to enable them.";
-  return `${SYSTEM_PROMPT}\n${account}\nYou have no general filesystem tools. Workspace-scoped capabilities can review the spec, propose a validated edit, prepare one new spec folder, prepare a sealed pipeline dry-run, prepare a background training run or its cancellation, or prepare a Hugging Face download; writes, previews, runs, cancellations and downloads require the user's approval.\n${host}`;
+  return `${SYSTEM_PROMPT}\nYou have no general filesystem tools. Workspace-scoped capabilities can review the spec, propose a validated edit, prepare one new spec folder, prepare a sealed pipeline dry-run, prepare a background training run or its cancellation, or prepare a Hugging Face download; writes, previews, runs, cancellations and downloads require the user's approval.\n${host}`;
 }
 
 // Pi keeps the system prompt as a transcript message and reuses a stored one
-// instead of the prompt passed in. The prompt depends on account and host state,
+// instead of the prompt passed in. The prompt depends on host state,
 // so threads store only the conversation and every turn starts from a fresh prompt.
 function withoutSystemMessages(messages: unknown[]): unknown[] {
   return messages.filter((message) => (message as { role?: unknown } | null)?.role !== "system");
@@ -122,12 +111,8 @@ export interface LocalAgentClientOptions {
   modelRuntime: AgentModelRuntime & {
     streamSimple?: (...args: any[]) => any;
   };
-  toolApi: AgentToolApi;
-  mutationApi: AgentMutationApi;
-  /** Executes approved teacher-labeling actions with the TT account. */
-  labeling?: AgentLabelingExecutor;
-  cloudEnabled?: boolean;
-  cloudContext?: CloudActionContext;
+  /** Optional hook observing each prepared proposal before it is stored. */
+  toolApi?: AgentToolApi;
   runPipelineCommand?: LocalPipelineCommandRunner;
   backgroundRuns?: BackgroundRunExecutor;
   createAgent?: (options: LocalPiAgentOptions) => LocalPiAgent;
@@ -205,18 +190,6 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
   const now = () => (options.now ?? (() => new Date()))().toISOString();
   const selected = resolveAgentModel(options.modelRuntime, options.selection);
   const settlingActions = new Set<string>();
-  const isCloudMutation = (action: AgentAction) => action.operation === "create_spec"
-    || action.operation === "update_spec"
-    || isLabelingOperation(action);
-  const assertCloudApprovalContext = (action: AgentAction) => {
-    if (!isCloudMutation(action)) return;
-    const expected = options.cloudContext;
-    if (!options.cloudEnabled || !expected
-      || action.cloud_context?.origin !== expected.origin
-      || action.cloud_context?.credential_fingerprint !== expected.credential_fingerprint) {
-      throw new Error("This cloud action is not bound to the current TT account and API origin. Return to the original account and origin, or prepare a new action before approving.");
-    }
-  };
 
   const persist = async (state: StoredAgentThread) => {
     state.thread.updated_at = now();
@@ -275,26 +248,12 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
       let separateNextText = false;
       let failure: string | undefined;
       const effectiveToolApi: AgentToolApi = {
-        get: async (path, query) => options.store.redact(await options.toolApi.get(path, query)),
-        postRead: async (path, body) => options.store.redact(await options.toolApi.postRead(path, options.store.redact(body))),
         propose: async (incoming) => {
           if (incoming.operation === "start_local_pipeline" && !matchingDryRun(state.actions, incoming)) {
             throw new Error(DRY_RUN_REQUIRED);
           }
-          const proposed = await options.toolApi.propose({ ...incoming, thread_id: threadId, turn_id: turnId });
-          const action = options.store.redact(isCloudMutation(proposed)
-            ? {
-              ...proposed,
-              cloud_context: options.cloudContext,
-              preview: {
-                ...(proposed.preview && typeof proposed.preview === "object" && !Array.isArray(proposed.preview)
-                  ? proposed.preview as Record<string, unknown>
-                  : {}),
-                api_origin: options.cloudContext?.origin,
-              },
-            }
-            : proposed);
-          assertCloudApprovalContext(action);
+          const tagged = { ...incoming, thread_id: threadId, turn_id: turnId };
+          const action = options.store.redact(options.toolApi ? await options.toolApi.propose(tagged) : tagged);
           if (!state.actions.some((item) => item.id === action.id)) state.actions.push(action);
           if (!actions.some((item) => item.id === action.id)) actions.push(action);
           await persist(state);
@@ -304,7 +263,6 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
       const tools = createTunedTensorTools(effectiveToolApi, {
         localServer,
         workspaceRoot: context?.workspaceRoot ?? options.workspaceRoot,
-        localOnly: !options.cloudEnabled,
         ...(options.backgroundRuns ? { backgroundRuns: options.backgroundRuns } : {}),
       });
       const toolLabels = new Map(tools.map((tool) => [tool.name, tool.label]));
@@ -313,7 +271,7 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
       const agent = createAgent({
         model: selected.model,
         thinking: selected.thinking,
-        systemPrompt: await systemPrompt(Boolean(options.cloudEnabled)),
+        systemPrompt: await systemPrompt(),
         messages: state.messages,
         summary: state.summary,
         tools,
@@ -423,16 +381,12 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
           action_id: action.id,
           ...(dryRun ? { dry_run_action_id: dryRun.id } : {}),
         });
-        // Check before claiming or contacting the API so changing accounts
-        // cannot redirect an approval or consume its one-way claim.
-        assertCloudApprovalContext(action);
         try {
           await preflightPreparedAction(action, {
             workspaceRoot,
             localServer,
             runPipelineCommand: options.runPipelineCommand,
             signal,
-            labeling: options.labeling,
             backgroundRuns: options.backgroundRuns,
             requestedBy,
           });
@@ -446,11 +400,9 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
         state = states.find((candidate) => candidate.actions.some((candidate) => candidate.id === actionId));
         action = state?.actions.find((candidate) => candidate.id === actionId);
         if (!state || !action) throw new Error(`No claimed local action matches ${actionId}.`);
-        assertCloudApprovalContext(action);
         onEvent({ type: "action_started", payload: { action_id: actionId } });
         const output = await approvePreparedAction(
           action,
-          options.mutationApi,
           async () => await persist(state),
           {
             workspaceRoot,
@@ -458,7 +410,6 @@ export function createLocalAgentClient(options: LocalAgentClientOptions): AgentC
             runPipelineCommand: options.runPipelineCommand,
             signal,
             durableClaimed: true,
-            labeling: options.labeling,
             backgroundRuns: options.backgroundRuns,
             requestedBy,
           },

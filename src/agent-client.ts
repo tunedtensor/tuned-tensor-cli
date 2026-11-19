@@ -18,18 +18,9 @@ export interface AgentAction {
   status?: string;
   arguments?: unknown;
   preview?: unknown;
-  method?: string;
-  path?: string;
-  cloud_context?: CloudActionContext;
   /** Compact outcome of an approved action the model has not been told yet. */
   result?: unknown;
   result_reported?: boolean;
-}
-
-/** Non-secret binding of a local approval to one TT account credential and API origin. */
-export interface CloudActionContext {
-  origin: string;
-  credential_fingerprint: string;
 }
 
 export interface AgentThreadDetail {
@@ -51,15 +42,15 @@ export interface AgentTurnResult {
 }
 
 export interface AgentTurnContext {
-  mode?: "cloud" | "local";
+  mode?: "local";
   workspaceRoot?: string;
 }
 
 /**
  * UI-facing conversation seam implemented by the local agent runtime.
  *
- * Threads and turn orchestration stay local. Managed model inference uses a
- * separate proxy transport and does not change this conversation contract.
+ * Threads, turn orchestration and approvals stay on this machine. Model
+ * inference uses the provider the user configured.
  */
 export interface AgentConversationClient {
   createThread(): Promise<AgentThread>;

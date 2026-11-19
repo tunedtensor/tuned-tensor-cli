@@ -2,7 +2,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
-  getAgentConfigDir, getApiKey, getBaseUrl, MANAGED_AGENT_PROVIDER, MANAGED_AGENT_MODEL,
+  getAgentConfigDir,
   type AgentSelection, type AgentThinkingLevel,
 } from "./config.js";
 
@@ -113,9 +113,6 @@ export function resolveAgentModel(
 ): ResolvedAgentModel {
   const resolved = resolveAgentModelDefinition(runtime, selection);
   if (!runtime.hasConfiguredAuth(selection.provider)) {
-    if (selection.provider === MANAGED_AGENT_PROVIDER) {
-      throw new Error("A TT access token is required for the managed agent. Run `tt auth login` or /login tunedtensor. Local workflow commands need no token.");
-    }
     throw new Error(missingProviderAuthMessage());
   }
   return resolved;
@@ -158,7 +155,7 @@ export function getAgentModelsPath(): string {
   return join(getAgentConfigDir(), "models.json");
 }
 
-export async function createPiModelRuntime(env: NodeJS.ProcessEnv = process.env): Promise<ModelRuntime & AgentModelRuntime> {
+export async function createPiModelRuntime(): Promise<ModelRuntime & AgentModelRuntime> {
   const agentDir = getAgentConfigDir();
   ensurePrivateDir(agentDir);
   const modelsPath = getAgentModelsPath();
@@ -169,36 +166,6 @@ export async function createPiModelRuntime(env: NodeJS.ProcessEnv = process.env)
     modelsPath,
     allowModelNetwork: false,
   });
-  // This reserved provider uses the account token only in memory. Its model
-  // and endpoint cannot inherit BYO provider overrides from models.json.
-  runtime.registerProvider(MANAGED_AGENT_PROVIDER, {
-    name: "Tuned Tensor (managed)",
-    baseUrl: new URL("/api/v1/agent", getBaseUrl({ baseUrl: env.TUNED_TENSOR_URL })).toString(),
-    api: "openai-completions",
-    apiKey: "TUNED_TENSOR_API_KEY",
-    authHeader: true,
-    models: [{
-      id: MANAGED_AGENT_MODEL,
-      name: "TT managed model (selected by server)",
-      reasoning: false,
-      input: ["text"],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 32_768,
-      maxTokens: 4096,
-      compat: {
-        supportsDeveloperRole: false,
-        supportsReasoningEffort: false,
-        supportsStore: false,
-        maxTokensField: "max_tokens",
-      },
-    }],
-  });
-  const token = getApiKey({ apiKey: env.TUNED_TENSOR_API_KEY });
-  if (token) await runtime.setRuntimeApiKey(MANAGED_AGENT_PROVIDER, token);
-  const hasAuth = runtime.hasConfiguredAuth.bind(runtime);
-  runtime.hasConfiguredAuth = (provider) => provider === MANAGED_AGENT_PROVIDER
-    ? Boolean(getApiKey({ apiKey: env.TUNED_TENSOR_API_KEY }))
-    : hasAuth(provider);
   if (existsSync(authPath)) chmodSync(authPath, 0o600);
   return Object.assign(runtime, {
     registerOpenRouterModel(id: string): void {
@@ -207,7 +174,7 @@ export async function createPiModelRuntime(env: NodeJS.ProcessEnv = process.env)
       }
       if (runtime.getModel("openrouter", id)) return;
       // BYO users may choose a model newer than Pi's offline catalog. Let
-      // OpenRouter validate the ID; no TT allowlist or managed-model policy applies.
+      // OpenRouter validate the ID; tt applies no model allowlist.
       runtime.registerProvider("openrouter", {
         ...runtime.getRegisteredProviderConfig("openrouter"),
         baseUrl: runtime.getProvider("openrouter")?.baseUrl ?? "https://openrouter.ai/api/v1",
@@ -272,9 +239,6 @@ function ensureOpenRouterAppHeaders(modelsPath: string): void {
       : undefined;
   const empty = (): Record<string, unknown> => ({});
   const providers = asRecord(config.providers) ?? (config.providers = empty());
-  // Managed inference has one server-selected model. Custom endpoint/model
-  // configuration belongs to a separate BYO provider and must not receive a TT token.
-  delete providers[MANAGED_AGENT_PROVIDER];
   const openrouter = asRecord(providers.openrouter) ?? (providers.openrouter = empty());
   const headers = asRecord(openrouter.headers) ?? (openrouter.headers = empty());
   const attributionNames = new Set(

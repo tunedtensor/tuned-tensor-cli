@@ -100,7 +100,6 @@ describe("local agent model resolution", () => {
       expect(providerIds).toEqual(expect.arrayContaining([...FEATURED_AGENT_PROVIDERS]));
       expect(recommendAgentModels(productionRuntime).map((model) => `${model.provider}/${model.id}`))
         .toEqual([
-          "tunedtensor/managed",
           "openai/gpt-5.6-sol",
           "openrouter/anthropic/claude-sonnet-5",
         ]);

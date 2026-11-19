@@ -1,6 +1,31 @@
 # Changelog
 
-## [Unreleased]
+## [0.30.0] - 2026-11-19
+
+### Removed
+
+- **Breaking:** the hosted Tuned Tensor service is retired, so `tt` is now fully
+  local and open source with no account, token or billing. Removed `tt cloud`
+  (specs, datasets, teacher labeling, runs, models and decision endpoints),
+  `tt auth`, `tt usage`, `tt balance`, `tt topup`, `tt publish`, the `/usage`
+  shell command, the global `--api-key` and `--base-url` options, managed agent
+  inference (`tunedtensor/managed`) and the agent's hosted-account tools.
+
+### Changed
+
+- The agent uses only the model provider you configure with `/login` and
+  `/model` or `tt agent configure`, which now requires `--model`. A saved
+  `tunedtensor/managed` selection counts as unconfigured, and the next config
+  write removes the retired `api_key` and `base_url` from `~/.tuned-tensor/config.json`.
+  Proposals saved by earlier releases for hosted operations fail safely if approved.
+- The decision hosting guide now explains how to serve a tuned model on
+  infrastructure you control.
+
+### Fixed
+
+- Live agent evaluation accepts a safe malformed-spec refusal after spec
+  inspection without requiring a redundant pipeline preparation attempt, and
+  requires review of the reported error.
 
 ## [0.29.0] - 2026-11-10
 
