@@ -104,7 +104,7 @@ Some runtime features have narrower platform requirements:
   workflow, including background training and cancellation, inside WSL2/Linux.
   A native Windows install does not provide those tools or certify that workflow.
 
-See the platform table in the [README](../README.md) and the
+See the [platform table](hardware.md) and the
 [AWS guide](local-runtime/aws-gpu.md) for training prerequisites.
 
 ## Release and WinGet maintenance

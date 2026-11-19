@@ -1,511 +1,125 @@
-# tt - Tuned Tensor CLI
+# tt — Tuned Tensor CLI
 
-`tt` is the open-source agent and CLI for fine-tuning open models on hardware
-you control. Write the behavior you want in `tunedtensor.json`, then prepare
-data, train, evaluate the tuned model against its base, and serve it, all from
-your own terminal. Training runs on a local NVIDIA GPU or on an existing GPU
-instance in your own AWS account; decision models also train on CPU or Apple MPS.
+**Fine-tune open models on hardware you control.** Describe the behavior you
+want in one file, and `tt` prepares the data, trains, compares the tuned model
+with its base, and serves it — from your own terminal.
 
-Tuned Tensor is free and community-driven. There is no account, sign-in,
-hosted service or usage fee: specs, data, runs, reports and model weights stay
-on your machines. Network calls include Hugging Face downloads, SSH to your own GPU instance,
-and the model provider you configure for the optional conversational agent.
-The CLI also checks the public npm registry for updates at most every 12 hours;
-set `TT_NO_UPDATE_CHECK=1` to disable these checks.
+```bash
+tt init --name "Support triage" --model Qwen/Qwen3.5-2B   # 1. describe the behavior
+tt pipeline run --spec tunedtensor.json                   # 2. train and evaluate
+tt runs report <run-id>                                   # 3. see if it got better
+tt serve local-<run-id>                                   # 4. serve it
+```
 
-Agent inference uses your own provider: OpenRouter, OpenAI, Anthropic or any
-other provider in the catalog, including a local OpenAI-compatible endpoint
-such as Ollama. Your requests go directly to that provider. Workflow commands
-such as `tt pipeline run`, `tt runs list` and `tt serve` need no provider at all.
-Inference choice is independent of where training uses a GPU. Your AWS GPU
-needs only your AWS credentials and SSH access.
+Free and open source (Apache-2.0). No account, sign-in, hosted service or usage fee.
 
-New to cloud GPU training? Follow [your first AWS run](docs/local-runtime/aws-gpu.md)
-for project creation, AWS quota and SSH setup, a preview, training, result
-verification, and shutdown. You still run `tt pipeline run` on your laptop.
+## Why use tt?
 
-## Commands
+- **One file is the source of truth.** `tunedtensor.json` holds the system
+  prompt, rules, examples and training settings. Edit it, rerun, compare.
+- **Proof, not vibes.** Adapter and decision runs evaluate the tuned model
+  against its base model on held-out examples and report the deltas and
+  regressions, so you know whether tuning helped.
+- **Your data stays yours.** Specs, datasets, runs and weights stay on your
+  machines. Train on a local NVIDIA GPU or an existing GPU instance in your own
+  AWS account. Small decision models also train on CPU or Apple Silicon.
+- **Reproducible and auditable.** Base models and datasets are pinned to exact
+  commits in a lock file, and each run keeps a tamper-evident record of what
+  produced it.
+- **An optional AI assistant.** Run `tt` to chat with an agent that edits your
+  spec, finds Hugging Face models and datasets, and prepares runs. Nothing is
+  written or started until you approve it. Bring your own model provider
+  (OpenRouter, OpenAI, Anthropic, or a local endpoint such as Ollama).
 
-The everyday commands are `tt pipeline run`, `tt runs list`, `tt models list`,
-and `tt serve`. GPU processes can use an existing instance in your AWS account
-through [`gpu` configuration](docs/local-runtime/aws-gpu.md). `tt --help` lists
-the full command surface.
+## What can you train?
 
-TT includes the former TT Local runtime. `tt local …` and `tt run` remain
-hidden compatibility aliases; new scripts should use root commands and
-`tt pipeline run --spec tunedtensor.json`.
-
-Earlier releases offered an optional hosted service (`tt cloud`, `tt auth`,
-`tt usage`, `tt balance`, `tt topup`, `tt publish`, and managed agent inference
-as `tunedtensor/managed`). That service is retired and those commands are
-removed. Local projects, run stores and saved provider settings keep working
-unchanged; a saved `tunedtensor/managed` selection counts as unconfigured, so
-choose your own provider with `/login` and `/model`.
+| Engine | What it does | Runs on |
+| --- | --- | --- |
+| **Adapter** (default) | LoRA fine-tuning of an open chat model, such as `Qwen/Qwen3.5-2B` | NVIDIA CUDA, local or AWS |
+| **Decision** | A small classifier-style model that picks a label, answers yes/no or gives a score, with a probability per label | CPU, Apple MPS or CUDA |
+| **Foundation** | A small GPT and tokenizer trained from scratch, for learning and experiments | NVIDIA CUDA, local or AWS |
 
 ## Install
 
-On Windows (PowerShell 5.1 or 7), with Node.js 22.19+ installed:
-
-```powershell
-winget install --id OpenJS.NodeJS.LTS --exact --source winget # if Node is missing
-# Open a new terminal after installing Node.
-npm.cmd install -g --ignore-scripts @tuned-tensor/cli
-tt.cmd --version
-```
-
-The [Windows guide](docs/windows.md) covers native setup with a bundled Node
-runtime, PowerShell execution policies, upgrades, and the WinGet distribution
-process. `TunedTensor.CLI` will become installable through WinGet after the first
-Windows release and catalog submission are accepted.
-
-On Linux or macOS:
+**macOS or Linux:**
 
 ```bash
 curl -fsSL https://tunedtensor.com/install.sh | sh
-tt --version
 ```
 
-The installer bootstraps Node.js 22.19+ if needed, installs
-`@tuned-tensor/cli` with npm `--ignore-scripts`, and falls back to
-`~/.local` when the global npm prefix is not writable. Inspect it first
-with `curl -fsSL https://tunedtensor.com/install.sh | less`. Pin a
-dist-tag or version on `sh`, not `curl`:
-
-```bash
-curl -fsSL https://tunedtensor.com/install.sh | TT_VERSION=beta sh
-curl -fsSL https://tunedtensor.com/install.sh | TT_VERSION=0.30.0 sh
-```
-
-Or install the package directly:
+**Windows (PowerShell), or anywhere with Node.js 22.19+:**
 
 ```bash
 npm install -g --ignore-scripts @tuned-tensor/cli
-tt --version
 ```
 
-`TT` also works on case-insensitive filesystems, including standard macOS installs.
-On case-sensitive systems, use `tt` or add a shell alias (`alias TT=tt`).
-Upgrade later with `tt upgrade`. Uninstall with `npm uninstall -g @tuned-tensor/cli` (add
-`--prefix ~/.local` if the curl installer used that prefix).
+On Windows, use `npm.cmd` and `tt.cmd` in PowerShell. Check the install with
+`tt --version`; upgrade later with `tt upgrade`.
 
-Node.js 22.19.0 or newer is required. Training additionally needs
-[`uv`](https://docs.astral.sh/uv/) locally and a supported NVIDIA CUDA host,
-either local or [in your AWS account](docs/local-runtime/aws-gpu.md). The laptop
-does not need a GPU when `gpu` is configured. The locked Python runner ships
-with the npm package and is prepared on first use.
-
-Run from source:
-
-```bash
-git clone https://github.com/tunedtensor/tuned-tensor-cli.git
-cd tuned-tensor-cli
-npm install
-npm run build
-npm link
-```
-
-## Behavior spec workflow
-
-`tunedtensor.json` is the source of truth for behavior and training settings.
-In the shell, `/spec` shows a readable overview grouped into behavior,
-dataset, examples, training, evaluation and runtime sections; `/spec <section>` (for
-example `/spec examples`) shows one section in full and `/spec show` prints the
-highlighted JSON. `/spec diff`, `/spec validate`, and `/spec history` complete
-the review, all without a model call. Outside the shell, `tt spec view` and
-`tt spec <section>` print the same readable view. Ask the agent for changes, inspect its proposed
-diff, then press `y` when tt asks (or `/approve` later) to save a validated edit
-with revision history. Pipeline
-runs use the saved spec. See [the spec workflow](docs/spec-workflow.md).
-
-## Conversational terminal
-
-The interactive agent harness and conversation state run on your laptop.
-Inference uses the provider and model you select, which may be a local endpoint
-or a remote service.
-
-Run `tt` to open the primary conversational workflow. The agent can inspect the
-project, derive the canonical pipeline from `tunedtensor.json`, present the
-resolved plan, and prepare a sealed dry-run for `/approve`. Workflow commands
-such as `runs list` and `doctor` work immediately without any credentials.
-
-For example, with OpenRouter:
-
-```text
-› /login openrouter
-› /model openrouter/<model-id>
-```
-
-`/login` asks which provider, then prompts for that provider's API key with
-hidden input. `/login <provider>` skips the provider prompt.
-`/model openrouter` lists the bundled catalog, but you can select any OpenRouter model ID, including one
-newer than that catalog. OpenRouter validates the selected ID. New IDs use
-conservative context/output defaults; custom metadata can be supplied in
-`~/.tuned-tensor/agent/models.json`. For a model without reasoning support,
-configure it with
-`tt agent configure --provider openrouter --model <model-id> --thinking off`.
-Inference is billed by your provider, if at all.
-
-Provider keys are stored under TT's local agent config
-(`~/.tuned-tensor/agent/auth.json`, readable only by you). Custom endpoints and
-models go in `~/.tuned-tensor/agent/models.json`. `tt` does not read
-`~/.pi/agent/`. `/model` and `/login` feature OpenAI and OpenRouter. Other
-catalog providers remain available by ID. Unauthenticated entries are marked
-`auth required`. Local endpoints such as Ollama use a placeholder `apiKey` in
-`models.json`.
-
-`tt` checks npm for a newer stable release at most every 12 hours and
-remembers the answer in `~/.tuned-tensor/update-check.json`. The notice appears
-when the shell opens and after commands run in a terminal; explicit commands
-never wait on the registry. Upgrade with:
-
-```bash
-tt upgrade            # latest stable, into the same npm prefix tt runs from
-tt upgrade --check    # only report
-tt upgrade beta       # or a specific version
-```
-
-Offline or unavailable registry checks are ignored. `CI`, `TT_NO_UPDATE_CHECK=1`
-or `NO_UPDATE_NOTIFIER=1` disable the check.
-
-After a model is selected, the banner shows it and ordinary sentences go to
-the agent:
-
-```text
-tt v0.15.0
-agent openrouter/anthropic/claude-sonnet-5 · workflow model base
-tt › What would you like to work on?
-/help commands · ctrl+c stop · ctrl+d exit
-
-› What happened in my latest training run?
-› runs list
-```
-
-Known commands such as `runs list` run directly; tab completes them. Ordinary
-sentences go through the locally orchestrated model session. The
-model has no shell or general filesystem tool. It can read and propose reviewed
-edits to an existing spec, or prepare a validated `tunedtensor.json` in the shell's current working directory
-when none exists, or prepare a local pipeline dry-run sealed to the reviewed
-workspace and spec contents. Writes and pipeline previews wait for your approval: after the
-answer, tt shows the proposal and asks inline, where `y` approves, `n` rejects and `Esc`
-leaves it pending for a later `/approve` or `/reject`. Any other key is ignored. The tools refuse path
-traversal, symlinked workspace roots, overwriting an existing spec, unsupported spec
-fields, cloud pipeline targets, and spec changes after review. Known CLI
-commands such as `runs list`, `doctor`, and `models list` still execute directly.
-Prefix a command with `:` when you want to make that intent explicit.
-
-The agent can describe the built-in adapter and foundation pipeline stages,
-including optional foundation RL. When asked to train or dry-run, it derives or
-validates the pipeline, shows the exact plan, and prepares a deterministic
-dry-run. `/approve` starts that preview outside the model, and Ctrl-C stops the
-child process group. Dry-run approval never starts real training. After a dry-run
-of the same spec bytes completes in the conversation, the agent can propose a
-background run; a separate approval starts real training in the background.
-Review the target and reason before approving; user-owned AWS compute costs
-remain your responsibility. Cancellation also requires approval. You can still
-run `tt pipeline run` directly. See [background runs](docs/local-runtime/background-runs.md).
-The agent can also search public Hugging Face model or dataset metadata for foundation and
-fine-tuning discovery. A Hub search sends only the search query to
-`huggingface.co`; it uses no Hugging Face token, downloads nothing, and omits
-model-card and dataset-card text. Search results are discovery metadata, not a
-guarantee that a model or dataset is compatible with a TT workflow. The agent
-can inspect a public dataset's exact JSONL/Parquet filenames, sizes, revision,
-and declared columns/splits before proposing a download. Declared schema comes
-from dataset-card metadata; it is not validation of the file contents.
-
-To reuse a download, ask “Which datasets have we downloaded?” followed by
-“Use CodeAlpaca in this spec for fine-tuning.” The agent can list TT-recorded
-local datasets and inspect actual Parquet columns/row counts or sampled JSONL
-fields, plus two bounded sample rows. It proposes a `dataset_prebuilt` pointer
-with the cached revision, training file, separate validation/test file and
-column mapping. Approval saves the edit; listing and inspection need no
-download or approval. Existing examples and model settings stay in the spec,
-but prebuilt data supplies the training rows instead of automatically mixing
-in the inline examples. Samples do not establish full dataset quality, and a
-download with only a training split still needs distinct held-out data.
-
-When a conversation approaches the model's context budget, TT automatically
-summarizes earlier turns using Pi and the selected model, and shows progress.
-The trigger reserves the full reply allowance plus 4,096 tokens for protocol
-headroom; it does not apply an additional percentage reserve. Usage measured
-before a summary is ignored, while new provider usage calibrates the next
-trigger, including after resume.
-The summary preserves goals, decisions and action outcomes and is saved for
-`/resume`; recent exchanges remain in context. Summarization uses an additional
-model request (or several for unusually long histories). The transcript stays
-in local history subject to the existing storage limits, and pending approvals
-remain intact. If the current request is still too large, summarization fails,
-or the model stops at its token limit, TT reports the problem instead of silently
-returning to the prompt. A failed summary does not replace the saved one.
-
-For educational questions about how or why training works, the agent can read
-the exact Python implementation shipped with the running TT build. The source
-tool is limited to named foundation components (tokenizer, pretraining, checkpointing, model,
-data, SFT, RL, evaluation, and common helpers) and adapter components (training,
-data, model contract, and evaluation); it cannot read arbitrary paths. Answers
-separate behavior directly visible in the code from inferred rationale and
-include the inspected package-relative path and source hash.
-
-Agent conversations are durable and local under
-`~/.tuned-tensor/agent/threads` (or `$TUNED_TENSOR_HOME/agent/threads`), with
-user-only directory/file permissions. Existing XDG agent state remains in use
-until the new agent directory exists. Persistence normally retains up to 100
-recent threads; unsettled safety records are never pruned even when that exceeds
-the cap. Each thread is limited to 1 MB, 200 messages, and 200 actions; one-way
-action claims are capped at 1,000. Use `/new` to start one, `/threads` to
-list recent conversations, and `/resume <id>` to continue one.
-
-Local spec creation waits for `/approve`, requires at least two examples,
-uses exclusive private folder/file creation, and never overwrites an existing
-path. Secure filesystem mutation is currently supported on Linux, where writes
-are anchored to open workspace and destination-directory handles. The proposal
-is bound to the current workspace so changing directories before approval fails
-safely instead of writing somewhere else. Ambiguous write failures remain
-sealed as `outcome_unknown` for manual inspection. `/reject` never mutates.
-Pipeline dry-runs also wait for `/approve`. Preparation fingerprints the
-workspace directory identity, spec, and adjacent config, revalidates them,
-copies the resolved spec, config, and pipeline into private temporary inputs,
-and invokes `tt pipeline run --dry-run` deterministically. A dry-run proposal
-edited to request real execution fails before the child command is dispatched.
-After a dry-run of the same spec bytes completes, the agent can propose a real
-background run with a reason; approval starts it in a detached process and the
-conversation continues. The agent reports progress with read-only tools and can
-cancel a run only through another approval. Each run keeps an audit record
-(reason, requester, choices, resources, outcome and metrics), a hash-chained event
-log and its full log; `TT_MAX_PARALLEL_RUNS` limits concurrent runs. See
-[background runs](docs/local-runtime/background-runs.md). The direct
-`tt pipeline run` and `tt pipeline start` commands remain available.
-A changed workspace or spec requires a new review.
-
-The startup **What you can do** panel covers specs/datasets, decision training,
-LLM fine-tuning, training from scratch, and serving even before a spec exists.
-Decision training can use CPU or Apple MPS; the other training paths currently
-require CUDA locally or a configured AWS GPU. A missing NVIDIA GPU does not
-prevent spec creation or dataset preparation. The banner lists ready workflows on
-one line and shows only the status of the rest; `/system` adds reasons and next steps.
-
-Guidance distinguishes **Ready**, **Needs setup**, **Limited resources**,
-**Remote GPU**, **Needs verification**, and **Unsupported runtime**. Quick
-startup sampling does not install Python dependencies. `tt hardware` explicitly
-checks the locked adapter and decision runtimes separately, including MPS
-availability; it may install those runtimes on first use. It does not download
-models or certify their fit. Old snapshots without a decision probe show
-"Needs verification" until refreshed.
-
-| Platform | Decision training | LLM / foundation training | Packaged LLM serving |
-| --- | --- | --- | --- |
-| Linux x64 / ARM64 | CPU; CUDA when available | NVIDIA CUDA, subject to memory and runtime checks | Linux + NVIDIA CUDA; separate runtime |
-| Apple Silicon macOS | CPU / MPS after runtime checks | Remote AWS GPU | Remote Linux/CUDA host |
-| Native Windows x64 | CPU path; end-to-end training not yet certified | Not certified natively; check a Linux/WSL2 environment or use AWS | Linux/CUDA host |
-| Intel macOS / Windows ARM64 | No compatible wheels in the current lockfiles | Remote AWS GPU | Remote Linux/CUDA host |
-
-The native Windows CI job verifies installation, PowerShell CLI commands,
-pipeline previews, hardware discovery and displayed guidance, not model training.
-Agent-approved spec creation, editing and history work on native Windows and Linux.
-AWS transport/background training should run inside WSL2/Linux. See
-[Windows limitations](docs/windows.md#native-cli-scope).
-WSL is assessed as its own Linux environment. AMD/Intel GPU
-acceleration is not enabled by the packaged CUDA runtime. Decision resource
-warnings use conservative advisory thresholds (8 GiB available working memory,
-6 GiB free model-cache disk, 4 CPU cores); they are not measured model minima.
-Batch size, sequence length, training mode and other running applications matter.
-CPU evaluation does not imply that `tt serve` can run on CPU. Agent chat still
-needs a model provider; local data commands do not.
-
-Useful shell controls include `/help`, `/status`, `/context`, `/system`,
-`/model`, `/login`, `/cd`, `/clear`, and `/exit`.
-When the shell opens, the TT logo mark (drawn in the terminal) greets you with the current spec, a
-live machine panel (GPU utilization, VRAM and temperature from `nvidia-smi`,
-CPU, RAM, and free space on the model-cache filesystem) and whether this machine can
-fine-tune the spec's base model, plus a suggested next step. `/system` refreshes
-that panel and lists every certified base model's verdict. Fit verdicts come
-from the same certified memory profiles as `tt hardware`; a fresh
-`tt hardware` snapshot takes precedence over the quick live check.
-On macOS, RAM marked `in use (est.)` excludes estimated reclaimable file cache;
-decision-training warnings use the same available-RAM estimate. This is not a
-memory-pressure measurement or a guarantee that a workload fits. CPU load is a
-one-minute average, separate from the sampled utilization percentage. Disk usage
-describes the filesystem containing the cache, not the size of downloaded models.
-The shell banner and `/context` show the inference selection (`agent
-provider/model`) separately from the workflow model. Run `/model` with no
-arguments to list suggested models, `/model <provider>` to list that provider's
-models, or `/model <query>` to search. Switch with `/model <provider>/<model>`.
-The equivalent non-interactive commands are `tt agent models`,
-`tt agent configure --provider <provider> --model <model>`, and `tt agent status`.
-`tt agent configure --thinking` accepts `off`, `minimal`, `low`, `medium`,
-`high`, `xhigh`, or `max`. Selection metadata can be overridden
-per process with
-`TUNED_TENSOR_AGENT_PROVIDER`, `TUNED_TENSOR_AGENT_MODEL`, and
-`TUNED_TENSOR_AGENT_THINKING`. These values are not credentials.
-The shell keeps normal terminal scrollback and command history only for the
-current process.
-
-Explicit commands remain non-interactive, including in CI. `tt --help` shows
-the command surface, `tt status` inspects local project context without a
-network or GPU probe, and `tt shell` opens the conversational terminal
-explicitly.
-
-## Composable pipelines (v1)
-
-A pipeline is an ordered JSON recipe. The CLI orchestrates every plan locally;
-optional `gpu` configuration moves its GPU processes to your AWS instance.
-The portable document contract lives in `@tuned-tensor/pipeline-contract`. The
-CLI adds execution planning (step selection) on top of it.
-
-Three local engines share that document version:
-
-- **Adapter** (default): LoRA SFT on a certified Hugging Face checkpoint.
-  Runs through `tt pipeline run`. Uses `train` / `evaluate` / `compare` with
-  `evaluate.with.evaluator: "behavior"`.
-  Certified models (`Qwen/Qwen3.5-2B`, Nemotron 3.5 Lightning, Muse Glimmer)
-  have a reviewed revision, architecture, and memory profile. Any other
-  Hugging Face text model can be trained as **uncertified** by pinning its
-  commit; it loads as a causal LM with safetensors weights, no remote code,
-  and generic LoRA defaults (override them in `hyperparameters`):
-
-  ```json
-  {
-    "base_model": "mistralai/Mistral-7B-Instruct-v0.3",
-    "hyperparameters": { "base_model_revision": "<40-char commit SHA>" }
-  }
-  ```
-
-  Pick an instruct/chat variant (the trainer needs a chat template) and check
-  hardware fit with `tt doctor`, since TT has no memory profile for it.
-- **Foundation**: from-scratch tokenizer + GPT. Also runs through
-  `tt pipeline run`. Uses
-  `tokenize` / `pretrain` / `finetune` / optional `rl` plus `bpb`, `chat`, and
-  `inference` evaluators. Requires a foundation `tunedtensor.json`
-  (`engine: "foundation"`, at least two examples, no `base_model`).
-- **Decision**: fine-tunes a small typed decision model
-  (`convaiinnovations/laya`, 421M) that answers one choice, yes/no or score
-  question per input with a probability per label, instead of generating text.
-  Uses the adapter vocabulary (`train` / `evaluate` / `compare`) and runs on
-  CPU, Apple MPS or CUDA. Requires `engine: "decision"` and a `decision`
-  question; example outputs are labels. See
-  [Decision models](docs/local-runtime/decision.md).
-
-All engines are spec-driven. `system_prompt`, `guidelines`, and `constraints`
-are compiled into one canonical system instruction, and `examples` supply the
-demonstrated behavior. Adapter training, foundation tokenizer/pretraining,
-chat SFT, optional RL, and evaluation all receive that same compiled
-instruction. Engine-specific fields choose how TT learns the behavior; they do
-not redefine the behavior itself.
-
-The foundation engine is a readable, single-GPU local trainer inspired by Andrej
-Karpathy's [nanochat](https://github.com/karpathy/nanochat), not a port of its
-distributed training stack. With `foundation.corpus_path`, it streams `.txt`
-or JSONL (`{"text":"..."}`) shards into a deterministic on-disk token cache;
-without that field it retains the bounded prompt/example corpus for smoke runs.
-`foundation.validation_path` supplies a distinct held-out BPB corpus. Foundation
-plans reject `compare` before creating run artifacts; comparison remains an
-adapter-engine capability. Optional RL samples one seeded on-policy completion
-per step with a sparse last-number exact reward and therefore requires a numeric
-expected output for every example. Treat those metrics as an end-to-end
-execution and overfit check—not held-out capability or multi-GPU evidence when
-no validation corpus is configured.
-
-`tunedtensor.json` contains behavior, training settings, optional `evaluation`,
-`runtime`, and advanced `pipeline` sections. Pipelines use the embedded recipe
-or derive it from the saved spec. Only explicit `--file` loads a separate recipe;
-it cannot override a conflicting embedded recipe. Foundation recipes must match
-the spec's training settings.
-
-```bash
-tt pipeline validate --spec tunedtensor.json
-tt --json pipeline plan --spec tunedtensor.json
-tt pipeline run --spec tunedtensor.json --dry-run
-tt pipeline run --spec tunedtensor.json
-# Optional: embed the current derived recipe for customization
-tt pipeline init --spec tunedtensor.json
-# Existing projects: consolidate sidecars, retaining .bak copies
-tt pipeline migrate --spec tunedtensor.json
-```
-
-Relative runtime paths resolve beside the spec. New project state uses
-`.tuned-tensor/store` and `.tuned-tensor/artifacts`. Legacy `local-runner.json`
-remains readable with a warning; migrate it before adding inline runtime or
-evaluation settings. See [single-file examples](examples/single-spec) and the
-[spec workflow](docs/spec-workflow.md).
-
-`--only` and `--skip` preserve dependency safety: a selected step cannot refer
-to an omitted predecessor. Keep step targets local and configure `runtime.gpu` in
-`tunedtensor.json` to execute GPU work on your AWS instance. Adapter and
-foundation workflows use the same local pipeline. The TT agent may describe,
-validate, and prepare a sealed pipeline action; only deterministic `/approve`
-handling can execute it.
-
-Long pretraining uses BF16, warmup plus cosine decay, gradient clipping,
-periodic metrics, and atomic rolling checkpoints. `--resume <run-directory>`
-starts or resumes one stable run identity; completed stages are verified and
-skipped, while an interrupted pretrain step restores model, optimizer,
-scheduler, RNG, counters, and token cursor. See
-[Long foundation runs](docs/local-runtime/foundation-long-runs.md) before an
-unattended job.
+Training also needs [`uv`](https://docs.astral.sh/uv/). LLM training needs an
+NVIDIA GPU, either on this machine or [in your AWS account](docs/local-runtime/aws-gpu.md).
+See [install options](docs/install.md) and the [Windows guide](docs/windows.md).
 
 ## Quick start
 
-Create a project on your development machine:
+**1. Create a spec** in a new folder:
 
 ```bash
-mkdir support-adapter && cd support-adapter
-tt init \
-  --name "Support Adapter" \
-  --model Qwen/Qwen3.5-2B
+mkdir support-triage && cd support-triage
+tt init --name "Support triage" --model Qwen/Qwen3.5-2B
 ```
 
-Edit the generated `tunedtensor.json`, replacing the placeholder system prompt and both placeholder examples.
-For a local GPU, `tt hardware` reports this machine's training and serving
-capacity. For an AWS GPU, add the following `runtime` section to your
-`tunedtensor.json`, replacing the instance, region, profile and SSH settings with your own:
+**2. Describe the behavior.** Open `tunedtensor.json` and replace the
+placeholder prompt and examples with your own (at least two):
 
 ```json
 {
-  "runtime": {
-    "gpu": {
-      "provider": "aws",
-      "profile": "research",
-      "region": "eu-west-1",
-      "instanceId": "i-0123456789abcdef0",
-      "user": "ubuntu",
-      "identityFile": "~/.ssh/research-gpu.pem"
-    }
-  }
+  "name": "Support triage",
+  "base_model": "Qwen/Qwen3.5-2B",
+  "system_prompt": "Classify the customer's message. Reply with one label.",
+  "guidelines": ["Reply with billing, bug or other."],
+  "examples": [
+    { "input": "I was charged twice this month.", "output": "billing" },
+    { "input": "The app crashes when I upload a photo.", "output": "bug" }
+  ]
 }
 ```
 
-The instance must already be running and reachable over SSH. See
-[AWS GPU setup](docs/local-runtime/aws-gpu.md) for prerequisites, authentication,
-transfer behavior and recovery. `tt hardware` always inspects the machine
-running the CLI; `tt doctor` uses `gpu` to check the remote runtime.
-Then validate, prefetch the base model locally, preview, and run:
+**3. Check your setup and preview the run.** The dry run needs no GPU:
 
 ```bash
 tt validate tunedtensor.json
-tt models prefetch tunedtensor.json
 tt doctor tunedtensor.json
 tt pipeline run --spec tunedtensor.json --dry-run
-tt pipeline run --spec tunedtensor.json
 ```
 
-`tt models prefetch` shows a progress bar with transfer rate and ETA. Large
-downloads survive flaky networks: TT pins the requested revision to one commit,
-retries interrupted transfers with backoff (`TT_HF_DOWNLOAD_MAX_ATTEMPTS`,
-default 10), and keeps completed files in the Hugging Face cache, so running the
-command again resumes instead of starting over.
-
-These commands read runtime and evaluation settings from the core spec. The preview needs
-no GPU or AWS connection. Results return to the local run and model stores:
+**4. Train and see the results:**
 
 ```bash
+tt pipeline run --spec tunedtensor.json
+tt runs list
 tt runs report <run-id>
-tt models verify local-<run-id>
 ```
+
+## Examples
+
+### Chat with the agent
+
+```bash
+tt                       # open the conversational terminal
+› /login openrouter      # enter your OpenRouter API key
+› /model openrouter/<model-id>
+› Add five more billing examples to my spec
+› Dry-run the pipeline
+```
+
+The agent shows each proposed change or run, and you press `y` to approve or
+`n` to reject. Commands such as `runs list` work without a provider.
+See [the conversational agent](docs/agent.md).
 
 ### Train on a Hugging Face dataset
 
-Point `dataset_prebuilt` at files in a Hugging Face dataset repo instead of
-local paths. It works like `base_model`: name the repo, pin a commit, and TT
-downloads it into the same Hugging Face cache.
+Point the spec at dataset files instead of inline examples:
 
 ```json
 {
@@ -522,222 +136,94 @@ downloads it into the same Hugging Face cache.
 ```
 
 ```bash
-tt datasets prefetch tunedtensor.json   # download with progress; rerun to resume
-tt datasets verify tunedtensor.json     # offline checksum check of the cached files
-tt pipeline run --spec tunedtensor.json # downloads automatically if still missing
+tt datasets prefetch tunedtensor.json   # download, resumable; pins the lock file
+tt pipeline run --spec tunedtensor.json
 ```
 
-In `tt agent`, ask it to download a dataset or model. It proposes the same
-`tt datasets prefetch` or `tt models prefetch` command and runs it after you
-approve. The source does not have to be in the spec yet: download first, look at
-it, then ask the agent to adopt it, and it proposes a spec edit pinned to the
-commit the download resolved. A download alone needs a training filename, not
-a validation split or column mapping; those are required when configuring training.
-Approval checks the workspace, spec and adjacent legacy runner configuration,
-then runs a private snapshot of the reviewed settings. Later edits cannot redirect
-the running download. After a failure or cancellation, ask for a new download
-proposal to resume from the cache.
+See [datasets and downloads](docs/datasets.md), including splitting your own
+JSONL data.
 
-### Downloads and the lock file
-
-Any Hugging Face dataset files or model can be downloaded without editing a spec:
+### Train a decision model on your laptop
 
 ```bash
-tt datasets prefetch --repo HuggingFaceH4/ultrachat_200k \
-  --training data/train_sft-00000-of-00003.parquet --test data/test_sft-00000-of-00001.parquet
-tt models prefetch --repo Qwen/Qwen3-4B-Instruct-2507   # add --revision <sha> to pin
+tt init --name "Ticket router" --engine decision
+# Edit tunedtensor.json: the question, the labels, and examples whose outputs are labels
+tt pipeline run --spec tunedtensor.json
 ```
 
-Direct downloads also work before a spec exists or while it is invalid; those
-workspaces use the default cache. An approved agent download reports the commit
-from that command's result for a later spec edit.
+This trains on CPU or Apple Silicon, no NVIDIA GPU needed. See [decision models](docs/local-runtime/decision.md) and the
+[card-triage example](examples/single-spec/decision/tunedtensor.json).
 
-Files stay in the Hugging Face cache (`HF_HOME`, or `runtime.paths.modelCache`).
-Each download also writes a manifest with the repo, commit, file digests and
-location under `~/.tuned-tensor/assets/`, so downloads are easy to find later:
+### Train on your own AWS GPU
+
+Add a `runtime` section to `tunedtensor.json`, keep running `tt` on your laptop,
+and the GPU work runs on your instance over SSH:
+
+```json
+{
+  "runtime": {
+    "gpu": {
+      "provider": "aws",
+      "profile": "research",
+      "region": "eu-west-1",
+      "instanceId": "i-0123456789abcdef0",
+      "user": "ubuntu",
+      "identityFile": "~/.ssh/research-gpu.pem"
+    }
+  }
+}
+```
+
+The instance must already be running. New to this? Follow
+[your first AWS run](docs/local-runtime/aws-gpu.md).
+
+### Serve your model
 
 ```bash
-tt assets list                 # everything downloaded, newest first
-tt assets path org/name        # where it is on disk (org/name@<sha> for one revision)
-tt assets verify [org/name]    # re-hash the files against their manifests
+tt serve local-<run-id>     # OpenAI-compatible server (Linux + NVIDIA GPU)
 ```
 
-`tunedtensor.lock.json` beside the spec pins what a project trains on, the way
-`.terraform.lock.hcl` pins providers: the dataset and base-model repo, commit,
-and each file's Hugging Face content digest (`sha256:` for LFS files,
-`git-sha1:` for small git files). `tt datasets prefetch` and `tt models prefetch`
-for the spec write it, and the first real run records any entry it is missing.
-After that, `tt pipeline run`:
+See [runs, audit and serving](docs/runs-and-serving.md).
 
-- uses the locked commit when the spec's dataset does not pin `revision`;
-- re-hashes the cached bytes and stops if the spec names another repo or revision,
-  a cached file's digest differs, or a locked model file is missing. If the change is intended, rerun the matching
-  `prefetch` command for the spec to update the lock.
+## Everyday commands
 
-A first local run with an empty model cache downloads and locks the model before
-training starts. Dry runs never download assets or write the lock.
+| Command | What it does |
+| --- | --- |
+| `tt` | Open the conversational terminal |
+| `tt init` | Create a `tunedtensor.json` spec |
+| `tt spec view` | Show the spec in a readable form |
+| `tt hardware` | Show what this machine can train or serve |
+| `tt doctor tunedtensor.json` | Check the machine (or AWS GPU) before a run |
+| `tt pipeline run --spec tunedtensor.json` | Train and evaluate (`--dry-run` to preview) |
+| `tt runs list` / `tt runs report <id>` | List runs and compare tuned vs base |
+| `tt runs audit <id>` | Verify a run's record has not been edited |
+| `tt models list` | List trained models |
+| `tt serve <model>` | Serve a model |
+| `tt upgrade` | Update tt |
 
-An unpinned dataset stays on its locked commit, including for `tt datasets prefetch`.
-To move it to a newer commit, pin that `revision` in the spec and prefetch again.
+Run `tt --help` or `tt <command> --help` for everything else.
 
-Commit the lock file with the spec. Runs that load the base model from
-`runtime.paths.baseModel` or on an AWS GPU host check only the dataset.
+## Privacy and network use
 
-- Split paths are files inside the repo: one `.jsonl` or `.parquet` file per
-  split (pick one shard of a sharded split). CSV is not supported yet.
-- Parquet supports Snappy, gzip, zstd, Brotli and LZ4 compression, as well as
-  uncompressed files.
-- Without `columns`, files must already be TT chat JSONL whose system message
-  matches the spec. With `columns`, each record's `input` and `output` fields
-  become chat rows that use the spec's instruction. Parquet files require
-  `columns`. For chat datasets such as `HuggingFaceH4/ultrachat_200k`, use
-  `"columns": { "messages": "messages" }`: each conversation's first user turn
-  and the assistant reply that follows become one example; later turns are not
-  used. Records missing a mapped field are skipped. Evaluation splits keep the first of any duplicate input,
-  and training drops inputs that also appear in an evaluation split. The run
-  report lists every skipped or dropped count.
-- Without `revision`, TT uses the cached `main` snapshot and records the commit
-  it resolved. `tt validate` and `tt datasets prefetch` flag the spec as
-  unpinned. Pin the commit for reproducible runs.
-- Runs never contact the Hub after the download. Each run checks every file
-  against its content-addressed blob and records the repo, commit, file
-  SHA-256s and conversion counts in `run_metadata.dataset_source`.
-- Gated datasets use `HF_TOKEN`, as model downloads do.
+Your specs, data, runs and model weights stay on your machines. Network calls
+include Hugging Face downloads, SSH to your own GPU instance, and the model
+provider you choose for the optional agent; agent requests go directly to that
+provider. `tt` also checks the public npm registry for updates at most every
+12 hours; set `TT_NO_UPDATE_CHECK=1` to turn that off.
 
-### Run records and audit
+## Guides
 
-`tt pipeline run` prints each stage live with the time since the run started.
-`--verbose` adds training and evaluation process output, and `--quiet` hides
-both. Full logs stay in the run directory either way.
-
-Adapter evaluation batches four prompts by default, reports
-completed examples and ETA, and saves completed batches for recovery. Set
-`evaluation.inference.batchSize` to tune memory use; `evaluation.maxExamples`
-and `sampleSeed` select an explicit smoke sample. Matching interrupted
-baselines automatically continue on retry with the default baseline cache.
-See [evaluation settings and recovery](docs/local-runtime/architecture.md#evaluation).
-
-Every run report has a `provenance` block recording what produced it:
-
-- TT, Node and platform versions, and the digest of the locked Python runtime;
-- where training ran (local, or the AWS instance and region);
-- the spec file and snapshot digests;
-- the base model id, revision and content fingerprint;
-- every dataset file's SHA-256, the compiled training data digest, and the
-  evaluation split and seed;
-- the hyperparameters and the training exit code.
-
-The run's event log is hash-chained: each event records the previous event's
-hash. When a run completes, TT records the report's SHA-256.
-
-```bash
-tt runs audit <run-id>
-```
-
-`tt runs audit` checks the event chain and re-hashes the report, then prints
-the stage timeline with durations and the provenance. Its verdict is
-`verified`, `incomplete` (older TT versions or unfinished runs) or `tampered`.
-`tampered` exits with code 2 and names the edited event or file; removing the
-completion event or emptying the log also counts as tampering.
-
-Run the audit before you share a report with anyone else. The chain makes edits
-evident; it is not a signature, so anyone with write access to the store can
-rewrite the whole log.
-
-Serving still runs on the machine executing `tt serve` and requires a local
-Linux/CUDA GPU, even when training used AWS:
-
-```bash
-tt serve local-<run-id>
-```
-
-Local currently certifies text SFT with `Qwen/Qwen3.5-2B` (pinned to snapshot
-`15852e8c16360a2fea060d615a32b45270f8a8fc`),
-`nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16`, and
-`meta-models/Muse-Glimmer-30B`, using LoRA/PEFT and CUDA. The 30B/3B-active
-Nemotron path is intended for DGX Spark-class unified memory, uses activation
-checkpointing, and adapts bounded shared attention/Mamba projections rather
-than every routed expert matrix. Muse Glimmer is a vision-language checkpoint
-whose text tower is fine-tuned through the image-text-to-text loader with the
-vision tower frozen and unused. Evaluation may use CPU; packaged local
-serving requires Linux and NVIDIA CUDA. AWS execution transfers the required
-datasets and model files to your instance and returns outputs locally; normal
-cleanup removes the remote staging directory.
-
-Activation is optional and requires the run to pass a configured
-`generalRegression` gate. Without that suite, `tt models activate` fails
-closed. `tt serve active` also fails closed if nothing is activated — it does
-not silently serve the protected base model. Once activated, use
-`tt serve active`.
-
-`tt serve base` does not automatically inject the adjacent project spec.
-Pass `--spec tunedtensor.json` when the server should enforce its instructions.
-Serving uses a separate locked **vLLM** runtime on Linux/CUDA. A tuned launch
-exposes both the adapter and its base model, sharing weights, with upstream
-streaming and native tool-call parsing. `tt serve <target> --print-client-config pi`
-exports isolated Pi configuration; tools no longer need to be disabled. See
-[Local serving and coding harnesses](docs/local-runtime/serving.md) for Pi/OpenCode
-setup, resource budgets, hardware limits, and the verified integration scope.
-
-### Serve a foundation checkpoint
-
-Serve a completed pretrain, fine-tune, or RL model directory with its training tokenizer:
-
-```sh
-tt serve foundation --checkpoint /path/to/run/pretrain/output --tokenizer /path/to/run/tokenize/output/tokenizer.json
-```
-
-Use the model artifact directory containing `config.json` and `model.safetensors`,
-not a resumable optimizer checkpoint. The API model name is `foundation`.
-`--spec tunedtensor.json` applies a foundation spec's system prompt. Existing
-port, authentication, sampling, streaming, and client configuration options apply.
-The context limit defaults to the checkpoint's `sequence_length`; a smaller
-`--context-length` is allowed. Foundation serving supports text completions and
-chat with system/user/assistant messages, without tool-call parsing.
-
-TT exports the weights and tokenizer to a temporary GPT-2 snapshot and uses the
-existing pinned vLLM server on Linux/CUDA. Training artifacts are unchanged; the
-temporary export is removed when the server exits. Export requires temporary
-disk space for a copy of the model weights.
-
-Export parity tests run on CPU as part of `npm test`. To run them directly:
-
-```sh
-uv run --frozen --project training/foundation --group test python -m unittest discover -s training/foundation/tests -p test_foundation_export.py
-```
-
-Useful discovery commands:
-
-```bash
-tt runs list
-tt models list
-tt models active
-tt status
-```
-
-For the full command reference, including long-example policies, eval token
-budgets, evaluation caps, and local model serving, see the
-[CLI docs](https://tunedtensor.com/docs/cli).
-
-### Split a master dataset
-
-Keep converted datasets as unsplit chat JSONL. Downloaded chat JSONL can be
-split directly from its verified cache: ask the agent to inspect the download
-and use its pinned `split_source`, with no manual copy. Ask it to split a named
-file with your ratios and seed, then attach the approved paths to your spec.
-For example: “Split data.jsonl 80/20 for training and validation with seed 123,
-stratify by metadata.category, and save to split-123.”
-
-```sh
-tt datasets inspect data.jsonl
-tt datasets split data.jsonl --output split-123 --train .8 --validation .2 --test 0 --seed 123
-```
-
-The source stays unchanged. Groups containing repeated prompts stay in training
-so held-out prompts remain unique;
-optional `--group-by` and `--stratify-by` support family and label boundaries.
-See [splitting local data](docs/spec-workflow.md#splitting-an-unsplit-dataset)
-for defaults, metadata preservation, and benchmark holdout limitations.
+- [Install, upgrade and uninstall](docs/install.md)
+- [Work from the behavior spec](docs/spec-workflow.md)
+- [The conversational agent](docs/agent.md)
+- [Hardware and platform support](docs/hardware.md)
+- [Your first AWS run](docs/local-runtime/aws-gpu.md)
+- [Datasets and downloads](docs/datasets.md)
+- [Composable pipelines](docs/pipelines.md)
+- [Runs, audit and serving](docs/runs-and-serving.md)
+- [Decision models](docs/local-runtime/decision.md)
+- [Background runs](docs/local-runtime/background-runs.md)
+- [Windows and PowerShell](docs/windows.md)
 
 ## Development
 
@@ -770,16 +256,3 @@ Run `npm run check` before opening a pull request.
 ## License
 
 Apache-2.0
-
-## Host a decision model yourself
-
-A tuned decision model is a directory you own. Load it with Laya in Python, or
-wrap it in a small HTTP service on infrastructure you control. See the
-[self-hosting guide](docs/local-runtime/hosting.md).
-
-### Review and use a customized model
-
-The local agent can inspect adapter datasets for conflicts/overlap, read actual
-run reports, and prepare activation, local serving, stopping and rollback.
-Agree `evaluation.taskQuality` before training; task and general-regression
-checks protect the reviewed selection. See [model quality and agent workflow](docs/local-runtime/model-quality.md).

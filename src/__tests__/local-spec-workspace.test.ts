@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { Value } from "typebox/value";
 import {
   createLocalSpecProject,
+  fingerprintWorkspace,
   LocalProjectSpecSchema,
   prepareLocalSpecProject,
 } from "../local-spec-workspace.js";
@@ -35,6 +36,19 @@ afterEach(() => {
 
 describe("local spec workspace", () => {
   const specPath = () => join(workspace, "tunedtensor.json");
+
+  it("gives sibling directories created back to back distinct fingerprints", async () => {
+    // Windows file IDs exceed 2^53 and its file times are coarse, so a lossy
+    // inode once made neighbouring workspaces look identical.
+    const directories = Array.from({ length: 8 }, (_, index) => {
+      const directory = join(workspace, `sibling-${index}`);
+      mkdirSync(directory);
+      return directory;
+    });
+    const fingerprints = await Promise.all(directories.map(fingerprintWorkspace));
+    expect(new Set(fingerprints).size).toBe(directories.length);
+    expect(await fingerprintWorkspace(directories[0]!)).toBe(fingerprints[0]);
+  });
 
   it("validates foundation execution settings before proposing a new spec", async () => {
     const { base_model: _model, ...behavior } = spec;

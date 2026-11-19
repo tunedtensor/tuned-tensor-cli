@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, type BigIntStats } from "node:fs";
 import { lstat, open, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Type, type Static } from "typebox";
@@ -106,13 +106,15 @@ export async function canonicalWorkspace(workspaceRoot: string): Promise<string>
 }
 
 export async function fingerprintWorkspace(canonicalRoot: string): Promise<string> {
-  return fingerprintWorkspaceInfo(await lstat(canonicalRoot));
+  return fingerprintWorkspaceInfo(await lstat(canonicalRoot, { bigint: true }));
 }
 
+// BigInt stats keep the identity exact. Windows file IDs exceed 2^53, so
+// number stats can round two different directories to the same inode.
 function fingerprintWorkspaceInfo(
-  info: { dev: number | bigint; ino: number | bigint; birthtimeMs: number },
+  info: Pick<BigIntStats, "dev" | "ino" | "birthtimeNs">,
 ): string {
-  const identity = `${info.dev}:${info.ino}:${info.birthtimeMs}`;
+  const identity = `${info.dev}:${info.ino}:${info.birthtimeNs}`;
   return createHash("sha256").update(identity).digest("hex");
 }
 
@@ -176,7 +178,7 @@ export async function createLocalSpecProject(
       canonicalRoot,
       constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
     );
-    if ((windows ? await fingerprintWorkspace(canonicalRoot) : fingerprintWorkspaceInfo(await workspaceHandle!.stat())) !== expectedWorkspaceFingerprint) {
+    if ((windows ? await fingerprintWorkspace(canonicalRoot) : fingerprintWorkspaceInfo(await workspaceHandle!.stat({ bigint: true }))) !== expectedWorkspaceFingerprint) {
       throw new LocalSpecMutationError(
         "The local workspace changed after this action was prepared; return to the original workspace and prepare it again.",
         "not_applied",
@@ -204,7 +206,7 @@ export async function createLocalSpecProject(
       flag: "wx",
       mode: 0o600,
     });
-    const finalWorkspaceInfo = await lstat(canonicalRoot);
+    const finalWorkspaceInfo = await lstat(canonicalRoot, { bigint: true });
     if (
       finalWorkspaceInfo.isSymbolicLink()
       || !finalWorkspaceInfo.isDirectory()
